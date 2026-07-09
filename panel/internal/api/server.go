@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
 	"github.com/labberairport/panel/internal/batch"
 	"github.com/labberairport/panel/internal/nodeclient"
 	"github.com/labberairport/panel/internal/store"
+	"github.com/labberairport/panel/web"
 	agentv1 "github.com/labberairport/proto/gen/go/agent/v1"
 )
 
@@ -42,10 +45,11 @@ type Server struct {
 	Timeout time.Duration
 }
 
-// Handler returns an http.Handler with all routes and auth middleware.
+// Handler returns an http.Handler with all routes, auth middleware, and embedded SPA.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
+	s.mountSPA(mux)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isAPIPath(r.URL.Path) && !isPublicAPI(r) {
@@ -55,6 +59,50 @@ func (s *Server) Handler() http.Handler {
 			}
 		}
 		mux.ServeHTTP(w, r)
+	})
+}
+
+// mountSPA serves the embedded React SPA for non-API routes with index.html fallback.
+func (s *Server) mountSPA(mux *http.ServeMux) {
+	dist, err := fs.Sub(web.Dist, "dist")
+	if err != nil {
+		// Dist layout missing; skip SPA (API still works).
+		return
+	}
+	mux.Handle("/", spaHandler(dist))
+}
+
+// spaHandler serves static files from root; unknown paths fall back to index.html.
+func spaHandler(root fs.FS) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		upath := path.Clean(r.URL.Path)
+		if upath == "/" || upath == "." {
+			http.ServeFileFS(w, r, root, "index.html")
+			return
+		}
+		// Strip leading slash for fs.FS paths.
+		rel := strings.TrimPrefix(upath, "/")
+
+		f, err := root.Open(rel)
+		if err != nil {
+			// SPA client-side route fallback.
+			http.ServeFileFS(w, r, root, "index.html")
+			return
+		}
+		defer f.Close()
+
+		st, err := f.Stat()
+		if err != nil || st.IsDir() {
+			http.ServeFileFS(w, r, root, "index.html")
+			return
+		}
+
+		http.ServeFileFS(w, r, root, rel)
 	})
 }
 

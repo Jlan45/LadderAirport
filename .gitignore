@@ -1,7 +1,6 @@
 bin/
-dist/
+/dist/
 node_modules/
-panel/web/dist/assets/
 *.db
 *.db-journal
 .idea/
@@ -11,3 +10,4 @@ panel/web/dist/assets/
 .env
 web/dist/
 .worktrees/
+# panel/web/dist is committed so `go build` works without npm

@@ -8,8 +8,11 @@ proto:
 
 web:
 	cd web && npm ci && npm run build
-	rm -rf panel/web/dist/*
-	cp -r web/dist/* panel/web/dist/
+	rm -rf panel/web/dist
+	mkdir -p panel/web/dist
+	cp -r web/dist/. panel/web/dist/
+	# keep dist non-empty for go:embed (placeholder if build produced nothing)
+	@test -f panel/web/dist/index.html || echo '<!doctype html><title>LabberAirport</title>' > panel/web/dist/index.html
 
 panel: web
 	cd panel && go build -o ../bin/panel ./cmd/panel
