@@ -185,6 +185,9 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 	client, err := r.Dial(opCtx, *node, token)
 	if err != nil {
 		res.Message = fmt.Sprintf("dial: %v", err)
+		node.Status = "unreachable"
+		node.LastError = res.Message
+		_ = r.Store.UpdateNode(node)
 		return res
 	}
 	defer func() { _ = client.Close() }()
@@ -194,6 +197,8 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 		msg, err := r.applyNode(opCtx, client, taskID, node)
 		if err != nil {
 			res.Message = err.Error()
+			node.LastError = res.Message
+			_ = r.Store.UpdateNode(node)
 			return res
 		}
 		res.OK = true
@@ -202,12 +207,24 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 		resp, err := client.Start(opCtx)
 		if err != nil {
 			res.Message = err.Error()
+			node.LastError = res.Message
+			_ = r.Store.UpdateNode(node)
 			return res
 		}
 		res.OK = resp.GetOk()
 		res.Message = resp.GetMessage()
 		if !res.OK && res.Message == "" {
 			res.Message = "start failed"
+		}
+		if res.OK {
+			node.Status = "online"
+			node.RuntimeState = "running"
+			node.LastError = ""
+			node.LastSeenUnix = time.Now().Unix()
+			_ = r.Store.UpdateNode(node)
+		} else {
+			node.LastError = res.Message
+			_ = r.Store.UpdateNode(node)
 		}
 	case "stop":
 		resp, err := client.Stop(opCtx)

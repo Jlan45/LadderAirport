@@ -96,7 +96,9 @@ Flags:
 | `-db` | `./data/panel.db` | SQLite path |
 | `-session-secret` | random ephemeral | Set a stable secret so sessions survive restart |
 | `-bootstrap` | `true` | On start, apply configs and start sing-box on all registered nodes |
-| `-bootstrap-timeout` | `3m` | Max time for startup bootstrap |
+| `-bootstrap-timeout` | `3m` | Max time for initial startup bootstrap |
+| `-bootstrap-retry` | `true` | Periodically retry apply+start for nodes not yet online/running |
+| `-bootstrap-retry-interval` | `30s` | Interval between retry rounds |
 
 Open `http://127.0.0.1:8080` in a browser.
 

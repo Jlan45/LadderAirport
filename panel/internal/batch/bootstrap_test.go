@@ -74,3 +74,56 @@ func TestBootstrapAllApplyAndStart(t *testing.T) {
 		t.Fatalf("expected apply+start tasks, got %d", len(tasks))
 	}
 }
+
+func TestBootstrapPendingSkipsSynced(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "t.db")
+	st, err := store.Open(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	synced := &store.Node{
+		Name: "ok", Address: "127.0.0.1", GRPCPort: 1,
+		Status: "online", RuntimeState: "running",
+	}
+	if err := st.CreateNode(synced); err != nil {
+		t.Fatal(err)
+	}
+	pending := &store.Node{
+		Name: "late", Address: "127.0.0.1", GRPCPort: 2,
+		Status: "unreachable",
+	}
+	if err := st.CreateNode(pending); err != nil {
+		t.Fatal(err)
+	}
+	in := &store.InboundConfig{
+		Name: "ss", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{"listen": "0.0.0.0", "port": float64(19001), "method": "aes-256-gcm", "password": "p"},
+	}
+	if err := st.CreateInbound(in); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(synced.ID, []string{in.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(pending.ID, []string{in.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	rpc := &bootRPC{}
+	r := batch.NewRunner(st, func() string { return "t" })
+	r.Dial = func(ctx context.Context, node store.Node, token string) (batch.NodeRPC, error) {
+		return rpc, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := r.BootstrapPending(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Only the unsynced node should be touched.
+	if rpc.applies != 1 || rpc.starts != 1 {
+		t.Fatalf("applies=%d starts=%d want 1/1", rpc.applies, rpc.starts)
+	}
+}
