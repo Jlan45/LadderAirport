@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/labberairport/panel/internal/inboundfill"
 	"github.com/labberairport/panel/internal/store"
 	"github.com/labberairport/panel/internal/templates"
 )
@@ -30,6 +31,13 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name and protocol required")
 		return
 	}
+	// Auto-generate passwords, UUIDs, TLS PEMs, Reality keys when omitted.
+	filled, err := inboundfill.Fill(in.Protocol, in.Params)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	in.Params = filled
 	// Default enabled=true when omitted (zero value is false; clients usually send it).
 	// Keep explicit false if client sets Enabled and sends the field — zero value stays false
 	// which is fine for create-as-disabled.
@@ -67,6 +75,21 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Params == nil {
 		body.Params = existing.Params
+	} else {
+		// Merge: keep existing secrets if client omitted them, then fill remaining gaps.
+		merged := map[string]any{}
+		for k, v := range existing.Params {
+			merged[k] = v
+		}
+		for k, v := range body.Params {
+			merged[k] = v
+		}
+		filled, err := inboundfill.Fill(body.Protocol, merged)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		body.Params = filled
 	}
 	if err := s.Store.UpdateInbound(&body); err != nil {
 		if isNotFound(err) {

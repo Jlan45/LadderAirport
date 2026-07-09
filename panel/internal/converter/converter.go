@@ -118,11 +118,7 @@ func mapTrojan(in store.InboundConfig) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	cert, err := requireString(in.Params, "tls_cert_path")
-	if err != nil {
-		return nil, err
-	}
-	key, err := requireString(in.Params, "tls_key_path")
+	tlsBlock, err := buildTLS(in.Params, true)
 	if err != nil {
 		return nil, err
 	}
@@ -134,11 +130,7 @@ func mapTrojan(in store.InboundConfig) (map[string]any, error) {
 		"users": []map[string]any{
 			{"name": "default", "password": password},
 		},
-		"tls": map[string]any{
-			"enabled":          true,
-			"certificate_path": cert,
-			"key_path":         key,
-		},
+		"tls": tlsBlock,
 	}, nil
 }
 
@@ -177,18 +169,9 @@ func mapVLESS(in store.InboundConfig) (map[string]any, error) {
 	case "none":
 		// no tls block
 	case "tls":
-		cert, err := requireString(in.Params, "tls_cert_path")
+		tls, err := buildTLS(in.Params, true)
 		if err != nil {
 			return nil, err
-		}
-		key, err := requireString(in.Params, "tls_key_path")
-		if err != nil {
-			return nil, err
-		}
-		tls := map[string]any{
-			"enabled":          true,
-			"certificate_path": cert,
-			"key_path":         key,
 		}
 		if sn := optionalString(in.Params, "server_name"); sn != "" {
 			tls["server_name"] = sn
@@ -251,11 +234,7 @@ func mapHysteria2(in store.InboundConfig) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	cert, err := requireString(in.Params, "tls_cert_path")
-	if err != nil {
-		return nil, err
-	}
-	key, err := requireString(in.Params, "tls_key_path")
+	tlsBlock, err := buildTLS(in.Params, true)
 	if err != nil {
 		return nil, err
 	}
@@ -267,11 +246,7 @@ func mapHysteria2(in store.InboundConfig) (map[string]any, error) {
 		"users": []map[string]any{
 			{"name": "default", "password": password},
 		},
-		"tls": map[string]any{
-			"enabled":          true,
-			"certificate_path": cert,
-			"key_path":         key,
-		},
+		"tls": tlsBlock,
 	}
 	if v, ok := in.Params["up_mbps"]; ok && v != nil && fmt.Sprint(v) != "" {
 		n, err := asInt(v)
@@ -292,6 +267,32 @@ func mapHysteria2(in store.InboundConfig) (map[string]any, error) {
 		}
 	}
 	return out, nil
+}
+
+// buildTLS builds a sing-box tls object from PEM (preferred) or file paths.
+func buildTLS(params map[string]any, required bool) (map[string]any, error) {
+	certPEM := optionalString(params, "tls_cert_pem")
+	keyPEM := optionalString(params, "tls_key_pem")
+	if certPEM != "" && keyPEM != "" {
+		return map[string]any{
+			"enabled":     true,
+			"certificate": []string{certPEM},
+			"key":         []string{keyPEM},
+		}, nil
+	}
+	certPath := optionalString(params, "tls_cert_path")
+	keyPath := optionalString(params, "tls_key_path")
+	if certPath != "" && keyPath != "" {
+		return map[string]any{
+			"enabled":          true,
+			"certificate_path": certPath,
+			"key_path":         keyPath,
+		}, nil
+	}
+	if required {
+		return nil, fmt.Errorf("missing TLS material (tls_cert_pem/tls_key_pem or tls_cert_path/tls_key_path)")
+	}
+	return map[string]any{"enabled": false}, nil
 }
 
 func requireListenPort(params map[string]any) (listen string, port int, err error) {
