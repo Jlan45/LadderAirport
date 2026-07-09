@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package agent.v1;
+
+option go_package = "github.com/labberairport/proto/gen/go/agent/v1;agentv1";
+
+service AgentControl {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
+  rpc Start(StartRequest) returns (StartResponse);
+  rpc Stop(StopRequest) returns (StopResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc StreamLogs(StreamLogsRequest) returns (stream LogLine);
+}
+
+message PingRequest {}
+message PingResponse {
+  string agent_version = 1;
+  string singbox_version = 2;
+}
+
+message ApplyConfigRequest {
+  string config_json = 1;
+  string config_hash = 2;
+  bool replace = 3;
+}
+message ApplyConfigResponse {
+  bool ok = 1;
+  string message = 2;
+  string applied_hash = 3;
+}
+
+message StartRequest {}
+message StartResponse {
+  bool ok = 1;
+  string message = 2;
+}
+message StopRequest {}
+message StopResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message GetStatusRequest {}
+message GetStatusResponse {
+  string state = 1; // running | stopped | error
+  string config_hash = 2;
+  int64 started_at_unix = 3;
+  string last_error = 4;
+}
+
+message GetMetricsRequest {}
+message GetMetricsResponse {
+  int64 connections = 1;
+  int64 uplink_bytes = 2;
+  int64 downlink_bytes = 3;
+  double cpu_percent = 4;
+  int64 memory_rss_bytes = 5;
+}
+
+message StreamLogsRequest {
+  string level = 1; // optional filter: debug|info|warn|error
+  int32 tail = 2;   // lines from ring buffer before live
+}
+message LogLine {
+  int64 ts_unix_ms = 1;
+  string level = 2;
+  string message = 3;
+}
