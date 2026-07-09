@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  applyNode,
   batchApply,
   batchStart,
   batchStop,
   fleetOverview,
   fleetRefresh,
+  startNode,
+  stopNode,
   type FleetOverview,
   type Node,
   type Task,
 } from '../api/client'
+
+type ViewMode = 'cards' | 'table'
 
 function formatBytes(n?: number): string {
   if (n == null || n <= 0) return '0 B'
@@ -25,8 +30,7 @@ function formatBytes(n?: number): string {
 
 function formatTime(unix?: number): string {
   if (!unix) return '—'
-  const d = new Date(unix * 1000)
-  return d.toLocaleString()
+  return new Date(unix * 1000).toLocaleString()
 }
 
 function statusLabel(s?: string): string {
@@ -50,14 +54,32 @@ function statusClass(s?: string): string {
   return 'status'
 }
 
+function runtimeLabel(s?: string): string {
+  switch (s) {
+    case 'running':
+      return '运行中'
+    case 'stopped':
+      return '已停止'
+    case 'error':
+      return '错误'
+    default:
+      return s || '未知'
+  }
+}
+
 export default function Dashboard() {
   const [ov, setOv] = useState<FleetOverview | null>(null)
   const [error, setError] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [auto, setAuto] = useState(true)
+  const [view, setView] = useState<ViewMode>(() => {
+    const v = localStorage.getItem('fleet-view')
+    return v === 'table' ? 'table' : 'cards'
+  })
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [lastTask, setLastTask] = useState<Task | null>(null)
+  const [actionId, setActionId] = useState<string | null>(null)
 
   const loadCached = useCallback(async () => {
     try {
@@ -94,6 +116,11 @@ export default function Dashboard() {
     return () => window.clearInterval(t)
   }, [auto, refreshLive])
 
+  function setViewMode(mode: ViewMode) {
+    setView(mode)
+    localStorage.setItem('fleet-view', mode)
+  }
+
   const nodes = ov?.nodes ?? []
 
   function toggle(id: string) {
@@ -106,11 +133,8 @@ export default function Dashboard() {
   }
 
   function toggleAll() {
-    if (selected.size === nodes.length) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(nodes.map((n) => n.id)))
-    }
+    if (selected.size === nodes.length) setSelected(new Set())
+    else setSelected(new Set(nodes.map((n) => n.id)))
   }
 
   async function runBatch(kind: 'apply' | 'start' | 'stop') {
@@ -129,7 +153,7 @@ export default function Dashboard() {
       const ok = task.results?.filter((r) => r.ok).length ?? 0
       const total = task.results?.length ?? 0
       setMsg(
-        `批量${kind === 'apply' ? '下发配置' : kind === 'start' ? '启动' : '停止'}完成：${ok}/${total} 成功（任务 ${task.status}）`,
+        `批量${kind === 'apply' ? '下发配置' : kind === 'start' ? '启动' : '停止'}完成：${ok}/${total} 成功（${task.status}）`,
       )
       await refreshLive()
     } catch (err) {
@@ -139,25 +163,65 @@ export default function Dashboard() {
     }
   }
 
+  async function runOne(id: string, kind: 'apply' | 'start' | 'stop') {
+    setActionId(id)
+    setError('')
+    setMsg('')
+    try {
+      const task =
+        kind === 'apply'
+          ? await applyNode(id)
+          : kind === 'start'
+            ? await startNode(id)
+            : await stopNode(id)
+      setLastTask(task)
+      const ok = task.results?.[0]?.ok
+      setMsg(
+        `${kind === 'apply' ? '下发' : kind === 'start' ? '启动' : '停止'} ${ok ? '成功' : '失败'}: ${task.results?.[0]?.message || task.status}`,
+      )
+      await refreshLive()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败')
+    } finally {
+      setActionId(null)
+    }
+  }
+
   return (
     <div>
       <div className="row-between" style={{ marginBottom: '1rem' }}>
         <div>
           <h1 style={{ margin: 0 }}>舰队总览</h1>
           <p className="muted" style={{ margin: '0.25rem 0 0' }}>
-            多节点状态监控 · 配置下发 · 参考 PPanel 运维台布局
+            节点卡片 / 矩阵 · 状态监控 · 配置下发
           </p>
         </div>
         <div className="actions" style={{ gap: '0.5rem' }}>
+          <div className="view-toggle" role="group" aria-label="视图切换">
+            <button
+              type="button"
+              className={view === 'cards' ? 'view-toggle-btn active' : 'view-toggle-btn'}
+              onClick={() => setViewMode('cards')}
+            >
+              卡片
+            </button>
+            <button
+              type="button"
+              className={view === 'table' ? 'view-toggle-btn active' : 'view-toggle-btn'}
+              onClick={() => setViewMode('table')}
+            >
+              表格
+            </button>
+          </div>
           <label className="muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
             15s 自动刷新
           </label>
           <button type="button" className="btn-secondary" disabled={busy} onClick={() => void loadCached()}>
-            缓存视图
+            缓存
           </button>
           <button type="button" disabled={busy} onClick={() => void refreshLive()}>
-            {busy ? '刷新中…' : '立即探测全部'}
+            {busy ? '刷新中…' : '探测全部'}
           </button>
         </div>
       </div>
@@ -186,15 +250,33 @@ export default function Dashboard() {
 
       <section className="card">
         <div className="row-between">
-          <h2 style={{ margin: 0 }}>节点矩阵</h2>
+          <h2 style={{ margin: 0 }}>{view === 'cards' ? '节点卡片' : '节点矩阵'}</h2>
           <div className="actions">
-            <button type="button" className="btn-secondary" disabled={busy || selected.size === 0} onClick={() => void runBatch('apply')}>
+            <button type="button" className="btn-secondary" onClick={toggleAll}>
+              {selected.size === nodes.length && nodes.length > 0 ? '取消全选' : '全选'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={busy || selected.size === 0}
+              onClick={() => void runBatch('apply')}
+            >
               下发配置 ({selected.size})
             </button>
-            <button type="button" className="btn-secondary" disabled={busy || selected.size === 0} onClick={() => void runBatch('start')}>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={busy || selected.size === 0}
+              onClick={() => void runBatch('start')}
+            >
               启动
             </button>
-            <button type="button" className="btn-secondary" disabled={busy || selected.size === 0} onClick={() => void runBatch('stop')}>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={busy || selected.size === 0}
+              onClick={() => void runBatch('stop')}
+            >
               停止
             </button>
             <Link to="/nodes" className="btn-secondary" style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -205,8 +287,23 @@ export default function Dashboard() {
 
         {nodes.length === 0 ? (
           <p className="muted" style={{ textAlign: 'center', padding: '2rem' }}>
-            暂无节点。请先到 <Link to="/nodes">节点</Link> 添加 Agent，再到入站关联配置后批量下发。
+            暂无节点。请先到 <Link to="/nodes">节点</Link> 添加 Agent，关联入站后再下发配置。
           </p>
+        ) : view === 'cards' ? (
+          <div className="node-card-grid">
+            {nodes.map((n) => (
+              <NodeCard
+                key={n.id}
+                node={n}
+                checked={selected.has(n.id)}
+                busy={actionId === n.id || busy}
+                onToggle={() => toggle(n.id)}
+                onApply={() => void runOne(n.id, 'apply')}
+                onStart={() => void runOne(n.id, 'start')}
+                onStop={() => void runOne(n.id, 'stop')}
+              />
+            ))}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="fleet-table">
@@ -223,13 +320,13 @@ export default function Dashboard() {
                   <th>地址</th>
                   <th>连通</th>
                   <th>核心</th>
-                  <th>入站数</th>
+                  <th>入站</th>
                   <th>连接</th>
-                  <th>↑ 流量</th>
-                  <th>↓ 流量</th>
+                  <th>↑</th>
+                  <th>↓</th>
                   <th>内存</th>
                   <th>标签</th>
-                  <th>上次探测</th>
+                  <th>探测</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -245,9 +342,9 @@ export default function Dashboard() {
 
       {lastTask ? (
         <section className="card">
-          <h2>最近批量任务</h2>
+          <h2>最近任务</h2>
           <p className="muted">
-            {lastTask.type} · {lastTask.status} · id={lastTask.id}
+            {lastTask.type} · {lastTask.status} · {lastTask.id}
           </p>
           <table>
             <thead>
@@ -279,6 +376,106 @@ export default function Dashboard() {
   )
 }
 
+function NodeCard({
+  node: n,
+  checked,
+  busy,
+  onToggle,
+  onApply,
+  onStart,
+  onStop,
+}: {
+  node: Node
+  checked: boolean
+  busy: boolean
+  onToggle: () => void
+  onApply: () => void
+  onStart: () => void
+  onStop: () => void
+}) {
+  const online = n.status === 'online'
+  const running = n.runtime_state === 'running'
+  return (
+    <article className={`node-card ${online ? 'node-card-online' : 'node-card-offline'} ${checked ? 'node-card-selected' : ''}`}>
+      <header className="node-card-header">
+        <label className="node-card-check">
+          <input type="checkbox" checked={checked} onChange={onToggle} />
+          <span className="node-card-title">{n.name}</span>
+        </label>
+        <div className="node-card-badges">
+          <span className={statusClass(n.status)}>{statusLabel(n.status)}</span>
+          <span className={running ? 'status status-success' : 'status'}>{runtimeLabel(n.runtime_state)}</span>
+        </div>
+      </header>
+
+      <div className="node-card-addr">
+        <code>
+          {n.address}:{n.grpc_port}
+        </code>
+      </div>
+
+      {(n.labels?.length ?? 0) > 0 ? (
+        <div className="node-card-tags">
+          {n.labels.map((l) => (
+            <span key={l} className="tag-chip">
+              {l}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="node-card-metrics">
+        <div>
+          <span className="m-label">入站</span>
+          <span className="m-val">{n.inbound_count ?? 0}</span>
+        </div>
+        <div>
+          <span className="m-label">连接</span>
+          <span className="m-val">{n.connections ?? 0}</span>
+        </div>
+        <div>
+          <span className="m-label">↑ 上传</span>
+          <span className="m-val">{formatBytes(n.uplink_bytes)}</span>
+        </div>
+        <div>
+          <span className="m-label">↓ 下载</span>
+          <span className="m-val">{formatBytes(n.downlink_bytes)}</span>
+        </div>
+        <div>
+          <span className="m-label">内存</span>
+          <span className="m-val">{formatBytes(n.memory_rss_bytes)}</span>
+        </div>
+        <div>
+          <span className="m-label">CPU</span>
+          <span className="m-val">{(n.cpu_percent ?? 0).toFixed(1)}%</span>
+        </div>
+      </div>
+
+      <div className="node-card-meta muted">
+        <div>Agent {n.agent_version || '—'} · sing-box {n.singbox_version || '—'}</div>
+        <div>探测 {formatTime(n.last_seen_unix || n.metrics_at_unix)}</div>
+        {n.config_hash ? <div>配置 {n.config_hash.slice(0, 12)}…</div> : null}
+        {n.last_error ? <div className="node-card-error">{n.last_error}</div> : null}
+      </div>
+
+      <footer className="node-card-actions">
+        <Link to={`/nodes/${n.id}`} className="btn-secondary">
+          详情
+        </Link>
+        <button type="button" className="btn-secondary" disabled={busy} onClick={onApply}>
+          下发
+        </button>
+        <button type="button" className="btn-secondary" disabled={busy} onClick={onStart}>
+          启动
+        </button>
+        <button type="button" className="btn-secondary" disabled={busy} onClick={onStop}>
+          停止
+        </button>
+      </footer>
+    </article>
+  )
+}
+
 function NodeRow({
   node: n,
   checked,
@@ -306,7 +503,7 @@ function NodeRow({
       </td>
       <td>
         <span className={n.runtime_state === 'running' ? 'status status-success' : 'status'}>
-          {n.runtime_state || '—'}
+          {runtimeLabel(n.runtime_state)}
         </span>
       </td>
       <td>{n.inbound_count ?? 0}</td>
@@ -315,9 +512,7 @@ function NodeRow({
       <td>{formatBytes(n.downlink_bytes)}</td>
       <td>{formatBytes(n.memory_rss_bytes)}</td>
       <td className="muted">{(n.labels ?? []).join(', ') || '—'}</td>
-      <td className="muted" style={{ whiteSpace: 'nowrap' }}>
-        {formatTime(n.last_seen_unix || n.metrics_at_unix)}
-      </td>
+      <td className="muted">{formatTime(n.last_seen_unix || n.metrics_at_unix)}</td>
       <td className="actions">
         <Link to={`/nodes/${n.id}`}>详情</Link>
       </td>
