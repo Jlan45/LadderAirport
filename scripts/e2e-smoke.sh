@@ -115,6 +115,19 @@ echo "==> start panel on ${PANEL_LISTEN} (temp db)"
 PANEL_PID=$!
 wait_http "${PANEL_URL}/api/v1/auth/login"
 
+echo "==> embedded SPA (single binary web)"
+SPA_CODE="$(curl -s -o "${TMPDIR}/index.html" -w '%{http_code}' -b "${COOKIE_JAR}" "${PANEL_URL}/")"
+if [[ "${SPA_CODE}" != "200" ]]; then
+  echo "ERROR: GET / returned HTTP ${SPA_CODE} (want 200 for embedded SPA)" >&2
+  exit 1
+fi
+if ! grep -qiE '<!doctype html|<html' "${TMPDIR}/index.html"; then
+  echo "ERROR: GET / did not look like HTML" >&2
+  head -c 200 "${TMPDIR}/index.html" >&2 || true
+  exit 1
+fi
+echo "SPA: HTTP ${SPA_CODE}"
+
 echo "==> login (password=${ADMIN_PASS})"
 LOGIN_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -H 'Content-Type: application/json' \
@@ -122,13 +135,48 @@ LOGIN_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   "${PANEL_URL}/api/v1/auth/login")"
 echo "login: ${LOGIN_BODY}"
 
+echo "==> GET /api/v1/templates (expect 4)"
+TMPL_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+  "${PANEL_URL}/api/v1/templates")"
+TMPL_COUNT="$(python3 -c '
+import json,sys
+obj=json.loads(sys.argv[1])
+if isinstance(obj, list):
+    print(len(obj))
+elif isinstance(obj, dict) and "_array" in obj:
+    print(len(obj["_array"]))
+else:
+    print(0)
+' "${TMPL_BODY}")"
+if [[ "${TMPL_COUNT}" -lt 4 ]]; then
+  echo "ERROR: expected >=4 templates, got ${TMPL_COUNT}: ${TMPL_BODY}" >&2
+  exit 1
+fi
+echo "templates: count=${TMPL_COUNT}"
+
 echo "==> create node 127.0.0.1:50051 token=${AGENT_TOKEN}"
 NODE_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -H 'Content-Type: application/json' \
-  -d "{\"name\":\"smoke-node\",\"address\":\"127.0.0.1\",\"grpc_port\":50051,\"token\":\"${AGENT_TOKEN}\",\"labels\":[\"smoke\"]}" \
+  -d "{\"name\":\"smoke-node\",\"address\":\"127.0.0.1\",\"grpc_port\":50051,\"token\":\"${AGENT_TOKEN}\",\"labels\":[\"smoke\",\"fleet\"]}" \
   "${PANEL_URL}/api/v1/nodes")"
 NODE_ID="$(json_get "${NODE_BODY}" 'obj["id"]')"
 echo "node id=${NODE_ID}"
+
+echo "==> create second node same labels (batch target)"
+NODE2_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"smoke-node-2\",\"address\":\"127.0.0.1\",\"grpc_port\":50051,\"token\":\"${AGENT_TOKEN}\",\"labels\":[\"smoke\",\"fleet\"]}" \
+  "${PANEL_URL}/api/v1/nodes")"
+NODE2_ID="$(json_get "${NODE2_BODY}" 'obj["id"]')"
+echo "node2 id=${NODE2_ID}"
+
+echo "==> create node with wrong agent token"
+BAD_NODE_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"bad-token-node\",\"address\":\"127.0.0.1\",\"grpc_port\":50051,\"token\":\"wrong-token\",\"labels\":[\"bad\"]}" \
+  "${PANEL_URL}/api/v1/nodes")"
+BAD_NODE_ID="$(json_get "${BAD_NODE_BODY}" 'obj["id"]')"
+echo "bad-token node id=${BAD_NODE_ID}"
 
 echo "==> create shadowsocks inbound"
 IN_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
@@ -138,14 +186,16 @@ IN_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
 INBOUND_ID="$(json_get "${IN_BODY}" 'obj["id"]')"
 echo "inbound id=${INBOUND_ID}"
 
-echo "==> attach inbound to node"
-curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
-  -X PUT \
-  -H 'Content-Type: application/json' \
-  -d "{\"inbound_ids\":[\"${INBOUND_ID}\"]}" \
-  "${PANEL_URL}/api/v1/nodes/${NODE_ID}/inbounds" >/dev/null
+echo "==> attach inbound to both fleet nodes"
+for nid in "${NODE_ID}" "${NODE2_ID}"; do
+  curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+    -X PUT \
+    -H 'Content-Type: application/json' \
+    -d "{\"inbound_ids\":[\"${INBOUND_ID}\"]}" \
+    "${PANEL_URL}/api/v1/nodes/${nid}/inbounds" >/dev/null
+done
 
-echo "==> apply config"
+echo "==> apply config (single node)"
 APPLY_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -X POST \
   "${PANEL_URL}/api/v1/nodes/${NODE_ID}/apply")"
@@ -177,4 +227,44 @@ for r in obj.get("results") or []:
   exit 1
 fi
 
-echo "==> e2e smoke OK (task status=${TASK_STATUS})"
+echo "==> batch apply by labels=[fleet] (expect 2 nodes)"
+BATCH_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"node_ids":[],"labels":["fleet"]}' \
+  "${PANEL_URL}/api/v1/batch/apply")"
+echo "batch apply: ${BATCH_BODY}"
+if ! python3 -c '
+import json,sys
+obj=json.loads(sys.argv[1])
+if obj.get("status")!="success":
+    sys.exit(1)
+ids=obj.get("node_ids") or []
+if len(ids)!=2:
+    sys.exit(2)
+for r in obj.get("results") or []:
+    if not r.get("ok"):
+        sys.exit(3)
+' "${BATCH_BODY}"; then
+  echo "ERROR: batch apply by labels failed" >&2
+  echo "${BATCH_BODY}" >&2
+  echo "--- agent log ---" >&2
+  cat "${AGENT_LOG}" >&2 || true
+  echo "--- panel log ---" >&2
+  cat "${PANEL_LOG}" >&2 || true
+  exit 1
+fi
+
+echo "==> wrong agent token must fail probe"
+BAD_PROBE_CODE="$(curl -s -o "${TMPDIR}/bad-probe.json" -w '%{http_code}' \
+  -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+  -X POST \
+  "${PANEL_URL}/api/v1/nodes/${BAD_NODE_ID}/probe")"
+if [[ "${BAD_PROBE_CODE}" == "200" ]]; then
+  echo "ERROR: probe with wrong agent token unexpectedly succeeded" >&2
+  cat "${TMPDIR}/bad-probe.json" >&2 || true
+  exit 1
+fi
+echo "wrong-token probe: HTTP ${BAD_PROBE_CODE} (expected non-200)"
+
+echo "==> e2e smoke OK (apply=${TASK_STATUS}, templates=${TMPL_COUNT}, batch labels OK, wrong token rejected)"

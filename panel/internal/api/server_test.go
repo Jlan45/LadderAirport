@@ -431,7 +431,7 @@ func TestSingleNodeApply(t *testing.T) {
 }
 
 func TestBatchByLabels(t *testing.T) {
-	rpc := &mockRPC{startOK: true}
+	rpc := &mockRPC{startOK: true, applyOK: true}
 	ts, client, st := newTestServer(t,
 		func(_ context.Context, _ store.Node, _ string) (batch.NodeRPC, error) {
 			return rpc, nil
@@ -444,13 +444,18 @@ func TestBatchByLabels(t *testing.T) {
 
 	n1 := &store.Node{Name: "a", Address: "1.1.1.1", GRPCPort: 1, Labels: []string{"prod"}, Token: "t"}
 	n2 := &store.Node{Name: "b", Address: "2.2.2.2", GRPCPort: 1, Labels: []string{"dev"}, Token: "t"}
+	n3 := &store.Node{Name: "c", Address: "3.3.3.3", GRPCPort: 1, Labels: []string{"prod"}, Token: "t"}
 	if err := st.CreateNode(n1); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateNode(n2); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.CreateNode(n3); err != nil {
+		t.Fatal(err)
+	}
 
+	// Start only matches the prod-labeled subset (n1).
 	resp, task := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/batch/start", map[string]any{
 		"node_ids": []string{},
 		"labels":   []string{"prod"},
@@ -459,10 +464,44 @@ func TestBatchByLabels(t *testing.T) {
 		t.Fatalf("batch start status = %d body=%v", resp.StatusCode, task)
 	}
 	ids, _ := task["node_ids"].([]any)
-	if len(ids) != 1 {
-		t.Fatalf("node_ids = %v, want 1", ids)
+	if len(ids) != 2 {
+		t.Fatalf("node_ids = %v, want 2 (both prod)", ids)
 	}
 	if task["status"] != "success" {
 		t.Fatalf("status = %v", task["status"])
+	}
+
+	// Batch apply by shared label should target both prod nodes with per-node results.
+	in := &store.InboundConfig{
+		Name: "ss-batch", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{"listen": "0.0.0.0", "port": 2000, "method": "aes-128-gcm", "password": "x"},
+	}
+	if err := st.CreateInbound(in); err != nil {
+		t.Fatalf("CreateInbound: %v", err)
+	}
+	if err := st.SetNodeInbounds(n1.ID, []string{in.ID}); err != nil {
+		t.Fatalf("SetNodeInbounds n1: %v", err)
+	}
+	if err := st.SetNodeInbounds(n3.ID, []string{in.ID}); err != nil {
+		t.Fatalf("SetNodeInbounds n3: %v", err)
+	}
+
+	resp, task = doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/batch/apply", map[string]any{
+		"node_ids": []string{},
+		"labels":   []string{"prod"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("batch apply status = %d body=%v", resp.StatusCode, task)
+	}
+	if task["status"] != "success" {
+		t.Fatalf("batch apply status = %v results=%v", task["status"], task["results"])
+	}
+	ids, _ = task["node_ids"].([]any)
+	if len(ids) != 2 {
+		t.Fatalf("batch apply node_ids = %v, want 2", ids)
+	}
+	results, _ := task["results"].([]any)
+	if len(results) != 2 {
+		t.Fatalf("batch apply results = %v, want 2", results)
 	}
 }
