@@ -259,7 +259,8 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := client.Ping(ctx)
 	if err != nil {
-		node.Status = "unreachable"
+		node.Status = classifyRPCError(err)
+		node.LastError = err.Error()
 		_ = s.Store.UpdateNode(node)
 		writeError(w, http.StatusBadGateway, err.Error())
 		return

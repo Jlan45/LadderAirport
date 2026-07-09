@@ -4,11 +4,32 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/labberairport/panel/internal/store"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func classifyRPCError(err error) string {
+	if err == nil {
+		return "online"
+	}
+	if st, ok := status.FromError(err); ok {
+		switch st.Code() {
+		case codes.Unauthenticated, codes.PermissionDenied:
+			return "unauthorized"
+		}
+	}
+	// string fallback for wrapped errors
+	msg := err.Error()
+	if strings.Contains(msg, "Unauthenticated") || strings.Contains(msg, "invalid token") {
+		return "unauthorized"
+	}
+	return "unreachable"
+}
 
 // FleetOverview is a PPanel-style multi-node summary.
 type FleetOverview struct {
@@ -92,7 +113,7 @@ func (s *Server) refreshOneNode(parent context.Context, n store.Node) store.Node
 
 	ping, err := client.Ping(ctx)
 	if err != nil {
-		n.Status = "unreachable"
+		n.Status = classifyRPCError(err)
 		n.LastError = err.Error()
 		_ = s.Store.UpdateNode(&n)
 		return n
