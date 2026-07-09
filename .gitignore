@@ -1,2 +1,13 @@
-.worktrees/
+bin/
+dist/
+node_modules/
+panel/web/dist/assets/
+*.db
+*.db-journal
+.idea/
+.vscode/
+*.pem
+*.key
+.env
+web/dist/
 .worktrees/
