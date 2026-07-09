@@ -33,14 +33,11 @@ If `git submodule add` fails (network), shallow clone then wire replace:
 git clone --depth 1 --branch v1.11.15 https://github.com/SagerNet/sing-box.git agent/sing-box
 ```
 
-## Runtimes
+## Runtime
 
-| Name | Flag | Description |
-|------|------|-------------|
-| `mock` | `-runtime=mock` (default) | In-memory no-op; used by CI / lab without pulling full proxy stack behaviour |
-| `box` | `-runtime=box` | Real in-process sing-box via `control.BoxRuntime` |
+Agent always uses **in-process sing-box** (`control.BoxRuntime`). There is no mock core or `-runtime` flag.
 
-Log line on start: `runtime=mock|box agent_version=... singbox_version=...`.
+Log line on start: `runtime=box agent_version=... singbox_version=...`.
 
 ## Build
 
@@ -90,8 +87,6 @@ cd agent && go test ./internal/control/ -short
 | `MemoryRSSBytes` | `runtime.MemStats.Sys` (approx process memory, not exact RSS) |
 | `CPUPercent` | Linux: `/proc/self/stat` sample between polls; first sample is 0 |
 
-Requires **`-runtime box`**. Mock runtime does not generate real traffic counters.
-
 ## Upgrade policy
 
 1. Bump submodule to a new **stable** tag (`v1.11.x` or `v1.12.x` LTS-ish).
@@ -105,14 +100,13 @@ Do not edit upstream files under `agent/sing-box/` unless deliberately forking; 
 ## Run (lab)
 
 ```bash
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -runtime mock
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -runtime box -data-dir /tmp/labber-agent
+./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent
 ```
 
 TLS (optional):
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -keyout /tmp/agent.key -out /tmp/agent.crt -days 1 -nodes -subj /CN=localhost
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -runtime box \
+./bin/labber-agent -listen 127.0.0.1:50051 -token test \
   -tls-cert /tmp/agent.crt -tls-key /tmp/agent.key -data-dir /tmp/labber-agent
 ```

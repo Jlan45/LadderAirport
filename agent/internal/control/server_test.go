@@ -3,7 +3,9 @@ package control_test
 import (
 	"context"
 	"net"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/labberairport/agent/internal/control"
 	"github.com/labberairport/pkg/auth"
@@ -14,6 +16,50 @@ import (
 )
 
 const bufSize = 1024 * 1024
+
+// stubRuntime is a minimal Runtime for gRPC server unit tests (not a product mock core).
+type stubRuntime struct {
+	mu         sync.Mutex
+	state      control.State
+	configHash string
+	startedAt  int64
+}
+
+func (s *stubRuntime) Apply(_ context.Context, _ string, hash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.configHash = hash
+	s.state = control.StateRunning
+	s.startedAt = time.Now().Unix()
+	return nil
+}
+
+func (s *stubRuntime) Start(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = control.StateRunning
+	if s.startedAt == 0 {
+		s.startedAt = time.Now().Unix()
+	}
+	return nil
+}
+
+func (s *stubRuntime) Stop(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = control.StateStopped
+	return nil
+}
+
+func (s *stubRuntime) Status(context.Context) control.Status {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return control.Status{State: s.state, ConfigHash: s.configHash, StartedAtUnix: s.startedAt}
+}
+
+func (s *stubRuntime) Metrics(context.Context) control.Metrics {
+	return control.Metrics{}
+}
 
 func startTestServer(t *testing.T, token string, rt control.Runtime) (agentv1.AgentControlClient, func()) {
 	t.Helper()
@@ -42,7 +88,7 @@ func startTestServer(t *testing.T, token string, rt control.Runtime) (agentv1.Ag
 }
 
 func TestApplyConfigRequiresToken(t *testing.T) {
-	rt := control.NewMockRuntime()
+	rt := &stubRuntime{state: control.StateStopped}
 	client, cleanup := startTestServer(t, "secret", rt)
 	defer cleanup()
 	_, err := client.ApplyConfig(context.Background(), &agentv1.ApplyConfigRequest{
@@ -56,7 +102,7 @@ func TestApplyConfigRequiresToken(t *testing.T) {
 }
 
 func TestApplyConfigOK(t *testing.T) {
-	rt := control.NewMockRuntime()
+	rt := &stubRuntime{state: control.StateStopped}
 	client, cleanup := startTestServer(t, "secret", rt)
 	defer cleanup()
 	ctx := auth.AppendBearerToken(context.Background(), "secret")

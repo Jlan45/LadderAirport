@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end smoke: panel + agent (mock runtime) control-plane path via HTTP API.
-# Mock runtime is enough for ApplyConfig; real sing-box (-runtime box) is optional.
+# End-to-end smoke: panel + agent (in-process sing-box) via HTTP API.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -97,11 +96,11 @@ if [[ ! -x "${PANEL_BIN}" ]]; then
   make panel
 fi
 
-echo "==> start agent (mock runtime) on ${AGENT_LISTEN}"
+echo "==> start agent (sing-box) on ${AGENT_LISTEN}"
 "${AGENT_BIN}" \
   -listen "${AGENT_LISTEN}" \
   -token "${AGENT_TOKEN}" \
-  -runtime mock \
+  -data-dir "${TMPDIR}/agent-data" \
   >"${AGENT_LOG}" 2>&1 &
 AGENT_PID=$!
 wait_tcp 127.0.0.1 50051

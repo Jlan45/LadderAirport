@@ -65,7 +65,7 @@ echo "  ${AGENT_CRT}"
 echo "  ${AGENT_KEY}"
 echo
 echo "Agent (TLS lab):"
-echo "  ./bin/labber-agent -listen 127.0.0.1:50051 -token test -runtime mock \\"
+echo "  ./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent \\"
 echo "    -tls-cert ${AGENT_CRT} -tls-key ${AGENT_KEY}"
 echo
 echo "Panel node: set ca_cert_pem from ${CA_CRT} (or tls_skip_verify=true for lab only)."

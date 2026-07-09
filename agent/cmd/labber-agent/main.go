@@ -24,7 +24,6 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "TLS certificate file (optional)")
 	tlsKey := flag.String("tls-key", "", "TLS private key file (optional)")
 	dataDir := flag.String("data-dir", "", "directory for cached config/state (optional)")
-	runtimeName := flag.String("runtime", "mock", "box runtime: mock|box (default mock for CI; use box for real sing-box)")
 	flag.Parse()
 
 	if *token == "" {
@@ -36,21 +35,10 @@ func main() {
 		}
 	}
 
-	var rt control.Runtime
-	switch *runtimeName {
-	case "mock":
-		rt = control.NewMockRuntime()
-	case "box":
-		rt = control.NewBoxRuntime(*dataDir)
-	default:
-		log.Fatalf("unknown -runtime %q (want mock|box)", *runtimeName)
-	}
+	rt := control.NewBoxRuntime(*dataDir)
 	logs := control.NewLogBuf(0)
 	singboxVer := control.SingboxVersion()
-	if *runtimeName == "mock" {
-		singboxVer = "n/a"
-	}
-	log.Printf("runtime=%s agent_version=%s singbox_version=%s data_dir=%q", *runtimeName, agentVersion, singboxVer, *dataDir)
+	log.Printf("runtime=box agent_version=%s singbox_version=%s data_dir=%q", agentVersion, singboxVer, *dataDir)
 
 	srv := control.NewServer(rt, agentVersion, singboxVer, logs)
 

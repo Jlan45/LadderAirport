@@ -8,7 +8,7 @@ Self-hosted **proxy fleet control plane**: a Go Panel with embedded React SPA an
 Browser --HTTP--> Panel (Go + embed SPA + SQLite)
                      |
                      | gRPC (optional TLS + Bearer token)
-                     +-----> Agent-1 (labber-agent + mock|box runtime)
+                     +-----> Agent-1 (labber-agent + sing-box)
                      +-----> Agent-2
                      '-----> Agent-N
 ```
@@ -17,7 +17,7 @@ Browser --HTTP--> Panel (Go + embed SPA + SQLite)
 |------|------|
 | `panel/` | Control plane: HTTP API, auth, store, converter, batch apply, node gRPC client |
 | `agent/` | Node agent (`labber-agent`): AgentControl gRPC server + box lifecycle |
-| `agent/sing-box/` | Upstream sing-box **git submodule** (pinned); used by `-runtime box` |
+| `agent/sing-box/` | Upstream sing-box **git submodule** (pinned); in-process box runtime |
 | `web/` | React + TypeScript + Vite SPA (built into `panel/web/dist` for `go:embed`) |
 | `pkg/` | Shared Go libs (`auth` token interceptors, `hashutil`) |
 | `proto/` | gRPC/protobuf (`AgentControl`) and generated Go |
@@ -66,19 +66,17 @@ See [agent/README.md](agent/README.md) for pin policy and upgrade notes. Glue co
 
 ### Agent
 
-```bash
-# Mock runtime — control-plane smoke / CI (no real proxy)
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -runtime mock
+Always runs in-process **sing-box** (no mock core).
 
-# Real in-process sing-box
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -runtime box -data-dir /tmp/labber-agent
+```bash
+./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent
 ```
 
 Optional TLS (after generating lab certs):
 
 ```bash
 ./scripts/gen-dev-certs.sh
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -runtime mock \
+./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent \
   -tls-cert deploy/dev/agent.crt -tls-key deploy/dev/agent.key
 ```
 
@@ -110,7 +108,7 @@ On first start with an empty admin hash, Panel sets the password to **`admin`** 
 ./scripts/e2e-smoke.sh
 ```
 
-Builds missing binaries if needed, starts agent (mock) + panel (temp DB), logs in, creates a node + Shadowsocks inbound, attaches, applies, and asserts task `success`.
+Builds missing binaries if needed, starts agent (sing-box) + panel (temp DB), logs in, creates a node + Shadowsocks inbound, attaches, applies, and asserts task `success`.
 
 ### Dev TLS certs
 
