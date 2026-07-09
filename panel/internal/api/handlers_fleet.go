@@ -158,30 +158,18 @@ func buildOverview(nodes []store.Node, counts map[string]int) FleetOverview {
 			n.InboundCount = counts[n.ID]
 		}
 		ov.TotalNodes++
-		switch n.Status {
-		case "online":
+		// Treat legacy "running" (mistakenly written to status) as online.
+		if n.Status == "online" || n.Status == "running" {
 			ov.OnlineNodes++
-		default:
-			if n.Status != "" {
-				ov.OfflineNodes++
-			} else {
-				ov.OfflineNodes++
+			if n.Status == "running" && n.RuntimeState == "" {
+				n.RuntimeState = "running"
 			}
 		}
-		if n.RuntimeState == "running" {
+		if n.RuntimeState == "running" || n.Status == "running" {
 			ov.RunningNodes++
 		}
 		ov.Nodes = append(ov.Nodes, n)
 	}
-	// unknown with empty status count as offline-ish
-	unknown := 0
-	for _, n := range nodes {
-		if n.Status == "" || n.Status == "unknown" {
-			unknown++
-		}
-	}
-	// Recalculate offline as not online
 	ov.OfflineNodes = ov.TotalNodes - ov.OnlineNodes
-	_ = unknown
 	return ov
 }

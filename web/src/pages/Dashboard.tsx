@@ -36,6 +36,7 @@ function formatTime(unix?: number): string {
 function statusLabel(s?: string): string {
   switch (s) {
     case 'online':
+    case 'running': // legacy: apply once wrote runtime into status
       return '在线'
     case 'unreachable':
       return '离线'
@@ -49,9 +50,13 @@ function statusLabel(s?: string): string {
 }
 
 function statusClass(s?: string): string {
-  if (s === 'online') return 'status status-success'
+  if (s === 'online' || s === 'running') return 'status status-success'
   if (s === 'unreachable' || s === 'unauthorized') return 'status status-failed'
   return 'status'
+}
+
+function isOnlineStatus(s?: string): boolean {
+  return s === 'online' || s === 'running'
 }
 
 function runtimeLabel(s?: string): string {
@@ -393,8 +398,8 @@ function NodeCard({
   onStart: () => void
   onStop: () => void
 }) {
-  const online = n.status === 'online'
-  const running = n.runtime_state === 'running'
+  const online = isOnlineStatus(n.status)
+  const running = n.runtime_state === 'running' || n.status === 'running'
   return (
     <article className={`node-card ${online ? 'node-card-online' : 'node-card-offline'} ${checked ? 'node-card-selected' : ''}`}>
       <header className="node-card-header">

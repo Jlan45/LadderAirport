@@ -260,9 +260,12 @@ func (r *Runner) applyNode(ctx context.Context, client NodeRPC, taskID string, n
 		return "", fmt.Errorf("%s", msg)
 	}
 
-	// Cache last applied hash on the node.
+	// Cache last applied hash + mark control plane online / core running.
+	// Status is connectivity (online|unreachable|...); RuntimeState is box lifecycle.
 	node.ConfigHash = hash
-	node.Status = "running"
+	node.Status = "online"
+	node.RuntimeState = "running"
+	node.LastError = ""
 	node.LastSeenUnix = time.Now().Unix()
 	if err := r.Store.UpdateNode(node); err != nil {
 		// Apply succeeded; surface update error lightly in message.

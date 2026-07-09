@@ -26,8 +26,12 @@ func SingboxVersion() string {
 }
 
 // BoxRuntime drives an in-process sing-box instance (二开 adapter).
-// Apply builds and starts a new box before closing the old one so failures
-// leave the previous instance running.
+//
+// Hot reload (Apply):
+//  1. Parse + create + start a NEW box instance without holding the state lock
+//     (so gRPC Ping/GetStatus stay responsive during reload).
+//  2. On success, swap under lock and close the old instance.
+//  3. On failure, keep the old instance running and return the error.
 type BoxRuntime struct {
 	mu            sync.Mutex
 	dataDir       string
@@ -38,6 +42,9 @@ type BoxRuntime struct {
 	startedAtUnix int64
 	lastError     string
 	state         State
+
+	// applyMu serializes reloads so two Applies don't start two boxes concurrently.
+	applyMu sync.Mutex
 }
 
 // NewBoxRuntime creates a BoxRuntime. dataDir, if non-empty, receives current.json
@@ -50,21 +57,17 @@ func NewBoxRuntime(dataDir string) *BoxRuntime {
 }
 
 func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	// Only one reload at a time; do not hold state mu across Start (hot-reload).
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
 
 	opts, err := r.parseOptions(configJSON)
 	if err != nil {
-		r.lastError = err.Error()
-		// Keep previous instance/state; only surface the error.
-		if r.instance == nil {
-			r.state = StateStopped
-		} else {
-			r.state = StateRunning
-		}
+		r.setLastError(err.Error())
 		return err
 	}
 
+	// Build + start NEW instance while old keeps serving traffic.
 	boxCtx := box.Context(
 		context.Background(),
 		include.InboundRegistry(),
@@ -79,31 +82,22 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 	})
 	if err != nil {
 		cancel()
-		r.lastError = err.Error()
-		if r.instance == nil {
-			r.state = StateStopped
-		}
+		r.setLastError(err.Error())
 		return fmt.Errorf("create box: %w", err)
 	}
 
 	if err := instance.Start(); err != nil {
 		_ = instance.Close()
 		cancel()
-		r.lastError = err.Error()
-		if r.instance == nil {
-			r.state = StateStopped
-		}
+		r.setLastError(err.Error())
+		// Keep previous instance if any.
 		return fmt.Errorf("start box: %w", err)
 	}
 
-	// Success: tear down old, swap in new.
-	if r.instance != nil {
-		_ = r.instance.Close()
-	}
-	if r.cancel != nil {
-		r.cancel()
-	}
-
+	// Success: atomic swap under state lock, then tear down old.
+	r.mu.Lock()
+	old := r.instance
+	oldCancel := r.cancel
 	r.instance = instance
 	r.cancel = cancel
 	r.configJSON = configJSON
@@ -111,15 +105,40 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 	r.startedAtUnix = time.Now().Unix()
 	r.lastError = ""
 	r.state = StateRunning
+	dataDir := r.dataDir
+	r.mu.Unlock()
 
-	if r.dataDir != "" {
-		if err := r.writeCurrentLocked(configJSON); err != nil {
-			// Non-fatal: box is already running.
-			r.lastError = "box running; failed to write current.json: " + err.Error()
+	if old != nil {
+		_ = old.Close()
+	}
+	if oldCancel != nil {
+		oldCancel()
+	}
+
+	if dataDir != "" {
+		if err := r.writeCurrent(dataDir, configJSON); err != nil {
+			r.setLastError("box running; failed to write current.json: " + err.Error())
 		}
 	}
 
+	// Respect cancel of the RPC context after success (best-effort).
+	select {
+	case <-ctx.Done():
+		// Config already applied; do not roll back.
+	default:
+	}
 	return nil
+}
+
+func (r *BoxRuntime) setLastError(msg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastError = msg
+	if r.instance == nil {
+		r.state = StateStopped
+	} else {
+		r.state = StateRunning
+	}
 }
 
 func (r *BoxRuntime) Start(ctx context.Context) error {
@@ -139,20 +158,25 @@ func (r *BoxRuntime) Start(ctx context.Context) error {
 }
 
 func (r *BoxRuntime) Stop(_ context.Context) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
 
-	var err error
-	if r.instance != nil {
-		err = r.instance.Close()
-		r.instance = nil
-	}
-	if r.cancel != nil {
-		r.cancel()
-		r.cancel = nil
-	}
+	r.mu.Lock()
+	old := r.instance
+	oldCancel := r.cancel
+	r.instance = nil
+	r.cancel = nil
 	r.state = StateStopped
 	r.startedAtUnix = 0
+	r.mu.Unlock()
+
+	var err error
+	if old != nil {
+		err = old.Close()
+	}
+	if oldCancel != nil {
+		oldCancel()
+	}
 	return err
 }
 
@@ -190,7 +214,6 @@ func (r *BoxRuntime) ConfigJSON() string {
 }
 
 func (r *BoxRuntime) parseOptions(configJSON string) (option.Options, error) {
-	// Registries must be present so typed inbound/outbound options can decode.
 	ctx := box.Context(
 		context.Background(),
 		include.InboundRegistry(),
@@ -204,11 +227,11 @@ func (r *BoxRuntime) parseOptions(configJSON string) (option.Options, error) {
 	return opts, nil
 }
 
-func (r *BoxRuntime) writeCurrentLocked(configJSON string) error {
-	if err := os.MkdirAll(r.dataDir, 0o755); err != nil {
+func (r *BoxRuntime) writeCurrent(dataDir, configJSON string) error {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return err
 	}
-	path := filepath.Join(r.dataDir, "current.json")
+	path := filepath.Join(dataDir, "current.json")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(configJSON), 0o600); err != nil {
 		return err
