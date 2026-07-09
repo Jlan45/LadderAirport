@@ -1,4 +1,4 @@
-# LabberAirport
+# LadderAirport
 
 Self-hosted **proxy fleet control plane**: a Go Panel with embedded React SPA and SQLite, plus a node Agent (sing-box 二开) controlled over gRPC (TLS + shared bearer token).
 
@@ -8,7 +8,7 @@ Self-hosted **proxy fleet control plane**: a Go Panel with embedded React SPA an
 Browser --HTTP--> Panel (Go + embed SPA + SQLite)
                      |
                      | gRPC (optional TLS + Bearer token)
-                     +-----> Agent-1 (labber-agent + sing-box)
+                     +-----> Agent-1 (ladder-agent + sing-box)
                      +-----> Agent-2
                      '-----> Agent-N
 ```
@@ -16,7 +16,7 @@ Browser --HTTP--> Panel (Go + embed SPA + SQLite)
 | Path | Role |
 |------|------|
 | `panel/` | Control plane: HTTP API, auth, store, converter, batch apply, node gRPC client |
-| `agent/` | Node agent (`labber-agent`): AgentControl gRPC server + box lifecycle |
+| `agent/` | Node agent (`ladder-agent`): AgentControl gRPC server + box lifecycle |
 | `agent/sing-box/` | Upstream sing-box **git submodule** (pinned); in-process box runtime |
 | `web/` | React + TypeScript + Vite SPA (built into `panel/web/dist` for `go:embed`) |
 | `pkg/` | Shared Go libs (`auth` token interceptors, `hashutil`) |
@@ -28,24 +28,24 @@ Panel owns protocol templates → form params → full sing-box JSON conversion.
 
 Design / plan docs:
 
-- [Design spec](docs/superpowers/specs/2026-07-09-labber-airport-design.md)
-- [Implementation plan](docs/superpowers/plans/2026-07-09-labber-airport.md)
+- [Design spec](docs/superpowers/specs/2026-07-09-ladder-airport-design.md)
+- [Implementation plan](docs/superpowers/plans/2026-07-09-ladder-airport.md)
 
 ## Modules
 
 Go workspace (`go.work`) covers:
 
-- `github.com/labberairport/pkg`
-- `github.com/labberairport/panel`
-- `github.com/labberairport/agent`
-- `github.com/labberairport/proto` (generated client/server stubs)
+- `github.com/ladderairport/pkg`
+- `github.com/ladderairport/panel`
+- `github.com/ladderairport/agent`
+- `github.com/ladderairport/proto` (generated client/server stubs)
 
 ## Build
 
 ```bash
 make web      # build frontend into panel/web/dist
 make panel   # build panel binary to bin/panel (depends on web)
-make agent   # build agent binary to bin/labber-agent
+make agent   # build agent binary to bin/ladder-agent
 make proto   # generate Go from proto/agent/v1
 make test    # run Go tests in pkg, panel, agent
 ```
@@ -69,14 +69,14 @@ See [agent/README.md](agent/README.md) for pin policy and upgrade notes. Glue co
 Always runs in-process **sing-box** (no mock core).
 
 ```bash
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent
+./bin/ladder-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/ladder-agent
 ```
 
 Optional TLS (after generating lab certs):
 
 ```bash
 ./scripts/gen-dev-certs.sh
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent \
+./bin/ladder-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/ladder-agent \
   -tls-cert deploy/dev/agent.crt -tls-key deploy/dev/agent.key
 ```
 
@@ -132,4 +132,4 @@ Writes `deploy/dev/{ca,agent}.{crt,key}` via `openssl` (self-signed CA + leaf). 
 
 ## License / upstream
 
-Agent runtime builds on sing-box (see `agent/sing-box` for upstream license). LabberAirport control-plane code is separate monorepo content around that submodule.
+Agent runtime builds on sing-box (see `agent/sing-box` for upstream license). LadderAirport control-plane code is separate monorepo content around that submodule.

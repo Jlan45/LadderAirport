@@ -3,9 +3,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/labberairport/panel/internal/inboundfill"
-	"github.com/labberairport/panel/internal/store"
-	"github.com/labberairport/panel/internal/templates"
+	"github.com/ladderairport/panel/internal/inboundfill"
+	"github.com/ladderairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/templates"
 )
 
 func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {

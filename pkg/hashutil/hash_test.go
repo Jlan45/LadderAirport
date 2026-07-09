@@ -3,7 +3,7 @@ package hashutil_test
 import (
 	"testing"
 
-	"github.com/labberairport/pkg/hashutil"
+	"github.com/ladderairport/pkg/hashutil"
 )
 
 func TestSHA256Hex(t *testing.T) {

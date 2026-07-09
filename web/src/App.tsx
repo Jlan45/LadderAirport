@@ -63,7 +63,7 @@ function AppLayout() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">Labber Airport</div>
+        <div className="brand">Ladder Airport</div>
         <nav>
           <NavLink to="/" end>
             总览

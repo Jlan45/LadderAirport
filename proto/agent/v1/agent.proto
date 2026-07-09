@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package agent.v1;
 
-option go_package = "github.com/labberairport/proto/gen/go/agent/v1;agentv1";
+option go_package = "github.com/ladderairport/proto/gen/go/agent/v1;agentv1";
 
 service AgentControl {
   rpc Ping(PingRequest) returns (PingResponse);

@@ -1,4 +1,4 @@
-# LabberAirport Agent
+# LadderAirport Agent
 
 In-process **sing-box 二开** agent: gRPC `AgentControl` + `BoxRuntime` lifecycle adapter.
 
@@ -45,7 +45,7 @@ Log line on start: `runtime=box agent_version=... singbox_version=...`.
 # from repo root
 make agent
 # or
-cd agent && go build -o ../bin/labber-agent ./cmd/labber-agent
+cd agent && go build -o ../bin/ladder-agent ./cmd/ladder-agent
 ```
 
 Optional full feature tags (match upstream Makefile; not required for lab):
@@ -54,7 +54,7 @@ Optional full feature tags (match upstream Makefile; not required for lab):
 cd agent
 go build -tags "with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api" \
   -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=1.11.15'" \
-  -o ../bin/labber-agent ./cmd/labber-agent
+  -o ../bin/ladder-agent ./cmd/ladder-agent
 ```
 
 Default builds use stub registries for QUIC/WireGuard/Clash API (`!with_*` tags). Protocol support for shadowsocks/vmess/trojan/vless/socks/http/mixed/direct works without extra tags.
@@ -100,13 +100,13 @@ Do not edit upstream files under `agent/sing-box/` unless deliberately forking; 
 ## Run (lab)
 
 ```bash
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent
+./bin/ladder-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/ladder-agent
 ```
 
 TLS (optional):
 
 ```bash
 openssl req -x509 -newkey rsa:2048 -keyout /tmp/agent.key -out /tmp/agent.crt -days 1 -nodes -subj /CN=localhost
-./bin/labber-agent -listen 127.0.0.1:50051 -token test \
-  -tls-cert /tmp/agent.crt -tls-key /tmp/agent.key -data-dir /tmp/labber-agent
+./bin/ladder-agent -listen 127.0.0.1:50051 -token test \
+  -tls-cert /tmp/agent.crt -tls-key /tmp/agent.key -data-dir /tmp/ladder-agent
 ```

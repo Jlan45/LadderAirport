@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labberairport/panel/internal/store"
-	"github.com/labberairport/panel/internal/subscription"
+	"github.com/ladderairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/subscription"
 )
 
 func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/store"
 )
 
 // Convert builds a full sing-box JSON config from inbound configs.

@@ -1,4 +1,4 @@
-# LabberAirport Implementation Plan
+# LadderAirport Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Go 1.22+, gRPC + protobuf, modernc.org/sqlite (or mattn/go-sqlite3), chi or stdlib `net/http` mux, React 18 + TypeScript + Vite, sing-box upstream (submodule, pinned tag), TLS + Bearer token.
 
-**Spec:** `docs/superpowers/specs/2026-07-09-labber-airport-design.md`
+**Spec:** `docs/superpowers/specs/2026-07-09-ladder-airport-design.md`
 
 **Prerequisites (environment):** Install Go 1.22+, `protoc`, `protoc-gen-go`, `protoc-gen-go-grpc`, Node 20+ (present), git. On Debian/Kali-like hosts:
 
@@ -25,7 +25,7 @@ export PATH="$(go env GOPATH)/bin:$PATH"
 ## File structure (target)
 
 ```
-LabberAirport/
+LadderAirport/
 ├── go.work
 ├── Makefile
 ├── README.md
@@ -76,7 +76,7 @@ LabberAirport/
 │       └── components/DynamicForm.tsx
 ├── agent/
 │   ├── go.mod
-│   ├── cmd/labber-agent/main.go
+│   ├── cmd/ladder-agent/main.go
 │   ├── internal/control/
 │   │   ├── server.go
 │   │   ├── server_test.go
@@ -94,10 +94,10 @@ LabberAirport/
 
 - `go.work` members: `./panel`, `./agent`, `./pkg` (if separate), and use `replace` for generated proto package under `proto/gen/go` or embed gen into `pkg/proto`.
 - Practical choice: rootless multi-module:
-  - `github.com/labberairport/panel`
-  - `github.com/labberairport/agent`
-  - `github.com/labberairport/pkg`
-  - Generated code: `github.com/labberairport/proto/gen/go`
+  - `github.com/ladderairport/panel`
+  - `github.com/ladderairport/agent`
+  - `github.com/ladderairport/pkg`
+  - Generated code: `github.com/ladderairport/proto/gen/go`
 
 ---
 
@@ -111,7 +111,7 @@ LabberAirport/
 ```bash
 mkdir -p proto/agent/v1 proto/gen/go pkg/auth pkg/hashutil \
   panel/cmd/panel panel/internal/{config,store,templates,converter,nodeclient,batch,api,embed} panel/web/dist \
-  web/src agent/cmd/labber-agent agent/internal/control \
+  web/src agent/cmd/ladder-agent agent/internal/control \
   docs/superpowers/plans
 ```
 
@@ -137,9 +137,9 @@ Keep `panel/web/dist/.gitkeep` so embed path exists before first frontend build.
 - [ ] **Step 2: Initialize Go modules and go.work**
 
 ```bash
-cd pkg && go mod init github.com/labberairport/pkg && cd ..
-cd panel && go mod init github.com/labberairport/panel && cd ..
-cd agent && go mod init github.com/labberairport/agent && cd ..
+cd pkg && go mod init github.com/ladderairport/pkg && cd ..
+cd panel && go mod init github.com/ladderairport/panel && cd ..
+cd agent && go mod init github.com/ladderairport/agent && cd ..
 go work init ./pkg ./panel ./agent
 ```
 
@@ -163,7 +163,7 @@ panel: web
 	cd panel && go build -o ../bin/panel ./cmd/panel
 
 agent:
-	cd agent && go build -o ../bin/labber-agent ./cmd/labber-agent
+	cd agent && go build -o ../bin/ladder-agent ./cmd/ladder-agent
 
 test:
 	cd pkg && go test ./...
@@ -185,7 +185,7 @@ git commit -m "chore: scaffold monorepo modules and Makefile"
 **Files:**
 - Create: `proto/agent/v1/agent.proto`
 - Create: `proto/gen/go/agent/v1/*` (generated)
-- Create: `proto/go.mod` (module `github.com/labberairport/proto`)
+- Create: `proto/go.mod` (module `github.com/ladderairport/proto`)
 
 - [ ] **Step 1: Write `proto/agent/v1/agent.proto`**
 
@@ -194,7 +194,7 @@ syntax = "proto3";
 
 package agent.v1;
 
-option go_package = "github.com/labberairport/proto/gen/go/agent/v1;agentv1";
+option go_package = "github.com/ladderairport/proto/gen/go/agent/v1;agentv1";
 
 service AgentControl {
   rpc Ping(PingRequest) returns (PingResponse);
@@ -266,7 +266,7 @@ message LogLine {
 
 ```bash
 mkdir -p proto/gen/go
-cd proto && go mod init github.com/labberairport/proto && cd ..
+cd proto && go mod init github.com/ladderairport/proto && cd ..
 # ensure plugins on PATH
 make proto
 ```
@@ -306,7 +306,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/labberairport/pkg/auth"
+	"github.com/ladderairport/pkg/auth"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -438,7 +438,7 @@ git commit -m "feat(pkg): bearer token helpers for gRPC metadata"
 - Create: `agent/internal/control/logbuf.go`
 - Create: `agent/internal/control/server.go`
 - Create: `agent/internal/control/server_test.go`
-- Create: `agent/cmd/labber-agent/main.go`
+- Create: `agent/cmd/ladder-agent/main.go`
 
 - [ ] **Step 1: Define Runtime interface**
 
@@ -493,9 +493,9 @@ import (
 	"net"
 	"testing"
 
-	"github.com/labberairport/agent/internal/control"
-	agentv1 "github.com/labberairport/proto/gen/go/agent/v1"
-	"github.com/labberairport/pkg/auth"
+	"github.com/ladderairport/agent/internal/control"
+	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
+	"github.com/ladderairport/pkg/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
@@ -572,7 +572,7 @@ Note: stream interceptor also needed for `StreamLogs` — add `grpc.StreamInterc
 
 Add `StreamServerInterceptor` analogous to unary (same ValidateIncomingBearer).
 
-- [ ] **Step 5: `cmd/labber-agent/main.go` flags**
+- [ ] **Step 5: `cmd/ladder-agent/main.go` flags**
 
 Flags: `-listen` (default `:50051`), `-token`, `-tls-cert`, `-tls-key`, `-data-dir` (cache last config). Start with `NewMockRuntime` until Task 5; print clear log line which runtime is active.
 
@@ -580,8 +580,8 @@ Flags: `-listen` (default `:50051`), `-token`, `-tls-cert`, `-tls-key`, `-data-d
 
 ```bash
 cd agent
-go get github.com/labberairport/pkg@v0.0.0
-go get github.com/labberairport/proto@v0.0.0
+go get github.com/ladderairport/pkg@v0.0.0
+go get github.com/ladderairport/proto@v0.0.0
 # with go.work, local replace is automatic
 go get google.golang.org/grpc@latest
 go test ./internal/control/ -v
@@ -603,7 +603,7 @@ git commit -m "feat(agent): gRPC AgentControl server with mock runtime"
 **Files:**
 - Create: `agent/sing-box` submodule
 - Create: `agent/internal/control/runtime_box.go`
-- Create: `agent/cmd/labber-agent/main.go` (switch runtime)
+- Create: `agent/cmd/ladder-agent/main.go` (switch runtime)
 - Modify: `agent/go.mod` replace / require sing-box
 - Create: `agent/README.md` (build notes)
 
@@ -664,10 +664,10 @@ replace github.com/sagernet/sing-box => ./sing-box
 - [ ] **Step 4: Manual smoke (not unit-test heavy)**
 
 ```bash
-cd agent && go build -o ../bin/labber-agent ./cmd/labber-agent
+cd agent && go build -o ../bin/ladder-agent ./cmd/ladder-agent
 # generate self-signed cert for lab
 openssl req -x509 -newkey rsa:2048 -keyout /tmp/agent.key -out /tmp/agent.crt -days 1 -nodes -subj /CN=localhost
-./bin/labber-agent -listen 127.0.0.1:50051 -token test -tls-cert /tmp/agent.crt -tls-key /tmp/agent.key
+./bin/ladder-agent -listen 127.0.0.1:50051 -token test -tls-cert /tmp/agent.crt -tls-key /tmp/agent.key
 ```
 
 Use a tiny grpcurl or panel client later to ApplyConfig with a minimal direct-only config.
@@ -1217,7 +1217,7 @@ git commit -m "fix: acceptance checklist hardening"
 
 ## Execution handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-07-09-labber-airport.md`.
+Plan complete and saved to `docs/superpowers/plans/2026-07-09-ladder-airport.md`.
 
 **Two execution options:**
 

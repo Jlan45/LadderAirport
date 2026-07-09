@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labberairport/panel/internal/batch"
-	"github.com/labberairport/panel/internal/nodeclient"
-	"github.com/labberairport/panel/internal/store"
-	"github.com/labberairport/panel/web"
-	agentv1 "github.com/labberairport/proto/gen/go/agent/v1"
+	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/nodeclient"
+	"github.com/ladderairport/panel/internal/store"
+	"github.com/ladderairport/panel/web"
+	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
 
 // NodeLive is the subset of nodeclient used for probe/metrics/logs.

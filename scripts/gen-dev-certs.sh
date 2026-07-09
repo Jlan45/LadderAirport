@@ -25,7 +25,7 @@ openssl req -x509 -new -nodes \
   -key "${CA_KEY}" \
   -sha256 \
   -days "${DAYS}" \
-  -subj "/CN=LabberAirport Dev CA" \
+  -subj "/CN=LadderAirport Dev CA" \
   -out "${CA_CRT}"
 
 # Agent leaf key + CSR
@@ -65,7 +65,7 @@ echo "  ${AGENT_CRT}"
 echo "  ${AGENT_KEY}"
 echo
 echo "Agent (TLS lab):"
-echo "  ./bin/labber-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/labber-agent \\"
+echo "  ./bin/ladder-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/ladder-agent \\"
 echo "    -tls-cert ${AGENT_CRT} -tls-key ${AGENT_KEY}"
 echo
 echo "Panel node: set ca_cert_pem from ${CA_CRT} (or tls_skip_verify=true for lab only)."

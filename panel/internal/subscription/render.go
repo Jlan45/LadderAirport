@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/store"
 	"gopkg.in/yaml.v3"
 )
 

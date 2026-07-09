@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
-AGENT_BIN="${ROOT}/bin/labber-agent"
+AGENT_BIN="${ROOT}/bin/ladder-agent"
 PANEL_BIN="${ROOT}/bin/panel"
 AGENT_LISTEN="127.0.0.1:50051"
 AGENT_TOKEN="test"
@@ -13,7 +13,7 @@ PANEL_LISTEN="127.0.0.1:18080"
 PANEL_URL="http://${PANEL_LISTEN}"
 ADMIN_PASS="admin"
 
-TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/labber-e2e.XXXXXX")"
+TMPDIR="$(mktemp -d "${TMPDIR:-/tmp}/ladder-e2e.XXXXXX")"
 COOKIE_JAR="${TMPDIR}/cookies.txt"
 PANEL_DB="${TMPDIR}/panel.db"
 AGENT_LOG="${TMPDIR}/agent.log"

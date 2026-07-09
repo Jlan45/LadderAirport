@@ -29,7 +29,7 @@ export default function Login() {
   return (
     <div className="login-page">
       <form className="card login-card" onSubmit={onSubmit}>
-        <h1>Labber Airport</h1>
+        <h1>Ladder Airport</h1>
         <p className="muted">登录运维控制台</p>
         <div className="form-row">
           <label htmlFor="password">密码</label>

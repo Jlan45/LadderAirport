@@ -1,8 +1,8 @@
-# LabberAirport Design Spec
+# LadderAirport Design Spec
 
 **Date:** 2026-07-09  
 **Status:** Approved for implementation planning  
-**Codename:** LabberAirport — self-hosted proxy fleet control plane
+**Codename:** LadderAirport — self-hosted proxy fleet control plane
 
 ## 1. Goal
 
@@ -41,7 +41,7 @@ Rejected alternatives:
 ### 4.1 Repository layout (monorepo)
 
 ```
-LabberAirport/
+LadderAirport/
 ├── proto/                      # gRPC: panel ↔ agent
 ├── pkg/                        # shared: token auth helpers, error codes
 ├── panel/
@@ -51,7 +51,7 @@ LabberAirport/
 ├── web/                        # React + TS + Vite source
 ├── agent/                      # sing-box source tree (submodule or vendored fork)
 │   ├── (upstream sing-box tree)
-│   ├── cmd/labber-agent/       # 二开 entry (name may vary)
+│   ├── cmd/ladder-agent/       # 二开 entry (name may vary)
 │   └── internal/control/       # gRPC, auth, runtime wrapper, metrics, logs
 └── docs/superpowers/specs/
 ```

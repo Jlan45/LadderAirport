@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/store"
 )
 
 // BootstrapAll applies config then starts every registered node.

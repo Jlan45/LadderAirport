@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/labberairport/panel/internal/api"
-	"github.com/labberairport/panel/internal/batch"
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/api"
+	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/store"
 )
 
 func main() {

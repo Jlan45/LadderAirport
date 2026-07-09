@@ -9,8 +9,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/labberairport/pkg/auth"
-	agentv1 "github.com/labberairport/proto/gen/go/agent/v1"
+	"github.com/ladderairport/pkg/auth"
+	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"

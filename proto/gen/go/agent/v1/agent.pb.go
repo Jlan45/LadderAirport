@@ -793,7 +793,7 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"GetMetrics\x12\x1b.agent.v1.GetMetricsRequest\x1a\x1c.agent.v1.GetMetricsResponse\x12>\n" +
 	"\n" +
-	"StreamLogs\x12\x1b.agent.v1.StreamLogsRequest\x1a\x11.agent.v1.LogLine0\x01B8Z6github.com/labberairport/proto/gen/go/agent/v1;agentv1b\x06proto3"
+	"StreamLogs\x12\x1b.agent.v1.StreamLogsRequest\x1a\x11.agent.v1.LogLine0\x01B8Z6github.com/ladderairport/proto/gen/go/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_agent_proto_rawDescOnce sync.Once

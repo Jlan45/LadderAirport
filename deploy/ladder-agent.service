@@ -1,0 +1,23 @@
+[Unit]
+Description=LadderAirport Agent (sing-box control plane)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ladder
+Group=ladder
+WorkingDirectory=/var/lib/ladder-agent
+EnvironmentFile=/etc/ladder-agent/agent.env
+ExecStart=/usr/local/bin/ladder-agent -listen ${LADDER_LISTEN} -token ${LADDER_TOKEN} -data-dir ${LADDER_DATA_DIR}
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ladder-agent
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

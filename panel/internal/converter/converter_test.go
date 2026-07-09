@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/store"
 )
 
 func TestConvertShadowsocksGolden(t *testing.T) {

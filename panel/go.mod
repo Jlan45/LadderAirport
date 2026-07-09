@@ -1,11 +1,11 @@
-module github.com/labberairport/panel
+module github.com/ladderairport/panel
 
 go 1.26.4
 
 require (
 	github.com/google/uuid v1.6.0
-	github.com/labberairport/pkg v0.0.0
-	github.com/labberairport/proto v0.0.0
+	github.com/ladderairport/pkg v0.0.0
+	github.com/ladderairport/proto v0.0.0
 	google.golang.org/grpc v1.82.0
 	modernc.org/sqlite v1.53.0
 )
@@ -29,6 +29,6 @@ require (
 )
 
 replace (
-	github.com/labberairport/pkg => ../pkg
-	github.com/labberairport/proto => ../proto
+	github.com/ladderairport/pkg => ../pkg
+	github.com/ladderairport/proto => ../proto
 )

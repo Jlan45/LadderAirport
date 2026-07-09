@@ -6,18 +6,18 @@
 
 ```bash
 # 目标机克隆/拷贝仓库后
-cd LabberAirport
+cd LadderAirport
 git submodule update --init --recursive   # 若尚未拉 sing-box
-make agent                                # 或拷贝已编译的 bin/labber-agent
+make agent                                # 或拷贝已编译的 bin/ladder-agent
 
-sudo LABBER_TOKEN='你的长密钥' ./scripts/install-agent.sh
+sudo LADDER_TOKEN='你的长密钥' ./scripts/install-agent.sh
 # 未设置 TOKEN 时脚本会随机生成并打印，请保存到 Panel
 ```
 
 使用已有二进制：
 
 ```bash
-sudo LABBER_TOKEN='secret' ./scripts/install-agent.sh /path/to/labber-agent
+sudo LADDER_TOKEN='secret' ./scripts/install-agent.sh /path/to/ladder-agent
 ```
 
 ## 装完后在 Panel 登记
@@ -26,29 +26,29 @@ sudo LABBER_TOKEN='secret' ./scripts/install-agent.sh /path/to/labber-agent
 |------|-----|
 | Address | 节点 IP（对 Panel 可达，勿用 127.0.0.1 跨机） |
 | gRPC 端口 | `50051`（默认） |
-| Token | 与 `/etc/labber-agent/agent.env` 中 `LABBER_TOKEN` 一致 |
+| Token | 与 `/etc/ladder-agent/agent.env` 中 `LADDER_TOKEN` 一致 |
 
 Panel 开启 bootstrap 时会自动下发配置并启动 sing-box。
 
 ## 手工 systemd（不跑脚本）
 
 ```bash
-sudo useradd -r -s /usr/sbin/nologin -d /var/lib/labber-agent labber || true
-sudo mkdir -p /etc/labber-agent /var/lib/labber-agent
-sudo cp bin/labber-agent /usr/local/bin/
-sudo cp deploy/agent.env.example /etc/labber-agent/agent.env
-sudo nano /etc/labber-agent/agent.env   # 改 TOKEN
-sudo cp deploy/labber-agent.service /etc/systemd/system/
+sudo useradd -r -s /usr/sbin/nologin -d /var/lib/ladder-agent ladder || true
+sudo mkdir -p /etc/ladder-agent /var/lib/ladder-agent
+sudo cp bin/ladder-agent /usr/local/bin/
+sudo cp deploy/agent.env.example /etc/ladder-agent/agent.env
+sudo nano /etc/ladder-agent/agent.env   # 改 TOKEN
+sudo cp deploy/ladder-agent.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now labber-agent
+sudo systemctl enable --now ladder-agent
 ```
 
 ## 常用命令
 
 ```bash
-systemctl status labber-agent
-journalctl -u labber-agent -f
-systemctl restart labber-agent
+systemctl status ladder-agent
+journalctl -u ladder-agent -f
+systemctl restart ladder-agent
 ```
 
 ## 防火墙
@@ -65,4 +65,4 @@ sudo ufw allow from 10.0.0.0/8 to any port 50051 proto tcp
 默认 unit 使用普通用户。若入站要用 443 等端口，可：
 
 - 改用 `User=root`（简单但不推荐），或  
-- `setcap 'cap_net_bind_service=+ep' /usr/local/bin/labber-agent` 并调整 unit 加固项。
+- `setcap 'cap_net_bind_service=+ep' /usr/local/bin/ladder-agent` 并调整 unit 加固项。

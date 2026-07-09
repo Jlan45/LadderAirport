@@ -1,4 +1,4 @@
-module github.com/labberairport/proto
+module github.com/ladderairport/proto
 
 go 1.26.4
 

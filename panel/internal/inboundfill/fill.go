@@ -134,7 +134,7 @@ func ensureTLSMaterial(params map[string]any) error {
 	if hasPEM || hasPath {
 		return nil
 	}
-	cert, key, err := generateSelfSigned("labber-airport")
+	cert, key, err := generateSelfSigned("ladder-airport")
 	if err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ func generateSelfSigned(cn string) (certPEM, keyPEM string, err error) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: cn, Organization: []string{"LabberAirport"}},
+		Subject:      pkix.Name{CommonName: cn, Organization: []string{"LadderAirport"}},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

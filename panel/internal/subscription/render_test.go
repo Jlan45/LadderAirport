@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/store"
 )
 
 func sampleEndpoints() []ProxyEndpoint {

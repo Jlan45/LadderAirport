@@ -1,4 +1,4 @@
-module github.com/labberairport/pkg
+module github.com/ladderairport/pkg
 
 go 1.26.4
 

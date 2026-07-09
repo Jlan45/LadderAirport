@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	agentv1 "github.com/labberairport/proto/gen/go/agent/v1"
+	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

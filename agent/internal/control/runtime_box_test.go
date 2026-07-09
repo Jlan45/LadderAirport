@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/labberairport/agent/internal/control"
+	"github.com/ladderairport/agent/internal/control"
 )
 
 func TestBoxRuntimeInvalidJSONKeepsStopped(t *testing.T) {

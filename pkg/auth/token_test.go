@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/labberairport/pkg/auth"
+	"github.com/ladderairport/pkg/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"

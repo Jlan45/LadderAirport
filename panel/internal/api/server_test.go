@@ -12,10 +12,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/labberairport/panel/internal/api"
-	"github.com/labberairport/panel/internal/batch"
-	"github.com/labberairport/panel/internal/store"
-	agentv1 "github.com/labberairport/proto/gen/go/agent/v1"
+	"github.com/ladderairport/panel/internal/api"
+	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/store"
+	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc/metadata"
 )
 

@@ -1,10 +1,10 @@
-module github.com/labberairport/agent
+module github.com/ladderairport/agent
 
 go 1.26.4
 
 require (
-	github.com/labberairport/pkg v0.0.0
-	github.com/labberairport/proto v0.0.0
+	github.com/ladderairport/pkg v0.0.0
+	github.com/ladderairport/proto v0.0.0
 	github.com/sagernet/sing v0.6.10
 	github.com/sagernet/sing-box v1.11.15
 	google.golang.org/grpc v1.82.0
@@ -89,8 +89,8 @@ require (
 )
 
 replace (
-	github.com/labberairport/pkg => ../pkg
-	github.com/labberairport/proto => ../proto
+	github.com/ladderairport/pkg => ../pkg
+	github.com/ladderairport/proto => ../proto
 	// 二开: prefer submodule at agent/sing-box (pinned tag v1.11.15).
 	github.com/sagernet/sing-box => ./sing-box
 )

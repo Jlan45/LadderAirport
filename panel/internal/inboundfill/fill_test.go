@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/labberairport/panel/internal/inboundfill"
+	"github.com/ladderairport/panel/internal/inboundfill"
 )
 
 func TestFillShadowsocksPassword(t *testing.T) {

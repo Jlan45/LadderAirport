@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/store"
 )
 
 type batchRequest struct {

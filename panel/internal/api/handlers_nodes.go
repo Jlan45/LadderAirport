@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/labberairport/panel/internal/converter"
-	"github.com/labberairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/converter"
+	"github.com/ladderairport/panel/internal/store"
 )
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
