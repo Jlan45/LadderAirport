@@ -53,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	s.mountSPA(mux)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Admin APIs require session; /sub/{token} and login are public.
 		if isAPIPath(r.URL.Path) && !isPublicAPI(r) {
 			if !s.authenticated(r) {
 				writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -112,10 +113,20 @@ func isAPIPath(path string) bool {
 }
 
 func isPublicAPI(r *http.Request) bool {
-	return r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/login"
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/login" {
+		return true
+	}
+	// Public subscription pull (token in path).
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/sub/") {
+		return true
+	}
+	return false
 }
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
+	// Public subscription endpoint (no admin session).
+	mux.HandleFunc("GET /sub/{token}", s.handlePublicSubscription)
+
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)
@@ -151,6 +162,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/v1/settings", s.handlePutSettings)
+
+	mux.HandleFunc("GET /api/v1/subscriptions", s.handleListSubscriptions)
+	mux.HandleFunc("POST /api/v1/subscriptions", s.handleCreateSubscription)
+	mux.HandleFunc("PUT /api/v1/subscriptions/{id}", s.handleUpdateSubscription)
+	mux.HandleFunc("DELETE /api/v1/subscriptions/{id}", s.handleDeleteSubscription)
+	mux.HandleFunc("GET /api/v1/subscriptions/{id}/preview", s.handlePreviewSubscription)
 }
 
 func (s *Server) liveDial(ctx context.Context, n store.Node, token string) (NodeLive, error) {

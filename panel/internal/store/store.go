@@ -92,7 +92,18 @@ func (s *Store) migrate() error {
 			default_agent_token TEXT NOT NULL DEFAULT '',
 			grpc_timeout_sec INTEGER NOT NULL DEFAULT 10,
 			max_concurrency INTEGER NOT NULL DEFAULT 10,
-			listen_addr TEXT NOT NULL DEFAULT ':8080'
+			listen_addr TEXT NOT NULL DEFAULT ':8080',
+			public_base_url TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS subscriptions (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			format TEXT NOT NULL,
+			token TEXT NOT NULL UNIQUE,
+			inbound_ids_json TEXT NOT NULL DEFAULT '[]',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS config_snapshots (
 			id TEXT PRIMARY KEY,
@@ -122,6 +133,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN memory_rss_bytes INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE nodes ADD COLUMN metrics_at_unix INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE nodes ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alters {
 		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
@@ -735,9 +747,9 @@ func (s *Store) ListTasks() ([]Task, error) {
 func (s *Store) GetSettings() (*Settings, error) {
 	var st Settings
 	err := s.db.QueryRow(`
-		SELECT admin_password_hash, default_agent_token, grpc_timeout_sec, max_concurrency, listen_addr
+		SELECT admin_password_hash, default_agent_token, grpc_timeout_sec, max_concurrency, listen_addr, public_base_url
 		FROM settings WHERE id = 1`).Scan(
-		&st.AdminPasswordHash, &st.DefaultAgentToken, &st.GRPCTimeoutSec, &st.MaxConcurrency, &st.ListenAddr,
+		&st.AdminPasswordHash, &st.DefaultAgentToken, &st.GRPCTimeoutSec, &st.MaxConcurrency, &st.ListenAddr, &st.PublicBaseURL,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get settings: %w", err)
@@ -755,14 +767,150 @@ func (s *Store) SaveSettings(st *Settings) error {
 			default_agent_token = ?,
 			grpc_timeout_sec = ?,
 			max_concurrency = ?,
-			listen_addr = ?
+			listen_addr = ?,
+			public_base_url = ?
 		WHERE id = 1`,
-		st.AdminPasswordHash, st.DefaultAgentToken, st.GRPCTimeoutSec, st.MaxConcurrency, st.ListenAddr,
+		st.AdminPasswordHash, st.DefaultAgentToken, st.GRPCTimeoutSec, st.MaxConcurrency, st.ListenAddr, st.PublicBaseURL,
 	)
 	if err != nil {
 		return fmt.Errorf("save settings: %w", err)
 	}
 	return nil
+}
+
+// --- Subscriptions ---
+
+func (s *Store) CreateSubscription(sub *Subscription) error {
+	if sub == nil {
+		return fmt.Errorf("subscription is nil")
+	}
+	if sub.ID == "" {
+		sub.ID = newID()
+	}
+	if sub.Token == "" {
+		return fmt.Errorf("token required")
+	}
+	now := nowUnix()
+	if sub.CreatedAtUnix == 0 {
+		sub.CreatedAtUnix = now
+	}
+	sub.UpdatedAtUnix = now
+	if sub.InboundIDs == nil {
+		sub.InboundIDs = []string{}
+	}
+	idsJSON, err := marshalJSON(sub.InboundIDs)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO subscriptions (id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		sub.ID, sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.Enabled), sub.CreatedAtUnix, sub.UpdatedAtUnix,
+	)
+	if err != nil {
+		return fmt.Errorf("create subscription: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateSubscription(sub *Subscription) error {
+	if sub == nil || sub.ID == "" {
+		return fmt.Errorf("subscription id required")
+	}
+	sub.UpdatedAtUnix = nowUnix()
+	if sub.InboundIDs == nil {
+		sub.InboundIDs = []string{}
+	}
+	idsJSON, err := marshalJSON(sub.InboundIDs)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.Exec(`
+		UPDATE subscriptions SET name=?, format=?, token=?, inbound_ids_json=?, enabled=?, updated_at_unix=?
+		WHERE id=?`,
+		sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.Enabled), sub.UpdatedAtUnix, sub.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update subscription: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("subscription not found: %s", sub.ID)
+	}
+	return nil
+}
+
+func (s *Store) DeleteSubscription(id string) error {
+	res, err := s.db.Exec(`DELETE FROM subscriptions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete subscription: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("subscription not found: %s", id)
+	}
+	return nil
+}
+
+func (s *Store) GetSubscription(id string) (*Subscription, error) {
+	row := s.db.QueryRow(`
+		SELECT id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix
+		FROM subscriptions WHERE id = ?`, id)
+	return scanSubscription(row)
+}
+
+func (s *Store) GetSubscriptionByToken(token string) (*Subscription, error) {
+	row := s.db.QueryRow(`
+		SELECT id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix
+		FROM subscriptions WHERE token = ?`, token)
+	sub, err := scanSubscription(row)
+	if err != nil {
+		return nil, err
+	}
+	return sub, nil
+}
+
+func (s *Store) ListSubscriptions() ([]Subscription, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix
+		FROM subscriptions ORDER BY created_at_unix ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list subscriptions: %w", err)
+	}
+	defer rows.Close()
+	var out []Subscription
+	for rows.Next() {
+		sub, err := scanSubscription(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *sub)
+	}
+	if out == nil {
+		out = []Subscription{}
+	}
+	return out, rows.Err()
+}
+
+func scanSubscription(row interface {
+	Scan(dest ...any) error
+}) (*Subscription, error) {
+	var sub Subscription
+	var idsJSON string
+	var enabled int
+	err := row.Scan(&sub.ID, &sub.Name, &sub.Format, &sub.Token, &idsJSON, &enabled, &sub.CreatedAtUnix, &sub.UpdatedAtUnix)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("subscription not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	sub.Enabled = enabled != 0
+	sub.InboundIDs = []string{}
+	if err := unmarshalJSON(idsJSON, &sub.InboundIDs); err != nil {
+		return nil, fmt.Errorf("unmarshal inbound_ids: %w", err)
+	}
+	return &sub, nil
 }
 
 // --- Snapshots ---

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,7 @@ type putSettingsBody struct {
 	GRPCTimeoutSec    *int    `json:"grpc_timeout_sec"`
 	MaxConcurrency    *int    `json:"max_concurrency"`
 	ListenAddr        *string `json:"listen_addr"`
+	PublicBaseURL     *string `json:"public_base_url"`
 	NewPassword       *string `json:"new_password"`
 }
 
@@ -52,6 +54,9 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.ListenAddr != nil {
 		st.ListenAddr = *body.ListenAddr
+	}
+	if body.PublicBaseURL != nil {
+		st.PublicBaseURL = strings.TrimSpace(*body.PublicBaseURL)
 	}
 	if body.NewPassword != nil {
 		if *body.NewPassword == "" {

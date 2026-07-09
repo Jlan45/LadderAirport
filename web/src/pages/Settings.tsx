@@ -6,6 +6,7 @@ export default function Settings() {
   const [timeoutSec, setTimeoutSec] = useState(10)
   const [concurrency, setConcurrency] = useState(8)
   const [listenAddr, setListenAddr] = useState('')
+  const [publicBase, setPublicBase] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
@@ -20,6 +21,7 @@ export default function Settings() {
       setTimeoutSec(s.grpc_timeout_sec)
       setConcurrency(s.max_concurrency)
       setListenAddr(s.listen_addr || '')
+      setPublicBase(s.public_base_url || '')
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载系统设置失败')
     }
@@ -44,6 +46,7 @@ export default function Settings() {
         grpc_timeout_sec: timeoutSec,
         max_concurrency: concurrency,
         listen_addr: listenAddr,
+        public_base_url: publicBase,
       }
       if (newPassword) {
         body.new_password = newPassword
@@ -53,6 +56,7 @@ export default function Settings() {
       setTimeoutSec(s.grpc_timeout_sec)
       setConcurrency(s.max_concurrency)
       setListenAddr(s.listen_addr || '')
+      setPublicBase(s.public_base_url || '')
       setNewPassword('')
       setConfirmPassword('')
       setMsg('系统设置保存成功')
@@ -115,6 +119,16 @@ export default function Settings() {
             <div className="field-hint">
               仅保存做参考之用；更改此项可能需要手动重启面板服务。
             </div>
+          </div>
+          <div className="form-row">
+            <label htmlFor="pbu">订阅公网基址（Public Base URL）</label>
+            <input
+              id="pbu"
+              value={publicBase}
+              onChange={(e) => setPublicBase(e.target.value)}
+              placeholder="例如: https://panel.example.com"
+            />
+            <div className="field-hint">用于生成完整订阅链接；留空则按当前访问 Host 拼接</div>
           </div>
 
           <h3 className="subhead">修改管理员密码</h3>

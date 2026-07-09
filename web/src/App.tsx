@@ -7,6 +7,7 @@ import Nodes from './pages/Nodes'
 import Inbounds from './pages/Inbounds'
 import NodeDetail from './pages/NodeDetail'
 import Batch from './pages/Batch'
+import Subscriptions from './pages/Subscriptions'
 import Settings from './pages/Settings'
 
 /** Layout with nav; redirects to /login if session is invalid. */
@@ -71,6 +72,7 @@ function AppLayout() {
             节点
           </NavLink>
           <NavLink to="/inbounds">入站</NavLink>
+          <NavLink to="/subscriptions">订阅</NavLink>
           <NavLink to="/batch">批量操作</NavLink>
           <NavLink to="/settings">设置</NavLink>
         </nav>
@@ -91,6 +93,7 @@ export default function App() {
         <Route path="/nodes" element={<Nodes />} />
         <Route path="/nodes/:id" element={<NodeDetail />} />
         <Route path="/inbounds" element={<Inbounds />} />
+        <Route path="/subscriptions" element={<Subscriptions />} />
         <Route path="/batch" element={<Batch />} />
         <Route path="/settings" element={<Settings />} />
       </Route>

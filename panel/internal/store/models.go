@@ -60,6 +60,20 @@ type Settings struct {
 	GRPCTimeoutSec    int    `json:"grpc_timeout_sec"`
 	MaxConcurrency    int    `json:"max_concurrency"`
 	ListenAddr        string `json:"listen_addr"`
+	// PublicBaseURL is used to render full subscription links (e.g. https://panel.example.com).
+	PublicBaseURL string `json:"public_base_url"`
+}
+
+// Subscription is a client-facing share link (Clash YAML or sing-box JSON).
+type Subscription struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Format        string   `json:"format"` // clash | singbox
+	Token         string   `json:"token"`  // URL secret for public /sub/{token}
+	InboundIDs    []string `json:"inbound_ids"` // empty = all enabled inbounds attached to any node
+	Enabled       bool     `json:"enabled"`
+	CreatedAtUnix int64    `json:"created_at_unix"`
+	UpdatedAtUnix int64    `json:"updated_at_unix"`
 }
 
 type ConfigSnapshot struct {

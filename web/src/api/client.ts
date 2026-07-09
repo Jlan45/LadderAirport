@@ -134,6 +134,19 @@ export interface Settings {
   grpc_timeout_sec: number
   max_concurrency: number
   listen_addr: string
+  public_base_url?: string
+}
+
+export interface Subscription {
+  id: string
+  name: string
+  format: 'clash' | 'singbox' | string
+  token: string
+  inbound_ids: string[]
+  enabled: boolean
+  url?: string
+  created_at_unix: number
+  updated_at_unix: number
 }
 
 export interface ProbeResult {
@@ -172,6 +185,7 @@ export interface PutSettingsInput {
   grpc_timeout_sec?: number
   max_concurrency?: number
   listen_addr?: string
+  public_base_url?: string
   new_password?: string
 }
 
@@ -376,4 +390,47 @@ export function getSettings(): Promise<Settings> {
 
 export function putSettings(body: PutSettingsInput): Promise<Settings> {
   return request('PUT', '/settings', body)
+}
+
+// --- Subscriptions ---
+
+export function listSubscriptions(): Promise<Subscription[]> {
+  return request('GET', '/subscriptions')
+}
+
+export function createSubscription(body: {
+  name: string
+  format: string
+  inbound_ids?: string[]
+  enabled?: boolean
+}): Promise<Subscription> {
+  return request('POST', '/subscriptions', body)
+}
+
+export function updateSubscription(
+  id: string,
+  body: {
+    name?: string
+    format?: string
+    inbound_ids?: string[]
+    enabled?: boolean
+    rotate_token?: boolean
+  },
+): Promise<Subscription> {
+  return request('PUT', `/subscriptions/${id}`, body)
+}
+
+export function deleteSubscription(id: string): Promise<void> {
+  return request('DELETE', `/subscriptions/${id}`)
+}
+
+export async function previewSubscription(id: string): Promise<string> {
+  const res = await fetch(`/api/v1/subscriptions/${id}/preview`, {
+    credentials: 'include',
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new ApiError(res.status, text || res.statusText)
+  }
+  return res.text()
 }
