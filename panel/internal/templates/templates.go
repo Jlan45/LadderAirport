@@ -1,0 +1,130 @@
+package templates
+
+// Field describes a form field for a protocol template.
+type Field struct {
+	Name        string   `json:"name"`
+	Label       string   `json:"label"`
+	Type        string   `json:"type"` // string|int|bool|select|password
+	Required    bool     `json:"required"`
+	Default     any      `json:"default,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
+// Template is a built-in inbound protocol form schema.
+type Template struct {
+	ID       string  `json:"id"`
+	Protocol string  `json:"protocol"`
+	Name     string  `json:"name"`
+	Fields   []Field `json:"fields"`
+}
+
+var builtins = []Template{
+	{
+		ID:       "inbound.shadowsocks.v1",
+		Protocol: "shadowsocks",
+		Name:     "Shadowsocks",
+		Fields: []Field{
+			{Name: "listen", Label: "Listen", Type: "string", Required: true, Default: "0.0.0.0", Description: "Listen address"},
+			{Name: "port", Label: "Port", Type: "int", Required: true, Description: "Listen port"},
+			{
+				Name:     "method",
+				Label:    "Method",
+				Type:     "select",
+				Required: true,
+				Default:  "aes-256-gcm",
+				Options: []string{
+					"aes-128-gcm",
+					"aes-192-gcm",
+					"aes-256-gcm",
+					"chacha20-ietf-poly1305",
+					"xchacha20-ietf-poly1305",
+					"2022-blake3-aes-128-gcm",
+					"2022-blake3-aes-256-gcm",
+					"2022-blake3-chacha20-poly1305",
+				},
+				Description: "AEAD encryption method",
+			},
+			{Name: "password", Label: "Password", Type: "password", Required: true},
+			{
+				Name:        "network",
+				Label:       "Network",
+				Type:        "select",
+				Required:    false,
+				Default:     "",
+				Options:     []string{"", "tcp", "udp"},
+				Description: "Empty means both TCP and UDP",
+			},
+		},
+	},
+	{
+		ID:       "inbound.trojan.v1",
+		Protocol: "trojan",
+		Name:     "Trojan",
+		Fields: []Field{
+			{Name: "listen", Label: "Listen", Type: "string", Required: true, Default: "0.0.0.0"},
+			{Name: "port", Label: "Port", Type: "int", Required: true},
+			{Name: "password", Label: "Password", Type: "password", Required: true},
+			{Name: "tls_cert_path", Label: "TLS Certificate Path", Type: "string", Required: true, Description: "Path to certificate file on the agent host"},
+			{Name: "tls_key_path", Label: "TLS Key Path", Type: "string", Required: true, Description: "Path to private key file on the agent host"},
+		},
+	},
+	{
+		ID:       "inbound.vless.v1",
+		Protocol: "vless",
+		Name:     "VLESS",
+		Fields: []Field{
+			{Name: "listen", Label: "Listen", Type: "string", Required: true, Default: "0.0.0.0"},
+			{Name: "port", Label: "Port", Type: "int", Required: true},
+			{Name: "uuid", Label: "UUID", Type: "string", Required: true, Description: "User UUID"},
+			{Name: "flow", Label: "Flow", Type: "string", Required: false, Description: "Optional VLESS flow, e.g. xtls-rprx-vision"},
+			{
+				Name:        "tls_mode",
+				Label:       "TLS Mode",
+				Type:        "select",
+				Required:    true,
+				Default:     "none",
+				Options:     []string{"none", "tls", "reality"},
+				Description: "TLS mode: none, classic TLS, or Reality",
+			},
+			{Name: "tls_cert_path", Label: "TLS Certificate Path", Type: "string", Required: false, Description: "Required when tls_mode is tls"},
+			{Name: "tls_key_path", Label: "TLS Key Path", Type: "string", Required: false, Description: "Required when tls_mode is tls"},
+			{Name: "private_key", Label: "Reality Private Key", Type: "password", Required: false, Description: "Required when tls_mode is reality (server private key)"},
+			{Name: "short_id", Label: "Reality Short ID", Type: "string", Required: false, Description: "Required when tls_mode is reality"},
+			{Name: "server_name", Label: "Server Name (SNI)", Type: "string", Required: false, Description: "TLS/Reality server name"},
+			{Name: "handshake_server", Label: "Reality Handshake Server", Type: "string", Required: false, Description: "Required when tls_mode is reality"},
+			{Name: "handshake_server_port", Label: "Reality Handshake Port", Type: "int", Required: false, Default: 443},
+		},
+	},
+	{
+		ID:       "inbound.hysteria2.v1",
+		Protocol: "hysteria2",
+		Name:     "Hysteria2",
+		Fields: []Field{
+			{Name: "listen", Label: "Listen", Type: "string", Required: true, Default: "0.0.0.0"},
+			{Name: "port", Label: "Port", Type: "int", Required: true},
+			{Name: "password", Label: "Password", Type: "password", Required: true},
+			{Name: "tls_cert_path", Label: "TLS Certificate Path", Type: "string", Required: true},
+			{Name: "tls_key_path", Label: "TLS Key Path", Type: "string", Required: true},
+			{Name: "up_mbps", Label: "Up Mbps", Type: "int", Required: false, Description: "Optional max upload bandwidth"},
+			{Name: "down_mbps", Label: "Down Mbps", Type: "int", Required: false, Description: "Optional max download bandwidth"},
+		},
+	},
+}
+
+// List returns all built-in protocol templates.
+func List() []Template {
+	out := make([]Template, len(builtins))
+	copy(out, builtins)
+	return out
+}
+
+// Get returns the template for a protocol id (e.g. "shadowsocks").
+func Get(protocol string) (Template, bool) {
+	for _, t := range builtins {
+		if t.Protocol == protocol {
+			return t, true
+		}
+	}
+	return Template{}, false
+}

@@ -1,0 +1,35 @@
+{
+  "log": {
+    "level": "info"
+  },
+  "inbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "in-hy2-main",
+      "listen": "0.0.0.0",
+      "listen_port": 8443,
+      "users": [
+        {
+          "name": "default",
+          "password": "hy2-pass"
+        }
+      ],
+      "up_mbps": 100,
+      "down_mbps": 200,
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/certs/fullchain.pem",
+        "key_path": "/etc/certs/privkey.pem"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "final": "direct"
+  }
+}

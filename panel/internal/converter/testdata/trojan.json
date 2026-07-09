@@ -1,0 +1,33 @@
+{
+  "log": {
+    "level": "info"
+  },
+  "inbounds": [
+    {
+      "type": "trojan",
+      "tag": "in-trojan-main",
+      "listen": "0.0.0.0",
+      "listen_port": 443,
+      "users": [
+        {
+          "name": "default",
+          "password": "trojan-pass"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/certs/fullchain.pem",
+        "key_path": "/etc/certs/privkey.pem"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "final": "direct"
+  }
+}
