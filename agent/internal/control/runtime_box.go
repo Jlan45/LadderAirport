@@ -43,6 +43,11 @@ type BoxRuntime struct {
 	lastError     string
 	state         State
 
+	// Traffic stats from ConnectionTracker (current instance + rolled-up previous).
+	tracker      *trafficTracker
+	prevUplink   int64
+	prevDownlink int64
+
 	// applyMu serializes reloads so two Applies don't start two boxes concurrently.
 	applyMu sync.Mutex
 }
@@ -86,6 +91,10 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 		return fmt.Errorf("create box: %w", err)
 	}
 
+	// Attach traffic tracker before Start so all routed conns are counted.
+	tracker := newTrafficTracker()
+	instance.Router().AppendTracker(tracker)
+
 	if err := instance.Start(); err != nil {
 		_ = instance.Close()
 		cancel()
@@ -98,8 +107,16 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 	r.mu.Lock()
 	old := r.instance
 	oldCancel := r.cancel
+	oldTracker := r.tracker
+	// Roll previous instance traffic into lifetime totals so hot-reload does not reset UI counters.
+	if oldTracker != nil {
+		_, up, down := oldTracker.Snapshot()
+		r.prevUplink += up
+		r.prevDownlink += down
+	}
 	r.instance = instance
 	r.cancel = cancel
+	r.tracker = tracker
 	r.configJSON = configJSON
 	r.configHash = hash
 	r.startedAtUnix = time.Now().Unix()
@@ -164,8 +181,15 @@ func (r *BoxRuntime) Stop(_ context.Context) error {
 	r.mu.Lock()
 	old := r.instance
 	oldCancel := r.cancel
+	oldTracker := r.tracker
+	if oldTracker != nil {
+		_, up, down := oldTracker.Snapshot()
+		r.prevUplink += up
+		r.prevDownlink += down
+	}
 	r.instance = nil
 	r.cancel = nil
+	r.tracker = nil
 	r.state = StateStopped
 	r.startedAtUnix = 0
 	r.mu.Unlock()
@@ -191,17 +215,26 @@ func (r *BoxRuntime) Status(_ context.Context) Status {
 	}
 }
 
-// Metrics returns process memory via runtime.MemStats.
-// Connection and traffic counters are 0 in v1 — sing-box does not expose a
-// stable in-process connection tally without clash API / custom hooks.
+// Metrics returns live connection count, cumulative traffic (survives hot-reload),
+// and approximate process memory. CPU percent is sampled coarsely (0 if unavailable).
 func (r *BoxRuntime) Metrics(_ context.Context) Metrics {
+	r.mu.Lock()
+	var conns, up, down int64
+	if r.tracker != nil {
+		c, u, d := r.tracker.Snapshot()
+		conns, up, down = c, u, d
+	}
+	up += r.prevUplink
+	down += r.prevDownlink
+	r.mu.Unlock()
+
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
 	return Metrics{
-		Connections:    0,
-		UplinkBytes:    0,
-		DownlinkBytes:  0,
-		CPUPercent:     0,
+		Connections:    conns,
+		UplinkBytes:    up,
+		DownlinkBytes:  down,
+		CPUPercent:     sampleCPUPercent(),
 		MemoryRSSBytes: int64(ms.Sys),
 	}
 }
