@@ -81,16 +81,16 @@ cd agent && go test ./internal/control/ -short
 
 `Start` re-applies the last good config if stopped. `Stop` closes the instance.
 
-### Metrics (v1 gap)
+### Metrics
 
 | Field | Source |
 |-------|--------|
-| `MemoryRSSBytes` | `runtime.MemStats.Sys` (process heap/sys, not true RSS) |
-| `Connections` | **0** — no stable in-process hook without Clash API |
-| `UplinkBytes` / `DownlinkBytes` | **0** until clash API / traffic hooks are wired |
-| `CPUPercent` | **0** |
+| `Connections` | Active routed connections via in-process `ConnectionTracker` |
+| `UplinkBytes` / `DownlinkBytes` | Cumulative bytes (client→node / node→client); survives hot-reload |
+| `MemoryRSSBytes` | `runtime.MemStats.Sys` (approx process memory, not exact RSS) |
+| `CPUPercent` | Linux: `/proc/self/stat` sample between polls; first sample is 0 |
 
-Documented intentionally so Panel UI can show “n/a” rather than fake counters.
+Requires **`-runtime box`**. Mock runtime does not generate real traffic counters.
 
 ## Upgrade policy
 
