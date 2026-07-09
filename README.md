@@ -95,6 +95,8 @@ Flags:
 | `-listen` | settings / `:8080` | HTTP listen address |
 | `-db` | `./data/panel.db` | SQLite path |
 | `-session-secret` | random ephemeral | Set a stable secret so sessions survive restart |
+| `-bootstrap` | `true` | On start, apply configs and start sing-box on all registered nodes |
+| `-bootstrap-timeout` | `3m` | Max time for startup bootstrap |
 
 Open `http://127.0.0.1:8080` in a browser.
 

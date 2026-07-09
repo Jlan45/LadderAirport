@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"flag"
 	"log"
@@ -18,6 +19,8 @@ func main() {
 	dbPath := flag.String("db", "./data/panel.db", "SQLite database path")
 	listen := flag.String("listen", "", "HTTP listen address (default: settings.listen_addr or :8080)")
 	sessionSecret := flag.String("session-secret", "", "JWT session HMAC secret (random if empty)")
+	bootstrap := flag.Bool("bootstrap", true, "on start, apply configs and start sing-box on all registered nodes")
+	bootstrapTimeout := flag.Duration("bootstrap-timeout", 3*time.Minute, "timeout for startup bootstrap")
 	flag.Parse()
 
 	if dir := filepath.Dir(*dbPath); dir != "" && dir != "." {
@@ -76,6 +79,24 @@ func main() {
 	}
 	if addr == "" {
 		addr = ":8080"
+	}
+
+	// Auto push configs + start agents after HTTP is about to serve (background).
+	if *bootstrap {
+		go func() {
+			// Small delay so ListenAndServe is up and agents have a moment if co-started.
+			time.Sleep(500 * time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), *bootstrapTimeout)
+			defer cancel()
+			log.Printf("bootstrap: starting (timeout=%s)", *bootstrapTimeout)
+			if err := runner.BootstrapAll(ctx); err != nil {
+				log.Printf("bootstrap: finished with error: %v", err)
+				return
+			}
+			log.Printf("bootstrap: finished")
+		}()
+	} else {
+		log.Printf("bootstrap: disabled (-bootstrap=false)")
 	}
 
 	log.Printf("panel listening on %s (db=%s)", addr, *dbPath)
