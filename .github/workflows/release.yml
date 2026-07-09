@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GOTOOLCHAIN: auto
+  CGO_ENABLED: "0"
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+          cache-dependency-path: |
+            pkg/go.sum
+            panel/go.sum
+            agent/go.sum
+            proto/go.sum
+
+      - name: Build all targets
+        run: |
+          mkdir -p dist
+          for pair in linux/amd64 linux/arm64; do
+            GOOS="${pair%/*}"
+            GOARCH="${pair#*/}"
+            echo "==> $GOOS/$GOARCH"
+            (cd panel && GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags="-s -w" \
+              -o ../dist/panel-${GOOS}-${GOARCH} ./cmd/panel)
+            (cd agent && GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags="-s -w" \
+              -o ../dist/ladder-agent-${GOOS}-${GOARCH} ./cmd/ladder-agent)
+          done
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/panel-linux-amd64
+            dist/panel-linux-arm64
+            dist/ladder-agent-linux-amd64
+            dist/ladder-agent-linux-arm64
+            dist/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
