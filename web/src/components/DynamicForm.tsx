@@ -78,7 +78,7 @@ function renderInput(
         >
           {(f.options ?? []).map((opt) => (
             <option key={opt === '' ? '__empty' : opt} value={opt}>
-              {opt === '' ? '(default)' : opt}
+              {opt === '' ? '(默认)' : opt}
             </option>
           ))}
         </select>

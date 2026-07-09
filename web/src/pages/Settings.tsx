@@ -21,7 +21,7 @@ export default function Settings() {
       setConcurrency(s.max_concurrency)
       setListenAddr(s.listen_addr || '')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed to load settings')
+      setError(err instanceof Error ? err.message : '加载系统设置失败')
     }
   }, [])
 
@@ -34,7 +34,7 @@ export default function Settings() {
     setError('')
     setMsg('')
     if (newPassword && newPassword !== confirmPassword) {
-      setError('passwords do not match')
+      setError('两次输入的密码不一致')
       return
     }
     setBusy(true)
@@ -55,9 +55,9 @@ export default function Settings() {
       setListenAddr(s.listen_addr || '')
       setNewPassword('')
       setConfirmPassword('')
-      setMsg('Settings saved')
+      setMsg('系统设置保存成功')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'save failed')
+      setError(err instanceof Error ? err.message : '保存失败')
     } finally {
       setBusy(false)
     }
@@ -65,24 +65,25 @@ export default function Settings() {
 
   return (
     <div>
-      <h1>Settings</h1>
+      <h1>系统设置</h1>
       {error ? <div className="error">{error}</div> : null}
       {msg ? <div className="ok">{msg}</div> : null}
 
       <section className="card">
         <form onSubmit={onSave}>
           <div className="form-row">
-            <label htmlFor="tok">Default agent token</label>
+            <label htmlFor="tok">默认 Agent 访问令牌</label>
             <input
               id="tok"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               autoComplete="off"
+              placeholder="全局默认的连接校验令牌"
             />
           </div>
           <div className="form-row">
-            <label htmlFor="to">gRPC timeout (seconds)</label>
+            <label htmlFor="to">gRPC 超时时间 (秒)</label>
             <input
               id="to"
               type="number"
@@ -93,7 +94,7 @@ export default function Settings() {
             />
           </div>
           <div className="form-row">
-            <label htmlFor="cc">Max concurrency</label>
+            <label htmlFor="cc">最大并发任务数</label>
             <input
               id="cc"
               type="number"
@@ -104,42 +105,44 @@ export default function Settings() {
             />
           </div>
           <div className="form-row">
-            <label htmlFor="la">Listen address</label>
+            <label htmlFor="la">面板监听地址</label>
             <input
               id="la"
               value={listenAddr}
               onChange={(e) => setListenAddr(e.target.value)}
-              placeholder=":8080"
+              placeholder="例如: :8080"
             />
             <div className="field-hint">
-              Stored for reference; changing may require panel restart.
+              仅保存做参考之用；更改此项可能需要手动重启面板服务。
             </div>
           </div>
 
-          <h3 className="subhead">Change password</h3>
+          <h3 className="subhead">修改管理员密码</h3>
           <div className="form-row">
-            <label htmlFor="np">New password</label>
+            <label htmlFor="np">新密码</label>
             <input
               id="np"
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               autoComplete="new-password"
+              placeholder="留空则不修改密码"
             />
           </div>
           <div className="form-row">
-            <label htmlFor="cp">Confirm new password</label>
+            <label htmlFor="cp">确认新密码</label>
             <input
               id="cp"
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               autoComplete="new-password"
+              placeholder="再次输入新密码以确认"
             />
           </div>
 
-          <button type="submit" disabled={busy}>
-            {busy ? 'Saving…' : 'Save'}
+          <button type="submit" disabled={busy} style={{ marginTop: '0.5rem' }}>
+            {busy ? '保存中…' : '保存设置'}
           </button>
         </form>
       </section>

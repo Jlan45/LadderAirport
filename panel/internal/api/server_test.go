@@ -88,6 +88,13 @@ func (m *mockLive) Ping(_ context.Context) (*agentv1.PingResponse, error) {
 	return &agentv1.PingResponse{AgentVersion: "test-agent", SingboxVersion: "1.0"}, nil
 }
 
+func (m *mockLive) GetStatus(_ context.Context) (*agentv1.GetStatusResponse, error) {
+	if !m.pingOK {
+		return nil, context.DeadlineExceeded
+	}
+	return &agentv1.GetStatusResponse{State: "running", ConfigHash: "abc"}, nil
+}
+
 func (m *mockLive) GetMetrics(_ context.Context) (*agentv1.GetMetricsResponse, error) {
 	if !m.metricsOK {
 		return nil, context.DeadlineExceeded

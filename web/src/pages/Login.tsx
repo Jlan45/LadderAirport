@@ -17,9 +17,9 @@ export default function Login() {
       navigate('/nodes', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
-        setError(err.message || 'login failed')
+        setError(err.message || '登录失败')
       } else {
-        setError(err instanceof Error ? err.message : 'login failed')
+        setError(err instanceof Error ? err.message : '登录失败')
       }
     } finally {
       setBusy(false)
@@ -30,9 +30,9 @@ export default function Login() {
     <div className="login-page">
       <form className="card login-card" onSubmit={onSubmit}>
         <h1>Labber Airport</h1>
-        <p className="muted">Sign in to the ops console</p>
+        <p className="muted">登录运维控制台</p>
         <div className="form-row">
-          <label htmlFor="password">Password</label>
+          <label htmlFor="password">密码</label>
           <input
             id="password"
             type="password"
@@ -45,7 +45,7 @@ export default function Login() {
         </div>
         {error ? <div className="error">{error}</div> : null}
         <button type="submit" disabled={busy || !password}>
-          {busy ? 'Signing in…' : 'Sign in'}
+          {busy ? '登录中…' : '登录'}
         </button>
       </form>
     </div>

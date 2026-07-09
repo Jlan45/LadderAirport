@@ -2,6 +2,7 @@ import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-rou
 import { useEffect, useState } from 'react'
 import { ApiError, listNodes } from './api/client'
 import Login from './pages/Login'
+import Dashboard from './pages/Dashboard'
 import Nodes from './pages/Nodes'
 import Inbounds from './pages/Inbounds'
 import NodeDetail from './pages/NodeDetail'
@@ -49,7 +50,7 @@ function AppLayout() {
   if (!ready) {
     return (
       <div className="login-page">
-        <p className="muted">Loading…</p>
+        <p className="muted">加载中…</p>
       </div>
     )
   }
@@ -63,12 +64,15 @@ function AppLayout() {
       <header className="topbar">
         <div className="brand">Labber Airport</div>
         <nav>
-          <NavLink to="/nodes" end={false}>
-            Nodes
+          <NavLink to="/" end>
+            总览
           </NavLink>
-          <NavLink to="/inbounds">Inbounds</NavLink>
-          <NavLink to="/batch">Batch</NavLink>
-          <NavLink to="/settings">Settings</NavLink>
+          <NavLink to="/nodes" end={false}>
+            节点
+          </NavLink>
+          <NavLink to="/inbounds">入站</NavLink>
+          <NavLink to="/batch">批量操作</NavLink>
+          <NavLink to="/settings">设置</NavLink>
         </nav>
       </header>
       <main className="main">
@@ -83,14 +87,14 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<AppLayout />}>
-        <Route path="/" element={<Navigate to="/nodes" replace />} />
+        <Route path="/" element={<Dashboard />} />
         <Route path="/nodes" element={<Nodes />} />
         <Route path="/nodes/:id" element={<NodeDetail />} />
         <Route path="/inbounds" element={<Inbounds />} />
         <Route path="/batch" element={<Batch />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
-      <Route path="*" element={<Navigate to="/nodes" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

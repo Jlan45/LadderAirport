@@ -9,11 +9,23 @@ type Node struct {
 	Labels        []string `json:"labels"`
 	TLSSkipVerify bool     `json:"tls_skip_verify"`
 	CACertPEM     string   `json:"ca_cert_pem,omitempty"`
-	Status        string   `json:"status"`
+	Status        string   `json:"status"` // online | unreachable | unauthorized | unknown
 	LastSeenUnix  int64    `json:"last_seen_unix"`
 	ConfigHash    string   `json:"config_hash"`
-	CreatedAtUnix int64    `json:"created_at_unix"`
-	UpdatedAtUnix int64    `json:"updated_at_unix"`
+	// Live monitoring cache (updated by fleet refresh / probe).
+	RuntimeState   string  `json:"runtime_state"` // running | stopped | error | ""
+	AgentVersion   string  `json:"agent_version"`
+	SingboxVersion string  `json:"singbox_version"`
+	Connections    int64   `json:"connections"`
+	UplinkBytes    int64   `json:"uplink_bytes"`
+	DownlinkBytes  int64   `json:"downlink_bytes"`
+	CPUPercent     float64 `json:"cpu_percent"`
+	MemoryRSSBytes int64   `json:"memory_rss_bytes"`
+	MetricsAtUnix  int64   `json:"metrics_at_unix"`
+	LastError      string  `json:"last_error,omitempty"`
+	InboundCount   int     `json:"inbound_count,omitempty"` // filled by overview, not persisted
+	CreatedAtUnix  int64   `json:"created_at_unix"`
+	UpdatedAtUnix  int64   `json:"updated_at_unix"`
 }
 
 type InboundConfig struct {

@@ -47,7 +47,7 @@ export default function NodeDetail() {
       setAllInbounds(all ?? [])
       setAttachedIds(new Set((attached ?? []).map((a) => a.id)))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed to load')
+      setError(err instanceof Error ? err.message : '加载失败')
     }
   }, [id])
 
@@ -81,10 +81,10 @@ export default function NodeDetail() {
     setMsg('')
     try {
       await setNodeInbounds(id, Array.from(attachedIds))
-      setMsg('Inbounds attached')
+      setMsg('入站配置关联成功')
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'attach failed')
+      setError(err instanceof Error ? err.message : '关联失败')
     } finally {
       setBusy(false)
     }
@@ -98,9 +98,41 @@ export default function NodeDetail() {
       const cfg = await previewNodeConfig(id)
       setPreview(JSON.stringify(cfg, null, 2))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'preview failed')
+      setError(err instanceof Error ? err.message : '配置预览生成失败')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const translateKind = (kind: string) => {
+    switch (kind) {
+      case 'apply':
+        return '应用配置'
+      case 'start':
+        return '启动服务'
+      case 'stop':
+        return '停止服务'
+      default:
+        return kind
+    }
+  }
+
+  const translateStatus = (status: string) => {
+    switch (status) {
+      case 'online':
+        return '在线'
+      case 'unreachable':
+        return '无法连接'
+      case 'success':
+        return '成功'
+      case 'failed':
+        return '失败'
+      case 'pending':
+        return '等待中'
+      case 'running':
+        return '进行中'
+      default:
+        return status || '未知'
     }
   }
 
@@ -113,10 +145,10 @@ export default function NodeDetail() {
       const fn = kind === 'apply' ? applyNode : kind === 'start' ? startNode : stopNode
       const t = await fn(id)
       setTask(t)
-      setMsg(`${kind}: ${t.status}`)
+      setMsg(`${translateKind(kind)}指令下发: ${translateStatus(t.status)}`)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : `${kind} failed`)
+      setError(err instanceof Error ? err.message : `${translateKind(kind)}失败`)
     } finally {
       setBusy(false)
     }
@@ -129,7 +161,7 @@ export default function NodeDetail() {
       const m = await getNodeMetrics(id)
       setMetrics(m)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'metrics failed')
+      setError(err instanceof Error ? err.message : '获取监控指标失败')
     }
   }
 
@@ -156,7 +188,7 @@ export default function NodeDetail() {
       })
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        setError(err instanceof Error ? err.message : 'log stream failed')
+        setError(err instanceof Error ? err.message : '日志流连接失败')
       }
     } finally {
       setStreaming(false)
@@ -169,45 +201,52 @@ export default function NodeDetail() {
   }
 
   if (!id) {
-    return <div className="error">Missing node id</div>
+    return <div className="error">缺少节点 ID</div>
   }
 
   return (
     <div>
-      <p>
-        <Link to="/nodes">← Nodes</Link>
+      <p style={{ marginBottom: '1.5rem' }}>
+        <Link to="/nodes">← 返回节点列表</Link>
       </p>
-      <h1>{node ? node.name : 'Node'}</h1>
+      <h1>{node ? node.name : '节点详情'}</h1>
       {node ? (
-        <p className="muted">
+        <p className="muted" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <code>
             {node.address}:{node.grpc_port}
           </code>{' '}
-          · status:{' '}
+          · <span>状态:</span>
           <span className={`status status-${node.status || 'unknown'}`}>
-            {node.status || 'unknown'}
+            {translateStatus(node.status || 'unknown')}
           </span>{' '}
-          · labels: {(node.labels || []).join(', ') || '—'} · hash:{' '}
+          · <span>标签:</span>
+          {(node.labels || []).length > 0 ? (
+            (node.labels || []).map((lbl) => (
+              <span key={lbl} className="status" style={{ fontSize: '0.75rem', padding: '0.1rem 0.4rem' }}>{lbl}</span>
+            ))
+          ) : (
+            <span className="muted">—</span>
+          )}{' '}
+          · <span>配置哈希:</span>
           <code>{node.config_hash || '—'}</code>
         </p>
       ) : (
-        <p className="muted">Loading…</p>
+        <p className="muted">加载中…</p>
       )}
 
       {error ? <div className="error">{error}</div> : null}
       {msg ? <div className="ok">{msg}</div> : null}
 
       <section className="card">
-        <h2>Attach inbounds</h2>
+        <h2>关联入站配置</h2>
         {allInbounds.length === 0 ? (
           <p className="muted">
-            No inbounds in library. Create some on the{' '}
-            <Link to="/inbounds">Inbounds</Link> page.
+            当前模板库中无入站配置。请先在 <Link to="/inbounds">入站配置管理</Link> 页面创建。
           </p>
         ) : (
           <div className="check-list">
             {allInbounds.map((inb) => (
-              <label key={inb.id} className="check-item">
+              <label key={inb.id} className="check-item" style={{ cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={attachedIds.has(inb.id)}
@@ -215,45 +254,45 @@ export default function NodeDetail() {
                 />
                 <span>
                   {inb.name} <code>{inb.protocol}</code>
-                  {!inb.enabled ? ' (disabled)' : ''}
+                  {!inb.enabled ? ' (已禁用)' : ''}
                 </span>
               </label>
             ))}
           </div>
         )}
         <button type="button" disabled={busy} onClick={() => void onSaveInbounds()}>
-          Save attachments
+          保存关联关系
         </button>
       </section>
 
       <section className="card">
-        <h2>Actions</h2>
+        <h2>管理操作</h2>
         <div className="actions">
-          <button type="button" disabled={busy} onClick={() => void onPreview()}>
-            Preview config
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => void onPreview()}>
+            预览配置
           </button>
           <button type="button" disabled={busy} onClick={() => void runAction('apply')}>
-            Apply
+            应用配置
           </button>
           <button type="button" disabled={busy} onClick={() => void runAction('start')}>
-            Start
+            启动服务
           </button>
-          <button type="button" disabled={busy} onClick={() => void runAction('stop')}>
-            Stop
+          <button type="button" className="btn-danger" disabled={busy} onClick={() => void runAction('stop')}>
+            停止服务
           </button>
-          <button type="button" disabled={busy} onClick={() => void onMetrics()}>
-            Refresh metrics
+          <button type="button" className="btn-secondary" disabled={busy} onClick={() => void onMetrics()}>
+            刷新监控指标
           </button>
         </div>
         {task ? (
           <div className="task-box">
             <strong>
-              Task {task.id.slice(0, 8)}… — {task.type} — {task.status}
+              任务 {task.id.slice(0, 8)}… — 类型: {translateKind(task.type)} — 状态: {translateStatus(task.status)}
             </strong>
             <ul>
               {(task.results || []).map((r) => (
                 <li key={r.node_id}>
-                  {r.ok ? '✓' : '✗'} {r.node_id.slice(0, 8)}…: {r.message}
+                  {r.ok ? '✓' : '✗'} 节点 {r.node_id.slice(0, 8)}…: {r.message}
                 </li>
               ))}
             </ul>
@@ -263,27 +302,27 @@ export default function NodeDetail() {
 
       {metrics ? (
         <section className="card">
-          <h2>Metrics</h2>
+          <h2>监控指标</h2>
           <table className="kv">
             <tbody>
               <tr>
-                <th>Connections</th>
+                <th>当前连接数</th>
                 <td>{metrics.connections}</td>
               </tr>
               <tr>
-                <th>Uplink</th>
+                <th>上行流量 (累计)</th>
                 <td>{formatBytes(metrics.uplink_bytes)}</td>
               </tr>
               <tr>
-                <th>Downlink</th>
+                <th>下行流量 (累计)</th>
                 <td>{formatBytes(metrics.downlink_bytes)}</td>
               </tr>
               <tr>
-                <th>CPU</th>
+                <th>CPU 使用率</th>
                 <td>{metrics.cpu_percent?.toFixed?.(1) ?? metrics.cpu_percent}%</td>
               </tr>
               <tr>
-                <th>Memory RSS</th>
+                <th>内存占用 (RSS)</th>
                 <td>{formatBytes(metrics.memory_rss_bytes)}</td>
               </tr>
             </tbody>
@@ -293,30 +332,30 @@ export default function NodeDetail() {
 
       {preview ? (
         <section className="card">
-          <h2>Config preview</h2>
+          <h2>配置文件预览</h2>
           <pre className="code-block">{preview}</pre>
         </section>
       ) : null}
 
       <section className="card">
         <div className="row-between">
-          <h2>Logs</h2>
+          <h2>节点日志</h2>
           <div className="actions">
             {!streaming ? (
               <button type="button" onClick={() => void startLogs()}>
-                Start stream
+                开启实时日志
               </button>
             ) : (
               <button type="button" className="btn-secondary" onClick={stopLogs}>
-                Stop stream
+                停止实时日志
               </button>
             )}
           </div>
         </div>
         <div className="log-viewer">
           {logs.length === 0 ? (
-            <div className="muted">
-              {streaming ? 'Waiting for log lines…' : 'Not streaming'}
+            <div className="muted" style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+              {streaming ? '正在等待日志输出…' : '未开启实时日志'}
             </div>
           ) : (
             logs.map((line, i) => (

@@ -23,7 +23,7 @@ export default function Batch() {
       const list = await listNodes()
       setNodes(list ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'failed to load nodes')
+      setError(err instanceof Error ? err.message : '加载节点列表失败')
     }
   }, [])
 
@@ -66,6 +66,38 @@ export default function Batch() {
     setSelected(new Set())
   }
 
+  const translateKind = (kind: string) => {
+    switch (kind) {
+      case 'apply':
+        return '应用配置'
+      case 'start':
+        return '启动服务'
+      case 'stop':
+        return '停止服务'
+      default:
+        return kind
+    }
+  }
+
+  const translateStatus = (status: string) => {
+    switch (status) {
+      case 'online':
+        return '在线'
+      case 'unreachable':
+        return '无法连接'
+      case 'success':
+        return '成功'
+      case 'failed':
+        return '失败'
+      case 'pending':
+        return '等待中'
+      case 'running':
+        return '进行中'
+      default:
+        return status || '未知'
+    }
+  }
+
   async function run(kind: 'apply' | 'start' | 'stop') {
     setBusy(true)
     setError('')
@@ -80,16 +112,16 @@ export default function Batch() {
         labels,
       }
       if (body.node_ids.length === 0 && labels.length === 0) {
-        setError('select nodes and/or provide labels')
+        setError('请选择操作节点或提供标签过滤')
         return
       }
       const fn =
         kind === 'apply' ? batchApply : kind === 'start' ? batchStart : batchStop
       const t = await fn(body)
       setTask(t)
-      setMsg(`Batch ${kind} started — status ${t.status}`)
+      setMsg(`批量${translateKind(kind)}任务已启动 — 当前状态: ${translateStatus(t.status)}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : `${kind} failed`)
+      setError(err instanceof Error ? err.message : `批量${translateKind(kind)}操作失败`)
     } finally {
       setBusy(false)
     }
@@ -97,58 +129,60 @@ export default function Batch() {
 
   return (
     <div>
-      <h1>Batch</h1>
+      <h1>批量操作</h1>
       {error ? <div className="error">{error}</div> : null}
       {msg ? <div className="ok">{msg}</div> : null}
 
       <section className="card">
-        <h2>Targets</h2>
+        <h2>操作目标节点</h2>
         <div className="form-row">
-          <label htmlFor="labels">Label filter (comma-separated, optional)</label>
+          <label htmlFor="labels">标签过滤器 (英文逗号分隔，可选)</label>
           <input
             id="labels"
             value={labelFilter}
             onChange={(e) => setLabelFilter(e.target.value)}
-            placeholder="prod,edge"
+            placeholder="例如: prod,edge"
           />
           <div className="field-hint">
-            Nodes matching any label are included in addition to the selection below.
+            除了下方手动勾选的节点，匹配此过滤条件中任意标签的节点也将包含在操作目标内。
           </div>
         </div>
 
-        <div className="actions" style={{ marginBottom: '0.75rem' }}>
+        <div className="actions" style={{ marginBottom: '1rem' }}>
           <button type="button" className="btn-secondary" onClick={selectAll}>
-            Select all
+            全选
           </button>
           <button type="button" className="btn-secondary" onClick={selectNone}>
-            Select none
+            取消全选
           </button>
           <button type="button" className="btn-secondary" onClick={() => void load()}>
-            Refresh
+            刷新列表
           </button>
         </div>
 
         <div className="check-list">
           {nodes.length === 0 ? (
-            <p className="muted">No nodes</p>
+            <p className="muted" style={{ textAlign: 'center', padding: '1rem' }}>暂无节点可选</p>
           ) : (
             nodes.map((n) => (
-              <label key={n.id} className="check-item">
+              <label key={n.id} className="check-item" style={{ cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   checked={selected.has(n.id)}
                   onChange={() => toggle(n.id)}
                 />
                 <span>
-                  {n.name}{' '}
+                  <strong>{n.name}</strong>{' '}
                   <code>
                     {n.address}:{n.grpc_port}
                   </code>{' '}
-                  <span className={`status status-${n.status || 'unknown'}`}>
-                    {n.status || 'unknown'}
+                  <span className={`status status-${n.status || 'unknown'}`} style={{ marginLeft: '0.25rem' }}>
+                    {translateStatus(n.status || 'unknown')}
                   </span>{' '}
                   {(n.labels || []).length > 0 ? (
-                    <span className="muted">[{(n.labels || []).join(', ')}]</span>
+                    <span className="muted" style={{ marginLeft: '0.5rem', fontSize: '0.8rem' }}>
+                      [{(n.labels || []).join(', ')}]
+                    </span>
                   ) : null}
                 </span>
               </label>
@@ -158,48 +192,48 @@ export default function Batch() {
       </section>
 
       <section className="card">
-        <h2>Actions</h2>
+        <h2>批量指令</h2>
         <div className="actions">
           <button type="button" disabled={busy} onClick={() => void run('apply')}>
-            Apply
+            批量应用配置
           </button>
           <button type="button" disabled={busy} onClick={() => void run('start')}>
-            Start
+            批量启动服务
           </button>
-          <button type="button" disabled={busy} onClick={() => void run('stop')}>
-            Stop
+          <button type="button" className="btn-danger" disabled={busy} onClick={() => void run('stop')}>
+            批量停止服务
           </button>
         </div>
       </section>
 
       {task ? (
         <section className="card">
-          <h2>Task result</h2>
-          <p>
-            <strong>ID:</strong> <code>{task.id}</code>
+          <h2>任务执行结果</h2>
+          <div style={{ marginBottom: '1.25rem', lineHeight: '1.8' }}>
+            <strong>任务 ID:</strong> <code>{task.id}</code>
             <br />
-            <strong>Type:</strong> {task.type}
+            <strong>任务类型:</strong> {translateKind(task.type)}
             <br />
-            <strong>Status:</strong>{' '}
-            <span className={`status status-${task.status}`}>{task.status}</span>
+            <strong>任务状态:</strong>{' '}
+            <span className={`status status-${task.status}`}>{translateStatus(task.status)}</span>
             <br />
-            <strong>Nodes:</strong> {(task.node_ids || []).length}
-          </p>
+            <strong>包含节点数:</strong> {(task.node_ids || []).length} 个节点
+          </div>
           <table>
             <thead>
               <tr>
-                <th>Node</th>
-                <th>OK</th>
-                <th>Message</th>
+                <th>节点名称</th>
+                <th>执行成功</th>
+                <th>返回消息</th>
               </tr>
             </thead>
             <tbody>
               {(task.results || []).length === 0 ? (
                 <tr>
-                  <td colSpan={3} className="muted">
+                  <td colSpan={3} className="muted" style={{ textAlign: 'center', padding: '1.5rem' }}>
                     {task.status === 'pending' || task.status === 'running'
-                      ? 'Running…'
-                      : 'No per-node results'}
+                      ? '正在执行中…'
+                      : '暂无单节点详细执行结果'}
                   </td>
                 </tr>
               ) : (
@@ -207,8 +241,12 @@ export default function Batch() {
                   const n = nodes.find((x) => x.id === r.node_id)
                   return (
                     <tr key={r.node_id}>
-                      <td>{n ? n.name : r.node_id}</td>
-                      <td>{r.ok ? '✓' : '✗'}</td>
+                      <td style={{ fontWeight: 600 }}>{n ? n.name : r.node_id}</td>
+                      <td>
+                        <span className={`status ${r.ok ? 'status-success' : 'status-failed'}`}>
+                          {r.ok ? '是' : '否'}
+                        </span>
+                      </td>
                       <td>{r.message}</td>
                     </tr>
                   )

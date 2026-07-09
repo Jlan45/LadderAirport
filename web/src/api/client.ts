@@ -62,8 +62,28 @@ export interface Node {
   status: string
   last_seen_unix: number
   config_hash: string
+  runtime_state?: string
+  agent_version?: string
+  singbox_version?: string
+  connections?: number
+  uplink_bytes?: number
+  downlink_bytes?: number
+  cpu_percent?: number
+  memory_rss_bytes?: number
+  metrics_at_unix?: number
+  last_error?: string
+  inbound_count?: number
   created_at_unix: number
   updated_at_unix: number
+}
+
+export interface FleetOverview {
+  total_nodes: number
+  online_nodes: number
+  offline_nodes: number
+  running_nodes: number
+  nodes: Node[]
+  refreshed_at: number
 }
 
 export interface InboundConfig {
@@ -164,6 +184,16 @@ export interface BatchRequest {
 
 export function login(password: string): Promise<{ ok: boolean }> {
   return request('POST', '/auth/login', { password })
+}
+
+// --- Fleet (multi-node overview / refresh) ---
+
+export function fleetOverview(): Promise<FleetOverview> {
+  return request('GET', '/fleet/overview')
+}
+
+export function fleetRefresh(): Promise<FleetOverview> {
+  return request('POST', '/fleet/refresh')
 }
 
 // --- Nodes ---

@@ -24,6 +24,7 @@ import (
 type NodeLive interface {
 	Close() error
 	Ping(ctx context.Context) (*agentv1.PingResponse, error)
+	GetStatus(ctx context.Context) (*agentv1.GetStatusResponse, error)
 	GetMetrics(ctx context.Context) (*agentv1.GetMetricsResponse, error)
 	StreamLogs(ctx context.Context, level string, tail int32) (agentv1.AgentControl_StreamLogsClient, error)
 }
@@ -123,6 +124,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/inbounds", s.handleCreateInbound)
 	mux.HandleFunc("PUT /api/v1/inbounds/{id}", s.handleUpdateInbound)
 	mux.HandleFunc("DELETE /api/v1/inbounds/{id}", s.handleDeleteInbound)
+
+	mux.HandleFunc("GET /api/v1/fleet/overview", s.handleFleetOverview)
+	mux.HandleFunc("POST /api/v1/fleet/refresh", s.handleFleetRefresh)
 
 	mux.HandleFunc("GET /api/v1/nodes", s.handleListNodes)
 	mux.HandleFunc("POST /api/v1/nodes", s.handleCreateNode)

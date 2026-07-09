@@ -266,6 +266,24 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 	}
 	node.Status = "online"
 	node.LastSeenUnix = time.Now().Unix()
+	node.AgentVersion = resp.GetAgentVersion()
+	node.SingboxVersion = resp.GetSingboxVersion()
+	node.LastError = ""
+	// Best-effort status/metrics on single probe.
+	if st, err := client.GetStatus(ctx); err == nil {
+		node.RuntimeState = st.GetState()
+		if st.GetConfigHash() != "" {
+			node.ConfigHash = st.GetConfigHash()
+		}
+	}
+	if m, err := client.GetMetrics(ctx); err == nil {
+		node.Connections = m.GetConnections()
+		node.UplinkBytes = m.GetUplinkBytes()
+		node.DownlinkBytes = m.GetDownlinkBytes()
+		node.CPUPercent = m.GetCpuPercent()
+		node.MemoryRSSBytes = m.GetMemoryRssBytes()
+		node.MetricsAtUnix = time.Now().Unix()
+	}
 	if err := s.Store.UpdateNode(node); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -110,6 +110,22 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	// Additive columns for fleet monitoring (safe to re-run).
+	alters := []string{
+		`ALTER TABLE nodes ADD COLUMN runtime_state TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN singbox_version TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN connections INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN uplink_bytes INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN downlink_bytes INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN cpu_percent REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN memory_rss_bytes INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN metrics_at_unix INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range alters {
+		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
+	}
 	return nil
 }
 
@@ -186,10 +202,18 @@ func (s *Store) CreateNode(n *Node) error {
 	_, err = s.db.Exec(`
 		INSERT INTO nodes (
 			id, name, address, grpc_port, token, labels_json, tls_skip_verify, ca_cert_pem,
-			status, last_seen_unix, config_hash, created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			status, last_seen_unix, config_hash,
+			runtime_state, agent_version, singbox_version,
+			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
+			metrics_at_unix, last_error,
+			created_at_unix, updated_at_unix
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, boolToInt(n.TLSSkipVerify), n.CACertPEM,
-		n.Status, n.LastSeenUnix, n.ConfigHash, n.CreatedAtUnix, n.UpdatedAtUnix,
+		n.Status, n.LastSeenUnix, n.ConfigHash,
+		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
+		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
+		n.MetricsAtUnix, n.LastError,
+		n.CreatedAtUnix, n.UpdatedAtUnix,
 	)
 	if err != nil {
 		return fmt.Errorf("create node: %w", err)
@@ -213,11 +237,19 @@ func (s *Store) UpdateNode(n *Node) error {
 		UPDATE nodes SET
 			name = ?, address = ?, grpc_port = ?, token = ?, labels_json = ?,
 			tls_skip_verify = ?, ca_cert_pem = ?, status = ?, last_seen_unix = ?,
-			config_hash = ?, updated_at_unix = ?
+			config_hash = ?,
+			runtime_state = ?, agent_version = ?, singbox_version = ?,
+			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
+			metrics_at_unix = ?, last_error = ?,
+			updated_at_unix = ?
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
 		boolToInt(n.TLSSkipVerify), n.CACertPEM, n.Status, n.LastSeenUnix,
-		n.ConfigHash, n.UpdatedAtUnix, n.ID,
+		n.ConfigHash,
+		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
+		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
+		n.MetricsAtUnix, n.LastError,
+		n.UpdatedAtUnix, n.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update node: %w", err)
@@ -258,7 +290,11 @@ func scanNode(row interface {
 	var tlsSkip int
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Address, &n.GRPCPort, &n.Token, &labelsJSON, &tlsSkip, &n.CACertPEM,
-		&n.Status, &n.LastSeenUnix, &n.ConfigHash, &n.CreatedAtUnix, &n.UpdatedAtUnix,
+		&n.Status, &n.LastSeenUnix, &n.ConfigHash,
+		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
+		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
+		&n.MetricsAtUnix, &n.LastError,
+		&n.CreatedAtUnix, &n.UpdatedAtUnix,
 	)
 	if err != nil {
 		return nil, err
@@ -272,7 +308,11 @@ func scanNode(row interface {
 }
 
 const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, tls_skip_verify, ca_cert_pem,
-	status, last_seen_unix, config_hash, created_at_unix, updated_at_unix`
+	status, last_seen_unix, config_hash,
+	runtime_state, agent_version, singbox_version,
+	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
+	metrics_at_unix, last_error,
+	created_at_unix, updated_at_unix`
 
 func (s *Store) GetNode(id string) (*Node, error) {
 	row := s.db.QueryRow(`SELECT `+nodeSelectCols+` FROM nodes WHERE id = ?`, id)
@@ -535,6 +575,26 @@ func (s *Store) ListInboundsForNode(nodeID string) ([]InboundConfig, error) {
 		out = []InboundConfig{}
 	}
 	return out, nil
+}
+
+// CountInboundsByNode returns node_id -> attached inbound count.
+func (s *Store) CountInboundsByNode() (map[string]int, error) {
+	rows, err := s.db.Query(`
+		SELECT node_id, COUNT(*) FROM node_inbounds GROUP BY node_id`)
+	if err != nil {
+		return nil, fmt.Errorf("count inbounds by node: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 // --- Tasks ---
