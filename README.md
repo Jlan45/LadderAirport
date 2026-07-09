@@ -130,6 +130,38 @@ Writes `deploy/dev/{ca,agent}.{crt,key}` via `openssl` (self-signed CA + leaf). 
 - **Network:** Agents must be reachable from the Panel (not from browsers). Bind agent listen addresses carefully.
 - **Lab certs** under `deploy/dev/` are self-signed throwaways — regenerate or replace for any non-dev use.
 
+## Git 仓库
+
+项目目录：`/home/kali/LadderAirport`（已含完整代码与 `.gitignore`）。
+
+整理 / 初始化仓库：
+
+```bash
+cd /home/kali/LadderAirport
+chmod +x scripts/init-git-repo.sh
+./scripts/init-git-repo.sh
+```
+
+若要**清空历史、只保留当前树的一次初始提交**：
+
+```bash
+FRESH=1 ./scripts/init-git-repo.sh
+```
+
+绑定远程并推送：
+
+```bash
+git remote add origin git@github.com:<你的账号>/LadderAirport.git
+git branch -M main
+git push -u origin main
+```
+
+子模块：
+
+```bash
+git submodule update --init --recursive
+```
+
 ## License / upstream
 
 Agent runtime builds on sing-box (see `agent/sing-box` for upstream license). LadderAirport control-plane code is separate monorepo content around that submodule.

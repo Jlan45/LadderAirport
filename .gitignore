@@ -1,13 +1,34 @@
+# Build
 bin/
-/dist/
+dist/
+*.exe
+*.test
+*.out
+
+# Frontend
 node_modules/
+web/dist/
+# panel/web/dist is committed for go:embed offline builds
+
+# Runtime / local data
+data/
 *.db
 *.db-journal
-.idea/
-.vscode/
+.env
 *.pem
 *.key
-.env
-web/dist/
+deploy/dev/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
 .worktrees/
-# panel/web/dist is committed so `go build` works without npm
+
+# Go
+go.work.sum
+# keep go.sum in modules
+
+# Logs
+*.log
