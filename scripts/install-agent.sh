@@ -95,13 +95,15 @@ detect_arch() {
 }
 
 # --- download from GitHub Release ---
+# Progress/status MUST go to stderr; only the binary path is printed on stdout
+# (callers capture via SRC="$(resolve_binary)").
 download_release_binary() {
   need_cmd curl
   local arch asset tag url
   arch="$(detect_arch)"
   asset="ladder-agent-linux-${arch}"
 
-  echo "==> 从 GitHub Release 获取二进制 (${REPO}, ${VERSION}, ${asset})"
+  echo "==> 从 GitHub Release 获取二进制 (${REPO}, ${VERSION}, ${asset})" >&2
 
   if [[ "${VERSION}" == "latest" ]]; then
     local api_json
@@ -118,24 +120,25 @@ download_release_binary() {
 
   [[ -n "${url}" ]] || die "未找到资源 ${asset}。请确认已发布 Release: ${RELEASES_BASE}"
 
-  echo "    tag: ${tag:-?}"
-  echo "    url: ${url}"
+  echo "    tag: ${tag:-?}" >&2
+  echo "    url: ${url}" >&2
 
   TMPDIR_DL="$(mktemp -d /tmp/ladder-agent-dl.XXXXXX)"
   local dest="${TMPDIR_DL}/${asset}"
   curl -fL --retry 3 --retry-delay 1 -o "${dest}" "${url}" || die "下载失败: ${url}"
+  [[ -f "${dest}" ]] || die "下载后文件不存在: ${dest}"
 
   local sums_url
   if [[ -n "${tag}" ]]; then
     sums_url="${RELEASES_BASE}/download/${tag}/SHA256SUMS.txt"
     if curl -fsSL -o "${TMPDIR_DL}/SHA256SUMS.txt" "${sums_url}" 2>/dev/null; then
-      echo "==> 校验 SHA256"
+      echo "==> 校验 SHA256" >&2
       if command -v sha256sum >/dev/null 2>&1; then
-        (cd "${TMPDIR_DL}" && grep " ${asset}\$" SHA256SUMS.txt | sha256sum -c -) \
+        (cd "${TMPDIR_DL}" && grep " ${asset}\$" SHA256SUMS.txt | sha256sum -c -) >&2 \
           || die "SHA256 校验失败"
       fi
     else
-      echo "    (无 SHA256SUMS.txt，跳过校验)"
+      echo "    (无 SHA256SUMS.txt，跳过校验)" >&2
     fi
   fi
 
@@ -147,31 +150,32 @@ download_release_binary() {
       echo "WARNING: 下载文件可能不是 Linux ELF 可执行文件" >&2
     fi
   fi
-  echo "${dest}"
+  # stdout: path only
+  printf '%s\n' "${dest}"
 }
 
 resolve_binary() {
   if [[ -n "${BIN_SRC}" ]]; then
     [[ -f "${BIN_SRC}" ]] || die "文件不存在: ${BIN_SRC}"
-    echo "==> 使用本地文件: ${BIN_SRC}"
-    echo "${BIN_SRC}"
+    echo "==> 使用本地文件: ${BIN_SRC}" >&2
+    printf '%s\n' "${BIN_SRC}"
     return
   fi
 
   if [[ "${FROM}" == "local" ]]; then
     if [[ -n "${ROOT}" && -x "${ROOT}/bin/ladder-agent" ]]; then
-      echo "==> 使用仓库 bin/ladder-agent"
-      echo "${ROOT}/bin/ladder-agent"
+      echo "==> 使用仓库 bin/ladder-agent" >&2
+      printf '%s\n' "${ROOT}/bin/ladder-agent"
       return
     fi
     [[ -n "${ROOT}" ]] || die "LADDER_FROM=local 需要在仓库内执行脚本"
-    echo "==> 本地编译 agent"
+    echo "==> 本地编译 agent" >&2
     if [[ ! -f "${ROOT}/agent/sing-box/go.mod" ]]; then
       git -C "${ROOT}" submodule update --init --recursive
     fi
     need_cmd go
-    (cd "${ROOT}" && make agent)
-    echo "${ROOT}/bin/ladder-agent"
+    (cd "${ROOT}" && make agent) >&2
+    printf '%s\n' "${ROOT}/bin/ladder-agent"
     return
   fi
 
