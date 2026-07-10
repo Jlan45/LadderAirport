@@ -96,12 +96,21 @@ export default function NodeDetail() {
     setBusy(true)
     setError('')
     setMsg('')
+    setTask(null)
     try {
-      await setNodeInbounds(id, Array.from(attachedIds))
-      setMsg('入站配置关联成功')
+      const res = await setNodeInbounds(id, Array.from(attachedIds))
+      // Prefer server deploy message; surface task results if deploy failed partially.
+      const base = res.deploy_message || (res.deployed ? '已关联并下发配置' : '关联已保存')
+      setMsg(base)
+      if (res.apply_task) setTask(res.apply_task)
+      else if (res.start_task) setTask(res.start_task)
+      if (!res.deployed && res.apply_task?.status === 'failed') {
+        setError(base)
+        setMsg('')
+      }
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '关联失败')
+      setError(err instanceof Error ? err.message : '保存失败')
     } finally {
       setBusy(false)
     }
@@ -384,7 +393,10 @@ export default function NodeDetail() {
       </section>
 
       <section className="card">
-        <h2>关联入站配置</h2>
+        <h2>入站配置</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          勾选后保存会<strong>自动下发到节点并启动核心</strong>，无需再点「应用配置」。
+        </p>
         {allInbounds.length === 0 ? (
           <p className="muted">
             当前模板库中无入站配置。请先在 <Link to="/inbounds">入站配置管理</Link> 页面创建。
@@ -407,7 +419,7 @@ export default function NodeDetail() {
           </div>
         )}
         <button type="button" disabled={busy} onClick={() => void onSaveInbounds()}>
-          保存关联关系
+          {busy ? '保存并下发中…' : '保存并下发'}
         </button>
       </section>
 
@@ -416,9 +428,6 @@ export default function NodeDetail() {
         <div className="actions">
           <button type="button" className="btn-secondary" disabled={busy} onClick={() => void onPreview()}>
             预览配置
-          </button>
-          <button type="button" disabled={busy} onClick={() => void runAction('apply')}>
-            应用配置
           </button>
           <button type="button" disabled={busy} onClick={() => void runAction('start')}>
             启动服务

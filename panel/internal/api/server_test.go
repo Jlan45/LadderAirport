@@ -392,12 +392,28 @@ func TestFleetFlow(t *testing.T) {
 		t.Fatalf("missing inbound id: %v", inObj)
 	}
 
-	// Attach inbound to node.
-	resp, _ = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+nodeID+"/inbounds", map[string]any{
+	// Attach inbound to node (auto-deploys apply+start).
+	resp, attach := doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+nodeID+"/inbounds", map[string]any{
 		"inbound_ids": []string{inboundID},
 	})
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("attach status = %d", resp.StatusCode)
+		t.Fatalf("attach status = %d body=%v", resp.StatusCode, attach)
+	}
+	if attach["deployed"] != true {
+		t.Fatalf("expected auto deploy, got %v", attach)
+	}
+	rpc.mu.Lock()
+	calls := append([]string{}, rpc.calls...)
+	rpc.mu.Unlock()
+	foundApply := false
+	for _, c := range calls {
+		if c == "apply" {
+			foundApply = true
+			break
+		}
+	}
+	if !foundApply {
+		t.Fatalf("expected apply on attach, calls=%v", calls)
 	}
 
 	// Preview config.

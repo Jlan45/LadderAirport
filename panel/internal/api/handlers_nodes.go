@@ -309,6 +309,17 @@ func (s *Server) handleListNodeInbounds(w http.ResponseWriter, r *http.Request) 
 
 type setNodeInboundsBody struct {
 	InboundIDs []string `json:"inbound_ids"`
+	// SkipDeploy when true only updates association (tests / advanced). Default: auto apply+start.
+	SkipDeploy bool `json:"skip_deploy"`
+}
+
+// setNodeInboundsResponse is returned after attaching inbounds; deploy is implicit.
+type setNodeInboundsResponse struct {
+	Inbounds      []store.InboundConfig `json:"inbounds"`
+	Deployed      bool                  `json:"deployed"`
+	DeployMessage string                `json:"deploy_message,omitempty"`
+	ApplyTask     *store.Task           `json:"apply_task,omitempty"`
+	StartTask     *store.Task           `json:"start_task,omitempty"`
 }
 
 func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +345,119 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+
+	out := setNodeInboundsResponse{
+		Inbounds: list,
+	}
+	if body.SkipDeploy {
+		out.DeployMessage = "关联已保存（未下发）"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	// Auto deploy: apply config + start runtime so operators never click a separate "应用配置".
+	node, err := s.Store.GetNode(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if strings.TrimSpace(node.Address) == "" {
+		out.DeployMessage = "关联已保存；节点地址未就绪，上线后由 bootstrap 同步"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	if len(body.InboundIDs) == 0 {
+		out.DeployMessage = "关联已清空；未向节点下发（无入站配置）"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	if s.Runner == nil {
+		out.DeployMessage = "关联已保存；runner 未配置，未下发"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	applyTask, startTask, depMsg := s.deployNodeInbounds(r.Context(), id)
+	out.ApplyTask = applyTask
+	out.StartTask = startTask
+	out.DeployMessage = depMsg
+	if applyTask != nil && applyTask.Status == "success" {
+		out.Deployed = true
+	}
+	// Partial success (apply ok, start fail) still counts as config pushed.
+	if applyTask != nil {
+		for _, res := range applyTask.Results {
+			if res.OK {
+				out.Deployed = true
+				break
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// deployNodeInbounds runs apply then start for one node; returns tasks and a user-facing message.
+func (s *Server) deployNodeInbounds(ctx context.Context, nodeID string) (applyTask, startTask *store.Task, msg string) {
+	applyTask = &store.Task{
+		Type:    "apply",
+		Status:  "pending",
+		NodeIDs: []string{nodeID},
+	}
+	if err := s.Store.CreateTask(applyTask); err != nil {
+		return nil, nil, "关联已保存；创建下发任务失败: " + err.Error()
+	}
+	if err := s.Runner.RunTask(ctx, applyTask.ID); err != nil {
+		t, _ := s.Store.GetTask(applyTask.ID)
+		return t, nil, "关联已保存；下发配置失败: " + err.Error()
+	}
+	applyTask, _ = s.Store.GetTask(applyTask.ID)
+
+	startTask = &store.Task{
+		Type:    "start",
+		Status:  "pending",
+		NodeIDs: []string{nodeID},
+	}
+	if err := s.Store.CreateTask(startTask); err != nil {
+		return applyTask, nil, deployMsgFromTasks(applyTask, nil) + "；启动任务创建失败: " + err.Error()
+	}
+	if err := s.Runner.RunTask(ctx, startTask.ID); err != nil {
+		t, _ := s.Store.GetTask(startTask.ID)
+		return applyTask, t, deployMsgFromTasks(applyTask, t) + "；启动失败: " + err.Error()
+	}
+	startTask, _ = s.Store.GetTask(startTask.ID)
+	return applyTask, startTask, deployMsgFromTasks(applyTask, startTask)
+}
+
+func deployMsgFromTasks(applyTask, startTask *store.Task) string {
+	applyOK := applyTask != nil && applyTask.Status == "success"
+	startOK := startTask != nil && startTask.Status == "success"
+	if applyOK && startOK {
+		return "已关联并下发配置，核心已启动"
+	}
+	// Prefer concrete agent messages
+	var parts []string
+	if applyTask != nil {
+		for _, res := range applyTask.Results {
+			if res.OK {
+				parts = append(parts, "配置已下发")
+			} else if res.Message != "" {
+				parts = append(parts, "下发: "+res.Message)
+			}
+		}
+	}
+	if startTask != nil {
+		for _, res := range startTask.Results {
+			if res.OK {
+				parts = append(parts, "核心已启动")
+			} else if res.Message != "" {
+				parts = append(parts, "启动: "+res.Message)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return "关联已保存；下发结果未知"
+	}
+	return "关联已保存；" + strings.Join(parts, "；")
 }
 
 func (s *Server) handleNodePreview(w http.ResponseWriter, r *http.Request) {

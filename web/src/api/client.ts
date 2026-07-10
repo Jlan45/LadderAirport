@@ -276,11 +276,24 @@ export function listNodeInbounds(id: string): Promise<InboundConfig[]> {
   return request('GET', `/nodes/${id}/inbounds`)
 }
 
+export interface SetNodeInboundsResult {
+  inbounds: InboundConfig[]
+  deployed: boolean
+  deploy_message?: string
+  apply_task?: Task
+  start_task?: Task
+}
+
+/** Attach inbounds and auto-apply+start on the agent (deploy is implicit). */
 export function setNodeInbounds(
   id: string,
   inbound_ids: string[],
-): Promise<InboundConfig[]> {
-  return request('PUT', `/nodes/${id}/inbounds`, { inbound_ids })
+  opts?: { skip_deploy?: boolean },
+): Promise<SetNodeInboundsResult> {
+  return request('PUT', `/nodes/${id}/inbounds`, {
+    inbound_ids,
+    skip_deploy: opts?.skip_deploy ?? false,
+  })
 }
 
 export function previewNodeConfig(id: string): Promise<unknown> {
