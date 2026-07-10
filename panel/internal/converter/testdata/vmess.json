@@ -1,0 +1,35 @@
+{
+  "log": {
+    "level": "info"
+  },
+  "inbounds": [
+    {
+      "type": "vmess",
+      "tag": "in-vmess-main",
+      "listen": "0.0.0.0",
+      "listen_port": 10086,
+      "users": [
+        {
+          "name": "default",
+          "uuid": "bf000d23-0752-40b4-affe-68f7707a9661",
+          "alterId": 0
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/certs/fullchain.pem",
+        "key_path": "/etc/certs/privkey.pem",
+        "server_name": "vmess.example.com"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "final": "direct"
+  }
+}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing/common/bufio"
-	satomic "github.com/sagernet/sing/common/atomic"
 	N "github.com/sagernet/sing/common/network"
 )
 
@@ -19,16 +18,13 @@ import (
 //   - Read from client  → uplink
 //   - Write to client   → downlink
 type trafficTracker struct {
-	uplink   *satomic.Int64
-	downlink *satomic.Int64
+	uplink   atomic.Int64
+	downlink atomic.Int64
 	active   atomic.Int64
 }
 
 func newTrafficTracker() *trafficTracker {
-	return &trafficTracker{
-		uplink:   new(satomic.Int64),
-		downlink: new(satomic.Int64),
-	}
+	return &trafficTracker{}
 }
 
 func (t *trafficTracker) Snapshot() (connections, uplink, downlink int64) {
@@ -43,7 +39,7 @@ func (t *trafficTracker) RoutedConnection(
 	_ adapter.Outbound,
 ) net.Conn {
 	t.active.Add(1)
-	counted := bufio.NewInt64CounterConn(conn, []*satomic.Int64{t.uplink}, []*satomic.Int64{t.downlink})
+	counted := bufio.NewInt64CounterConn(conn, []*atomic.Int64{&t.uplink}, []*atomic.Int64{&t.downlink})
 	return &trackedConn{Conn: counted, t: t}
 }
 
@@ -55,7 +51,14 @@ func (t *trafficTracker) RoutedPacketConnection(
 	_ adapter.Outbound,
 ) N.PacketConn {
 	t.active.Add(1)
-	counted := bufio.NewInt64CounterPacketConn(conn, []*satomic.Int64{t.uplink}, []*satomic.Int64{t.downlink})
+	// sing ≥0.7: separate byte counters and packet counters; we only track bytes.
+	counted := bufio.NewInt64CounterPacketConn(
+		conn,
+		[]*atomic.Int64{&t.uplink},
+		nil,
+		[]*atomic.Int64{&t.downlink},
+		nil,
+	)
 	return &trackedPacketConn{PacketConn: counted, t: t}
 }
 

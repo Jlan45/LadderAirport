@@ -326,8 +326,17 @@ func TestFleetFlow(t *testing.T) {
 		t.Fatalf("templates status = %d", resp.StatusCode)
 	}
 	arr, _ := tmpl["_array"].([]any)
-	if len(arr) < 4 {
-		t.Fatalf("expected >=4 templates, got %v", tmpl)
+	if len(arr) < 7 {
+		t.Fatalf("expected >=7 templates, got %v", tmpl)
+	}
+
+	// Unknown protocol rejected.
+	resp, badIn := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
+		"name": "nope", "protocol": "not-a-protocol", "enabled": true,
+		"params": map[string]any{"port": 1},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown protocol status = %d body=%v", resp.StatusCode, badIn)
 	}
 
 	// Probe.

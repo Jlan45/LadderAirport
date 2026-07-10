@@ -84,6 +84,64 @@ func TestConvertHysteria2Golden(t *testing.T) {
 	assertGolden(t, []store.InboundConfig{in}, "hysteria2.json")
 }
 
+func TestConvertTUICGolden(t *testing.T) {
+	in := store.InboundConfig{
+		ID:       "tuic-001",
+		Name:     "tuic-main",
+		Protocol: "tuic",
+		Enabled:  true,
+		Params: map[string]any{
+			"listen":             "0.0.0.0",
+			"port":               float64(8443),
+			"uuid":               "2dd61d93-75d8-4da4-ac0e-6aece7eac365",
+			"password":           "tuic-pass",
+			"congestion_control": "bbr",
+			"server_name":        "tuic.example.com",
+			"tls_cert_path":      "/etc/certs/fullchain.pem",
+			"tls_key_path":       "/etc/certs/privkey.pem",
+		},
+	}
+	assertGolden(t, []store.InboundConfig{in}, "tuic.json")
+}
+
+func TestConvertAnyTLSGolden(t *testing.T) {
+	in := store.InboundConfig{
+		ID:       "any-001",
+		Name:     "anytls-main",
+		Protocol: "anytls",
+		Enabled:  true,
+		Params: map[string]any{
+			"listen":        "0.0.0.0",
+			"port":          float64(443),
+			"password":      "anytls-pass",
+			"server_name":   "anytls.example.com",
+			"tls_cert_path": "/etc/certs/fullchain.pem",
+			"tls_key_path":  "/etc/certs/privkey.pem",
+		},
+	}
+	assertGolden(t, []store.InboundConfig{in}, "anytls.json")
+}
+
+func TestConvertVMessGolden(t *testing.T) {
+	in := store.InboundConfig{
+		ID:       "vm-001",
+		Name:     "vmess-main",
+		Protocol: "vmess",
+		Enabled:  true,
+		Params: map[string]any{
+			"listen":        "0.0.0.0",
+			"port":          float64(10086),
+			"uuid":          "bf000d23-0752-40b4-affe-68f7707a9661",
+			"alter_id":      float64(0),
+			"tls_mode":      "tls",
+			"server_name":   "vmess.example.com",
+			"tls_cert_path": "/etc/certs/fullchain.pem",
+			"tls_key_path":  "/etc/certs/privkey.pem",
+		},
+	}
+	assertGolden(t, []store.InboundConfig{in}, "vmess.json")
+}
+
 func TestConvertEmptyError(t *testing.T) {
 	if _, err := Convert(nil); err == nil {
 		t.Fatal("expected error for empty list")

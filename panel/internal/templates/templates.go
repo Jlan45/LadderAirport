@@ -100,6 +100,62 @@ var builtins = []Template{
 			{Name: "down_mbps", Label: "Down Mbps", Type: "int", Required: false},
 		},
 	},
+	{
+		ID:       "inbound.tuic.v1",
+		Protocol: "tuic",
+		Name:     "TUIC",
+		Fields: []Field{
+			{Name: "listen", Label: "Listen", Type: "string", Required: false, Default: "0.0.0.0"},
+			{Name: "port", Label: "Port", Type: "int", Required: true},
+			{
+				Name:        "congestion_control",
+				Label:       "Congestion Control",
+				Type:        "select",
+				Required:    false,
+				Default:     "cubic",
+				Options:     []string{"cubic", "new_reno", "bbr"},
+				Description: "QUIC congestion control (UUID/password/TLS auto-generated)",
+			},
+			{Name: "server_name", Label: "Server Name (SNI)", Type: "string", Required: false, Description: "Optional TLS SNI for clients"},
+		},
+	},
+	{
+		ID:       "inbound.anytls.v1",
+		Protocol: "anytls",
+		Name:     "AnyTLS",
+		Fields: []Field{
+			{Name: "listen", Label: "Listen", Type: "string", Required: false, Default: "0.0.0.0"},
+			{Name: "port", Label: "Port", Type: "int", Required: true},
+			{Name: "server_name", Label: "Server Name (SNI)", Type: "string", Required: false, Description: "Optional TLS SNI for clients"},
+		},
+	},
+	{
+		ID:       "inbound.vmess.v1",
+		Protocol: "vmess",
+		Name:     "VMess",
+		Fields: []Field{
+			{Name: "listen", Label: "Listen", Type: "string", Required: false, Default: "0.0.0.0"},
+			{Name: "port", Label: "Port", Type: "int", Required: true},
+			{
+				Name:        "alter_id",
+				Label:       "Alter ID",
+				Type:        "int",
+				Required:    false,
+				Default:     0,
+				Description: "0 = AEAD only (recommended); >0 enables legacy",
+			},
+			{
+				Name:        "tls_mode",
+				Label:       "TLS Mode",
+				Type:        "select",
+				Required:    false,
+				Default:     "none",
+				Options:     []string{"none", "tls"},
+				Description: "UUID auto-generated; TLS material auto-generated when tls",
+			},
+			{Name: "server_name", Label: "Server Name (SNI)", Type: "string", Required: false},
+		},
+	},
 }
 
 // List returns all built-in protocol templates.

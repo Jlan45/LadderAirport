@@ -31,6 +31,10 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name and protocol required")
 		return
 	}
+	if _, ok := templates.Get(in.Protocol); !ok {
+		writeError(w, http.StatusBadRequest, "unknown protocol")
+		return
+	}
 	// Auto-generate passwords, UUIDs, TLS PEMs, Reality keys when omitted.
 	filled, err := inboundfill.Fill(in.Protocol, in.Params)
 	if err != nil {
@@ -72,6 +76,10 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Protocol == "" {
 		body.Protocol = existing.Protocol
+	}
+	if _, ok := templates.Get(body.Protocol); !ok {
+		writeError(w, http.StatusBadRequest, "unknown protocol")
+		return
 	}
 	if body.Params == nil {
 		body.Params = existing.Params

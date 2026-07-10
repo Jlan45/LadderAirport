@@ -2,10 +2,10 @@ package templates
 
 import "testing"
 
-func TestListReturnsFour(t *testing.T) {
+func TestListReturnsSeven(t *testing.T) {
 	list := List()
-	if len(list) != 4 {
-		t.Fatalf("List() len = %d, want 4", len(list))
+	if len(list) != 7 {
+		t.Fatalf("List() len = %d, want 7", len(list))
 	}
 	// Ensure copy is independent
 	list[0].Protocol = "mutated"
@@ -20,6 +20,9 @@ func TestGetEachProtocol(t *testing.T) {
 		"trojan":      "inbound.trojan.v1",
 		"vless":       "inbound.vless.v1",
 		"hysteria2":   "inbound.hysteria2.v1",
+		"tuic":        "inbound.tuic.v1",
+		"anytls":      "inbound.anytls.v1",
+		"vmess":       "inbound.vmess.v1",
 	}
 	for proto, id := range want {
 		tpl, ok := Get(proto)

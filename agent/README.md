@@ -7,14 +7,15 @@ In-process **sing-box 二开** agent: gRPC `AgentControl` + `BoxRuntime` lifecyc
 | Item | Value |
 |------|--------|
 | Upstream | [SagerNet/sing-box](https://github.com/SagerNet/sing-box) |
-| Pinned tag | **v1.11.15** |
+| Pinned tag | **v1.12.22** |
 | Submodule path | `agent/sing-box` |
 | Go module | `github.com/sagernet/sing-box` |
+| Default build tags | `with_quic,with_utls` |
 
 `agent/go.mod` uses:
 
 ```go
-require github.com/sagernet/sing-box v1.11.15
+require github.com/sagernet/sing-box v1.12.22
 replace github.com/sagernet/sing-box => ./sing-box
 ```
 
@@ -24,13 +25,13 @@ replace github.com/sagernet/sing-box => ./sing-box
 
 ```bash
 git submodule update --init --recursive
-cd agent/sing-box && git checkout v1.11.15
+cd agent/sing-box && git checkout v1.12.22
 ```
 
 If `git submodule add` fails (network), shallow clone then wire replace:
 
 ```bash
-git clone --depth 1 --branch v1.11.15 https://github.com/SagerNet/sing-box.git agent/sing-box
+git clone --depth 1 --branch v1.12.22 https://github.com/SagerNet/sing-box.git agent/sing-box
 ```
 
 ## Runtime
@@ -41,37 +42,54 @@ Log line on start: `runtime=box agent_version=... singbox_version=...`.
 
 ## Build
 
+From repo root (recommended — applies default tags + version ldflags):
+
 ```bash
-# from repo root
-make agent
-# or
-cd agent && go build -o ../bin/ladder-agent ./cmd/ladder-agent
+make agent   # → bin/ladder-agent
 ```
 
-Optional full feature tags (match upstream Makefile; not required for lab):
+Or:
+
+```bash
+cd agent
+go build -tags "with_quic,with_utls" \
+  -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=1.12.22'" \
+  -o ../bin/ladder-agent ./cmd/ladder-agent
+```
+
+Optional full feature tags (match upstream Makefile extras):
 
 ```bash
 cd agent
 go build -tags "with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api" \
-  -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=1.11.15'" \
+  -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=1.12.22'" \
   -o ../bin/ladder-agent ./cmd/ladder-agent
 ```
 
-Default builds use stub registries for QUIC/WireGuard/Clash API (`!with_*` tags). Protocol support for shadowsocks/vmess/trojan/vless/socks/http/mixed/direct works without extra tags.
+### Protocol build notes
 
-### Tests
+| Protocols | Tags / pin |
+|-----------|------------|
+| Shadowsocks, Trojan, VLESS, VMess | default registries |
+| TUIC, Hysteria2 | **`with_quic`** (default in `make agent` / CI) |
+| AnyTLS | sing-box **≥ 1.12** (pin v1.12.22) |
+| Reality client fingerprint paths | **`with_utls`** (default) |
+
+## Tests
 
 ```bash
-cd agent && go test ./...
+make test
+# or
+cd agent && go test -tags "with_quic,with_utls" ./... -timeout 120s
 # faster parse-only smoke (skips real box Start):
-cd agent && go test ./internal/control/ -short
+cd agent && go test -tags "with_quic,with_utls" ./internal/control/ -short
 ```
 
 ## BoxRuntime behaviour
 
 `Apply` algorithm (keep-old-on-failure):
 
-1. Parse JSON into `option.Options` with inbound/outbound/endpoint registries.
+1. Parse JSON into `option.Options` with inbound/outbound/endpoint/DNS/service registries.
 2. Create a **new** box instance (old still running).
 3. `Start` new; on error close new, set `LastError`, return error (**old kept**).
 4. On success close old, swap, update hash / `startedAt`, write `dataDir/current.json` when set.
@@ -89,24 +107,9 @@ cd agent && go test ./internal/control/ -short
 
 ## Upgrade policy
 
-1. Bump submodule to a new **stable** tag (`v1.11.x` or `v1.12.x` LTS-ish).
-2. Rebuild agent; fix compile breaks only inside `internal/control/runtime_box.go` (and README pin table).
-3. Run `go test ./...` and a manual Apply of a minimal direct config.
-4. Update this README pin + `go.mod` require comment in the **same commit**.
-5. Prefer minor bumps within the same major line; re-read `box.New` / `box.Context` signatures on major jumps (registries grew in later lines).
+1. Bump submodule to a new **stable** tag (`v1.12.x` or `v1.13.x`).
+2. Update `agent/go.mod` require version comment, `SingboxVersion` fallback, Makefile/`AGENT_LDFLAGS`, CI env.
+3. Fix glue under `agent/internal` only if APIs break (do not edit upstream tree under `agent/sing-box/` unless deliberately forking).
+4. Run `make test` and a short Apply/Start smoke.
 
 Do not edit upstream files under `agent/sing-box/` unless deliberately forking; keep 二开 glue in `agent/internal` and `agent/cmd`.
-
-## Run (lab)
-
-```bash
-./bin/ladder-agent -listen 127.0.0.1:50051 -token test -data-dir /tmp/ladder-agent
-```
-
-TLS (optional):
-
-```bash
-openssl req -x509 -newkey rsa:2048 -keyout /tmp/agent.key -out /tmp/agent.crt -days 1 -nodes -subj /CN=localhost
-./bin/ladder-agent -listen 127.0.0.1:50051 -token test \
-  -tls-cert /tmp/agent.crt -tls-key /tmp/agent.key -data-dir /tmp/ladder-agent
-```

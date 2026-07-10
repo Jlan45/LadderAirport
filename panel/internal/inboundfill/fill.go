@@ -43,6 +43,12 @@ func Fill(protocol string, params map[string]any) (map[string]any, error) {
 		return fillVLESS(params)
 	case "hysteria2":
 		return fillHysteria2(params)
+	case "tuic":
+		return fillTUIC(params)
+	case "anytls":
+		return fillAnyTLS(params)
+	case "vmess":
+		return fillVMess(params)
 	default:
 		return params, nil
 	}
@@ -109,6 +115,65 @@ func fillVLESS(params map[string]any) (map[string]any, error) {
 		}
 	case "none":
 		// no secrets
+	default:
+		return nil, fmt.Errorf("invalid tls_mode %q", mode)
+	}
+	return params, nil
+}
+
+func fillTUIC(params map[string]any) (map[string]any, error) {
+	if empty(params, "listen") {
+		params["listen"] = "0.0.0.0"
+	}
+	if empty(params, "uuid") {
+		params["uuid"] = uuid.NewString()
+	}
+	if err := ensurePassword(params); err != nil {
+		return nil, err
+	}
+	if empty(params, "congestion_control") {
+		params["congestion_control"] = "cubic"
+	}
+	if err := ensureTLSMaterial(params); err != nil {
+		return nil, err
+	}
+	return params, nil
+}
+
+func fillAnyTLS(params map[string]any) (map[string]any, error) {
+	if empty(params, "listen") {
+		params["listen"] = "0.0.0.0"
+	}
+	if err := ensurePassword(params); err != nil {
+		return nil, err
+	}
+	if err := ensureTLSMaterial(params); err != nil {
+		return nil, err
+	}
+	return params, nil
+}
+
+func fillVMess(params map[string]any) (map[string]any, error) {
+	if empty(params, "listen") {
+		params["listen"] = "0.0.0.0"
+	}
+	if empty(params, "uuid") {
+		params["uuid"] = uuid.NewString()
+	}
+	if empty(params, "alter_id") {
+		params["alter_id"] = 0
+	}
+	if empty(params, "tls_mode") {
+		params["tls_mode"] = "none"
+	}
+	mode := str(params, "tls_mode")
+	switch mode {
+	case "tls":
+		if err := ensureTLSMaterial(params); err != nil {
+			return nil, err
+		}
+	case "none":
+		// no TLS material
 	default:
 		return nil, fmt.Errorf("invalid tls_mode %q", mode)
 	}

@@ -12,6 +12,8 @@ permissions:
 env:
   GOTOOLCHAIN: auto
   CGO_ENABLED: "0"
+  AGENT_TAGS: with_quic,with_utls
+  AGENT_LDFLAGS: -X 'github.com/sagernet/sing-box/constant.Version=1.12.22'
 
 jobs:
   release:
@@ -42,7 +44,8 @@ jobs:
             echo "==> $GOOS/$GOARCH"
             (cd panel && GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags="-s -w" \
               -o ../dist/panel-${GOOS}-${GOARCH} ./cmd/panel)
-            (cd agent && GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags="-s -w" \
+            (cd agent && GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -tags "${AGENT_TAGS}" \
+              -ldflags="-s -w ${AGENT_LDFLAGS}" \
               -o ../dist/ladder-agent-${GOOS}-${GOARCH} ./cmd/ladder-agent)
           done
           cd dist

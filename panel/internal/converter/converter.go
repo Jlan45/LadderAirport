@@ -77,6 +77,12 @@ func mapInbound(in store.InboundConfig) (map[string]any, error) {
 		return mapVLESS(in)
 	case "hysteria2":
 		return mapHysteria2(in)
+	case "tuic":
+		return mapTUIC(in)
+	case "anytls":
+		return mapAnyTLS(in)
+	case "vmess":
+		return mapVMess(in)
 	default:
 		return nil, fmt.Errorf("unsupported protocol %q", in.Protocol)
 	}
@@ -267,6 +273,158 @@ func mapHysteria2(in store.InboundConfig) (map[string]any, error) {
 		}
 	}
 	return out, nil
+}
+
+func mapTUIC(in store.InboundConfig) (map[string]any, error) {
+	listen, port, err := requireListenPort(in.Params)
+	if err != nil {
+		return nil, err
+	}
+	uid, err := requireString(in.Params, "uuid")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(uid); err != nil {
+		return nil, fmt.Errorf("invalid UUID: %w", err)
+	}
+	password, err := requireString(in.Params, "password")
+	if err != nil {
+		return nil, err
+	}
+	tlsBlock, err := buildTLS(in.Params, true)
+	if err != nil {
+		return nil, err
+	}
+	if sn := optionalString(in.Params, "server_name"); sn != "" {
+		tlsBlock["server_name"] = sn
+	}
+	out := map[string]any{
+		"type":        "tuic",
+		"tag":         inboundTag(in),
+		"listen":      listen,
+		"listen_port": port,
+		"users": []map[string]any{
+			{"name": "default", "uuid": uid, "password": password},
+		},
+		"tls": tlsBlock,
+	}
+	if cc := optionalString(in.Params, "congestion_control"); cc != "" {
+		switch cc {
+		case "cubic", "new_reno", "bbr":
+			out["congestion_control"] = cc
+		default:
+			return nil, fmt.Errorf("invalid congestion_control %q", cc)
+		}
+	}
+	if v, ok := in.Params["zero_rtt_handshake"]; ok && v != nil {
+		if b, ok := asBool(v); ok {
+			out["zero_rtt_handshake"] = b
+		}
+	}
+	return out, nil
+}
+
+func mapAnyTLS(in store.InboundConfig) (map[string]any, error) {
+	listen, port, err := requireListenPort(in.Params)
+	if err != nil {
+		return nil, err
+	}
+	password, err := requireString(in.Params, "password")
+	if err != nil {
+		return nil, err
+	}
+	tlsBlock, err := buildTLS(in.Params, true)
+	if err != nil {
+		return nil, err
+	}
+	if sn := optionalString(in.Params, "server_name"); sn != "" {
+		tlsBlock["server_name"] = sn
+	}
+	return map[string]any{
+		"type":        "anytls",
+		"tag":         inboundTag(in),
+		"listen":      listen,
+		"listen_port": port,
+		"users": []map[string]any{
+			{"name": "default", "password": password},
+		},
+		"tls": tlsBlock,
+	}, nil
+}
+
+func mapVMess(in store.InboundConfig) (map[string]any, error) {
+	listen, port, err := requireListenPort(in.Params)
+	if err != nil {
+		return nil, err
+	}
+	uid, err := requireString(in.Params, "uuid")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := uuid.Parse(uid); err != nil {
+		return nil, fmt.Errorf("invalid UUID: %w", err)
+	}
+	alterID := 0
+	if v, ok := in.Params["alter_id"]; ok && v != nil && fmt.Sprint(v) != "" {
+		n, err := asInt(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid alter_id: %w", err)
+		}
+		if n < 0 {
+			return nil, fmt.Errorf("alter_id must be >= 0")
+		}
+		alterID = n
+	}
+	user := map[string]any{
+		"name":    "default",
+		"uuid":    uid,
+		"alterId": alterID,
+	}
+	out := map[string]any{
+		"type":        "vmess",
+		"tag":         inboundTag(in),
+		"listen":      listen,
+		"listen_port": port,
+		"users":       []map[string]any{user},
+	}
+	tlsMode := optionalString(in.Params, "tls_mode")
+	if tlsMode == "" {
+		tlsMode = "none"
+	}
+	switch tlsMode {
+	case "none":
+	case "tls":
+		tls, err := buildTLS(in.Params, true)
+		if err != nil {
+			return nil, err
+		}
+		if sn := optionalString(in.Params, "server_name"); sn != "" {
+			tls["server_name"] = sn
+		}
+		out["tls"] = tls
+	default:
+		return nil, fmt.Errorf("invalid tls_mode %q", tlsMode)
+	}
+	return out, nil
+}
+
+func asBool(v any) (bool, bool) {
+	switch b := v.(type) {
+	case bool:
+		return b, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(b)) {
+		case "true", "1", "yes":
+			return true, true
+		case "false", "0", "no":
+			return false, true
+		}
+	case float64:
+		return b != 0, true
+	case int:
+		return b != 0, true
+	}
+	return false, false
 }
 
 // buildTLS builds a sing-box tls object from PEM (preferred) or file paths.

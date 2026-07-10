@@ -1,0 +1,36 @@
+{
+  "log": {
+    "level": "info"
+  },
+  "inbounds": [
+    {
+      "type": "tuic",
+      "tag": "in-tuic-main",
+      "listen": "0.0.0.0",
+      "listen_port": 8443,
+      "users": [
+        {
+          "name": "default",
+          "uuid": "2dd61d93-75d8-4da4-ac0e-6aece7eac365",
+          "password": "tuic-pass"
+        }
+      ],
+      "congestion_control": "bbr",
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/certs/fullchain.pem",
+        "key_path": "/etc/certs/privkey.pem",
+        "server_name": "tuic.example.com"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "final": "direct"
+  }
+}

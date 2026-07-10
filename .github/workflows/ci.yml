@@ -14,6 +14,8 @@ concurrency:
 env:
   GOTOOLCHAIN: auto
   CGO_ENABLED: "0"
+  AGENT_TAGS: with_quic,with_utls
+  AGENT_LDFLAGS: -X 'github.com/sagernet/sing-box/constant.Version=1.12.22'
 
 jobs:
   test:
@@ -42,7 +44,7 @@ jobs:
         run: cd panel && go test ./...
 
       - name: Test agent
-        run: cd agent && go test ./... -timeout 120s
+        run: cd agent && go test -tags "${AGENT_TAGS}" ./... -timeout 120s
 
   build:
     name: Build
@@ -87,7 +89,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           cd agent
-          go build -trimpath -ldflags="-s -w" -o ../dist/ladder-agent-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/ladder-agent
+          go build -trimpath -tags "${AGENT_TAGS}" \
+            -ldflags="-s -w ${AGENT_LDFLAGS}" \
+            -o ../dist/ladder-agent-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/ladder-agent
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -66,3 +66,46 @@ func TestCollectEndpoints(t *testing.T) {
 		t.Fatalf("%+v", eps[0])
 	}
 }
+
+func TestRenderNewProtocols(t *testing.T) {
+	eps := []ProxyEndpoint{
+		{
+			Name: "n-tuic", Server: "1.1.1.1", Port: 8443, Protocol: "tuic",
+			Params: map[string]any{
+				"uuid": "2dd61d93-75d8-4da4-ac0e-6aece7eac365", "password": "p",
+				"congestion_control": "bbr", "server_name": "t.example.com",
+			},
+		},
+		{
+			Name: "n-anytls", Server: "1.1.1.1", Port: 443, Protocol: "anytls",
+			Params: map[string]any{"password": "p", "server_name": "a.example.com"},
+		},
+		{
+			Name: "n-vmess", Server: "1.1.1.1", Port: 10086, Protocol: "vmess",
+			Params: map[string]any{
+				"uuid": "bf000d23-0752-40b4-affe-68f7707a9661",
+				"alter_id": float64(0), "tls_mode": "tls", "server_name": "v.example.com",
+			},
+		},
+	}
+	clash, err := RenderClash(eps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := string(clash)
+	for _, want := range []string{"type: tuic", "type: anytls", "type: vmess", "congestion-controller: bbr"} {
+		if !strings.Contains(cs, want) {
+			t.Fatalf("clash missing %q in:\n%s", want, cs)
+		}
+	}
+	sb, err := RenderSingbox(eps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ss := string(sb)
+	for _, want := range []string{`"type": "tuic"`, `"type": "anytls"`, `"type": "vmess"`, `"congestion_control": "bbr"`} {
+		if !strings.Contains(ss, want) {
+			t.Fatalf("singbox missing %q in:\n%s", want, ss)
+		}
+	}
+}

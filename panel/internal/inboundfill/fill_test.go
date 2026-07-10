@@ -76,6 +76,53 @@ func TestFillHysteria2(t *testing.T) {
 	}
 }
 
+func TestFillTUIC(t *testing.T) {
+	p, err := inboundfill.Fill("tuic", map[string]any{"port": 8443})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uuid.Parse(str(p, "uuid")); err != nil {
+		t.Fatalf("uuid: %v", err)
+	}
+	if str(p, "password") == "" || str(p, "tls_cert_pem") == "" {
+		t.Fatalf("%+v", p)
+	}
+	if p["congestion_control"] != "cubic" {
+		t.Fatalf("congestion_control = %v", p["congestion_control"])
+	}
+}
+
+func TestFillAnyTLS(t *testing.T) {
+	p, err := inboundfill.Fill("anytls", map[string]any{"port": 443})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str(p, "password") == "" || str(p, "tls_cert_pem") == "" {
+		t.Fatalf("%+v", p)
+	}
+}
+
+func TestFillVMess(t *testing.T) {
+	p, err := inboundfill.Fill("vmess", map[string]any{"port": 10086})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uuid.Parse(str(p, "uuid")); err != nil {
+		t.Fatalf("uuid: %v", err)
+	}
+	if p["tls_mode"] != "none" {
+		t.Fatalf("tls_mode = %v", p["tls_mode"])
+	}
+	// TLS mode should generate certs
+	p2, err := inboundfill.Fill("vmess", map[string]any{"port": 10086, "tls_mode": "tls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if str(p2, "tls_cert_pem") == "" {
+		t.Fatalf("expected tls material: %+v", p2)
+	}
+}
+
 func str(m map[string]any, k string) string {
 	v, _ := m[k].(string)
 	return v

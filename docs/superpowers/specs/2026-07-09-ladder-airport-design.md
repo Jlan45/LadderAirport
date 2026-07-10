@@ -87,7 +87,7 @@ Browser --HTTPS--> Panel (Go + embed SPA + SQLite)
 | Entity | Purpose |
 |--------|---------|
 | `Node` | `id`, `name`, `address`, `grpc_port`, optional per-node `token`, `labels` (JSON), TLS client options, cached `status`, `last_seen`, last `config_hash` |
-| `InboundConfig` | `id`, `name`, `protocol` (`shadowsocks` \| `trojan` \| `vless` \| `hysteria2`), `params` (JSON), `enabled`, timestamps |
+| `InboundConfig` | `id`, `name`, `protocol` (`shadowsocks` \| `trojan` \| `vless` \| `hysteria2` \| `tuic` \| `anytls` \| `vmess`), `params` (JSON), `enabled`, timestamps |
 | `NodeInbound` | M2M: which inbound configs apply to which nodes |
 | `ConfigSnapshot` | Generated full JSON, hash, `node_id`, `created_at`, optional task id |
 | `Task` | Batch job: type (`apply`/`start`/`stop`), targets, overall status, per-node results JSON |
@@ -112,8 +112,12 @@ Templates are **code/static schema**, not user-editable schema documents.
 | Trojan | `inbound.trojan.v1` | listen, port, password, TLS cert/key or paths, optional fallback |
 | VLESS | `inbound.vless.v1` | listen, port, uuid, optional flow; TLS mode **or Reality** (public_key, short_id, server_names, handshake server, etc.) |
 | Hysteria2 | `inbound.hysteria2.v1` | listen, port, password/users, TLS, optional bandwidth fields |
+| TUIC | `inbound.tuic.v1` | listen, port, uuid, password, congestion_control, TLS (QUIC; Agent needs `with_quic`) |
+| AnyTLS | `inbound.anytls.v1` | listen, port, password, TLS (requires sing-box ≥ 1.12) |
+| VMess | `inbound.vmess.v1` | listen, port, uuid, alter_id, tls_mode none/tls |
 
 - Reality is a **TLS mode on VLESS**, not a separate protocol row.
+- Protocol expansion detail: [2026-07-10-inbound-protocols-tuic-anytls-vmess-design.md](./2026-07-10-inbound-protocols-tuic-anytls-vmess-design.md).
 - Frontend: `GET /api/v1/templates` → JSON Schema-like field defs → dynamic form.
 - Backend converter maps `params` + `template_id`/protocol version → sing-box inbound object(s).
 
@@ -235,7 +239,7 @@ gRPC Server
 
 | Layer | Coverage |
 |-------|----------|
-| Converter unit tests | Four protocols → JSON golden files; conflict/invalid cases |
+| Converter unit tests | Seven protocols → JSON golden files; conflict/invalid cases |
 | Store unit tests | SQLite CRUD, M2M, task state machine |
 | gRPC tests | Auth interceptor; Apply/Stop against mock Runtime |
 | HTTP API tests | httptest + temp SQLite |

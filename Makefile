@@ -1,5 +1,9 @@
 .PHONY: proto panel agent web test
 
+# Default agent tags: QUIC (TUIC/Hy2) + uTLS (Reality/AnyTLS client fingerprints).
+AGENT_TAGS ?= with_quic,with_utls
+AGENT_LDFLAGS ?= -X 'github.com/sagernet/sing-box/constant.Version=1.12.22'
+
 proto:
 	protoc -I proto \
 	  --go_out=proto/gen/go --go_opt=paths=source_relative \
@@ -18,9 +22,9 @@ panel: web
 	cd panel && go build -o ../bin/panel ./cmd/panel
 
 agent:
-	cd agent && go build -o ../bin/ladder-agent ./cmd/ladder-agent
+	cd agent && go build -tags "$(AGENT_TAGS)" -ldflags "$(AGENT_LDFLAGS)" -o ../bin/ladder-agent ./cmd/ladder-agent
 
 test:
 	cd pkg && go test ./...
 	cd panel && go test ./...
-	cd agent && go test ./...
+	cd agent && go test -tags "$(AGENT_TAGS)" ./... -timeout 120s

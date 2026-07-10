@@ -1,0 +1,34 @@
+{
+  "log": {
+    "level": "info"
+  },
+  "inbounds": [
+    {
+      "type": "anytls",
+      "tag": "in-anytls-main",
+      "listen": "0.0.0.0",
+      "listen_port": 443,
+      "users": [
+        {
+          "name": "default",
+          "password": "anytls-pass"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/certs/fullchain.pem",
+        "key_path": "/etc/certs/privkey.pem",
+        "server_name": "anytls.example.com"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "final": "direct"
+  }
+}

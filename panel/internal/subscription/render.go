@@ -285,6 +285,69 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		if down, err := paramInt(ep.Params, "down_mbps"); err == nil && down > 0 {
 			p["down"] = fmt.Sprintf("%d Mbps", down)
 		}
+	case "tuic":
+		uid, _ := paramString(ep.Params, "uuid")
+		password, _ := paramString(ep.Params, "password")
+		if uid == "" || password == "" {
+			return nil, fmt.Errorf("missing uuid/password")
+		}
+		p["type"] = "tuic"
+		p["uuid"] = uid
+		p["password"] = password
+		p["skip-cert-verify"] = true
+		p["udp-relay-mode"] = "native"
+		if cc, _ := paramString(ep.Params, "congestion_control"); cc != "" {
+			p["congestion-controller"] = cc
+		} else {
+			p["congestion-controller"] = "cubic"
+		}
+		if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
+			p["sni"] = sn
+		}
+		p["alpn"] = []string{"h3"}
+	case "anytls":
+		password, _ := paramString(ep.Params, "password")
+		if password == "" {
+			return nil, fmt.Errorf("missing password")
+		}
+		p["type"] = "anytls"
+		p["password"] = password
+		p["udp"] = true
+		p["skip-cert-verify"] = true
+		p["client-fingerprint"] = "chrome"
+		if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
+			p["sni"] = sn
+		}
+	case "vmess":
+		uid, _ := paramString(ep.Params, "uuid")
+		if uid == "" {
+			return nil, fmt.Errorf("missing uuid")
+		}
+		p["type"] = "vmess"
+		p["uuid"] = uid
+		p["cipher"] = "auto"
+		p["udp"] = true
+		p["network"] = "tcp"
+		alterID := 0
+		if n, err := paramInt(ep.Params, "alter_id"); err == nil && n >= 0 {
+			alterID = n
+		}
+		p["alterId"] = alterID
+		mode, _ := paramString(ep.Params, "tls_mode")
+		if mode == "" {
+			mode = "none"
+		}
+		switch mode {
+		case "none":
+		case "tls":
+			p["tls"] = true
+			p["skip-cert-verify"] = true
+			if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
+				p["servername"] = sn
+			}
+		default:
+			return nil, fmt.Errorf("unsupported tls_mode %q", mode)
+		}
 	default:
 		return nil, fmt.Errorf("unsupported protocol %q", ep.Protocol)
 	}
@@ -382,6 +445,71 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		}
 		if down, err := paramInt(ep.Params, "down_mbps"); err == nil && down > 0 {
 			o["down_mbps"] = down
+		}
+	case "tuic":
+		uid, _ := paramString(ep.Params, "uuid")
+		password, _ := paramString(ep.Params, "password")
+		if uid == "" || password == "" {
+			return nil, fmt.Errorf("missing uuid/password")
+		}
+		o["type"] = "tuic"
+		o["uuid"] = uid
+		o["password"] = password
+		o["udp_relay_mode"] = "native"
+		if cc, _ := paramString(ep.Params, "congestion_control"); cc != "" {
+			o["congestion_control"] = cc
+		} else {
+			o["congestion_control"] = "cubic"
+		}
+		o["tls"] = map[string]any{
+			"enabled":     true,
+			"insecure":    true,
+			"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
+			"alpn":        []string{"h3"},
+		}
+	case "anytls":
+		password, _ := paramString(ep.Params, "password")
+		if password == "" {
+			return nil, fmt.Errorf("missing password")
+		}
+		o["type"] = "anytls"
+		o["password"] = password
+		o["tls"] = map[string]any{
+			"enabled":     true,
+			"insecure":    true,
+			"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
+			"utls": map[string]any{
+				"enabled":     true,
+				"fingerprint": "chrome",
+			},
+		}
+	case "vmess":
+		uid, _ := paramString(ep.Params, "uuid")
+		if uid == "" {
+			return nil, fmt.Errorf("missing uuid")
+		}
+		o["type"] = "vmess"
+		o["uuid"] = uid
+		o["security"] = "auto"
+		alterID := 0
+		if n, err := paramInt(ep.Params, "alter_id"); err == nil && n >= 0 {
+			alterID = n
+		}
+		o["alter_id"] = alterID
+		mode, _ := paramString(ep.Params, "tls_mode")
+		if mode == "" {
+			mode = "none"
+		}
+		switch mode {
+		case "none":
+		case "tls":
+			o["tls"] = map[string]any{
+				"enabled":     true,
+				"insecure":    true,
+				"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
+			}
+		default:
+			return nil, fmt.Errorf("unsupported tls_mode %q", mode)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported protocol %q", ep.Protocol)

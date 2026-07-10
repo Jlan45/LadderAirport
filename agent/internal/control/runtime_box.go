@@ -22,7 +22,7 @@ func SingboxVersion() string {
 	if constant.Version != "" && constant.Version != "unknown" {
 		return constant.Version
 	}
-	return "1.11.15"
+	return "1.12.22"
 }
 
 // BoxRuntime drives an in-process sing-box instance (二开 adapter).
@@ -73,12 +73,8 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 	}
 
 	// Build + start NEW instance while old keeps serving traffic.
-	boxCtx := box.Context(
-		context.Background(),
-		include.InboundRegistry(),
-		include.OutboundRegistry(),
-		include.EndpointRegistry(),
-	)
+	// include.Context registers inbound/outbound/endpoint/DNS/service registries (sing-box ≥1.12).
+	boxCtx := include.Context(context.Background())
 	boxCtx, cancel := context.WithCancel(boxCtx)
 
 	instance, err := box.New(box.Options{
@@ -247,12 +243,7 @@ func (r *BoxRuntime) ConfigJSON() string {
 }
 
 func (r *BoxRuntime) parseOptions(configJSON string) (option.Options, error) {
-	ctx := box.Context(
-		context.Background(),
-		include.InboundRegistry(),
-		include.OutboundRegistry(),
-		include.EndpointRegistry(),
-	)
+	ctx := include.Context(context.Background())
 	opts, err := json.UnmarshalExtendedContext[option.Options](ctx, []byte(configJSON))
 	if err != nil {
 		return option.Options{}, fmt.Errorf("parse config: %w", err)
