@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Outlet, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { ApiError, listNodes } from './api/client'
 import Login from './pages/Login'
@@ -77,22 +77,12 @@ function AppLayout() {
   )
 }
 
-/** Legacy /nodes/:id → /?node=id */
-function NodeIdRedirect() {
-  const { id } = useParams()
-  if (!id) return <Navigate to="/" replace />
-  return <Navigate to={`/?node=${encodeURIComponent(id)}`} replace />
-}
-
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<AppLayout />}>
         <Route path="/" element={<Fleet />} />
-        <Route path="/nodes" element={<Navigate to="/" replace />} />
-        <Route path="/nodes/:id" element={<NodeIdRedirect />} />
-        <Route path="/batch" element={<Navigate to="/" replace />} />
         <Route path="/inbounds" element={<Inbounds />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
         <Route path="/settings" element={<Settings />} />

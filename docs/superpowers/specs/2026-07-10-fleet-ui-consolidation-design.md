@@ -21,8 +21,8 @@ Users saw two similar “node lists” and repeated ops across pages.
 1. **Single primary surface** for node monitoring + lifecycle management.
 2. **Clear hierarchy:** list-first; add via modal; deep config via side drawer.
 3. **Remove standalone Batch page**; keep multi-select batch on the list toolbar.
-4. **Compatible redirects** for old bookmarks (`/nodes`, `/nodes/:id`, `/batch`).
-5. **Shared helpers** for status labels and byte formatting (no duplicated utilities).
+4. **Shared helpers** for status labels and byte formatting (no duplicated utilities).
+5. **No legacy route compatibility** — only `/` (Fleet), plus inbounds/subscriptions/settings/login.
 
 ## Non-goals
 
@@ -45,12 +45,10 @@ After: `节点 | 入站 | 订阅 | 设置`
 | Path | Behavior |
 |------|----------|
 | `/` | Render `FleetPage` |
-| `/nodes` | Redirect → `/` |
-| `/nodes/:id` | Redirect → `/?node=:id` (opens drawer) |
-| `/batch` | Redirect → `/` |
-| Other routes | Unchanged |
+| `/inbounds`, `/subscriptions`, `/settings`, `/login` | Unchanged |
+| Anything else | Navigate → `/` |
 
-Drawer open state is driven by `?node=<id>` so refresh/share still works; closing the drawer clears the query.
+Drawer open state is driven by `?node=<id>` so refresh/share still works; closing the drawer clears the query. No redirects for former `/nodes` or `/batch` paths.
 
 ### Page layout
 
@@ -111,7 +109,7 @@ Delete after Fleet lands:
 - `pages/NodeDetail.tsx`
 - `pages/Batch.tsx`
 
-Update `App.tsx` nav + routes; Login continues to `/` (or `/nodes` → redirect).
+Update `App.tsx` nav + routes; Login lands on `/`.
 
 ## UX details
 
@@ -123,7 +121,7 @@ Update `App.tsx` nav + routes; Login continues to `/` (or `/nodes` → redirect)
 ## Testing / verification
 
 - `npm run build` in `web/` succeeds.
-- Manual smoke: list, add modal, open drawer via click and `/?node=`, batch toolbar, redirects from `/nodes`, `/batch`, `/nodes/:id`.
+- Manual smoke: list, add modal, open drawer via click and `/?node=`, batch toolbar.
 
 ## Implementation notes
 
