@@ -5,8 +5,11 @@
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh | sudo bash
 #   curl -fsSL ... | sudo LADDER_TOKEN=mysecret bash
 #
+# 默认开启 TLS（自签 CA + 节点证书）。关闭:
+#   sudo LADDER_TLS=0 ... bash
+#
 # 指定版本 / 本地文件 / 源码编译:
-#   sudo LADDER_VERSION=v0.1.0 ./scripts/install-agent.sh
+#   sudo LADDER_VERSION=v0.2.0 ./scripts/install-agent.sh
 #   sudo ./scripts/install-agent.sh /path/to/ladder-agent
 #   sudo LADDER_FROM=local ./scripts/install-agent.sh   # 使用仓库 bin/ 或 make agent
 #
@@ -27,6 +30,7 @@ BIN_SRC="${1:-}"
 INSTALL_BIN="${INSTALL_BIN:-/usr/local/bin/ladder-agent}"
 CONF_DIR="${CONF_DIR:-/etc/ladder-agent}"
 DATA_DIR="${DATA_DIR:-/var/lib/ladder-agent}"
+TLS_DIR="${TLS_DIR:-${CONF_DIR}/tls}"
 SERVICE_DST="${SERVICE_DST:-/etc/systemd/system/ladder-agent.service}"
 USER_NAME="${LADDER_USER:-ladder}"
 GROUP_NAME="${LADDER_GROUP:-ladder}"
@@ -34,7 +38,12 @@ LISTEN="${LADDER_LISTEN:-0.0.0.0:50051}"
 TOKEN="${LADDER_TOKEN:-}"
 # release | local  （默认 release）
 FROM="${LADDER_FROM:-release}"
-VERSION="${LADDER_VERSION:-latest}" # latest 或 v0.1.0
+VERSION="${LADDER_VERSION:-latest}" # latest 或 v0.2.0
+# TLS: 1=自签并启用（默认）; 0=明文 lab
+TLS_ENABLE="${LADDER_TLS:-1}"
+TLS_DAYS="${LADDER_TLS_DAYS:-825}"
+TLS_CN="${LADDER_TLS_CN:-}"
+TLS_EXTRA_SANS="${LADDER_TLS_EXTRA_SANS:-}" # 逗号分隔: DNS:foo,IP:1.2.3.4
 TMPDIR_DL=""
 
 cleanup() {
@@ -90,12 +99,10 @@ download_release_binary() {
   echo "==> 从 GitHub Release 获取二进制 (${REPO}, ${VERSION}, ${asset})"
 
   if [[ "${VERSION}" == "latest" ]]; then
-    # API: latest release assets
     local api_json
     api_json="$(curl -fsSL "${API_BASE}/repos/${REPO}/releases/latest")" || die "无法访问 releases/latest（仓库私有或无 Release？）"
     tag="$(echo "${api_json}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
     url="$(echo "${api_json}" | tr ',' '\n' | sed -n "s/.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\\([^\"]*${asset}\\)\"/\\1/p" | head -1)"
-    # fallback: construct URL if tag found
     if [[ -z "${url}" && -n "${tag}" ]]; then
       url="${RELEASES_BASE}/download/${tag}/${asset}"
     fi
@@ -113,8 +120,7 @@ download_release_binary() {
   local dest="${TMPDIR_DL}/${asset}"
   curl -fL --retry 3 --retry-delay 1 -o "${dest}" "${url}" || die "下载失败: ${url}"
 
-  # optional checksum
-  local sums_url sums
+  local sums_url
   if [[ -n "${tag}" ]]; then
     sums_url="${RELEASES_BASE}/download/${tag}/SHA256SUMS.txt"
     if curl -fsSL -o "${TMPDIR_DL}/SHA256SUMS.txt" "${sums_url}" 2>/dev/null; then
@@ -129,9 +135,7 @@ download_release_binary() {
   fi
 
   chmod +x "${dest}"
-  # smoke: executable
   if ! head -c 4 "${dest}" | grep -q $'\x7fELF'; then
-    # still try — might be script; for Go binary expect ELF on linux
     if file "${dest}" 2>/dev/null | grep -qi 'ELF'; then
       :
     else
@@ -142,7 +146,6 @@ download_release_binary() {
 }
 
 resolve_binary() {
-  # 1) explicit path argument
   if [[ -n "${BIN_SRC}" ]]; then
     [[ -f "${BIN_SRC}" ]] || die "文件不存在: ${BIN_SRC}"
     echo "==> 使用本地文件: ${BIN_SRC}"
@@ -150,7 +153,6 @@ resolve_binary() {
     return
   fi
 
-  # 2) local mode: repo bin or build
   if [[ "${FROM}" == "local" ]]; then
     if [[ -n "${ROOT}" && -x "${ROOT}/bin/ladder-agent" ]]; then
       echo "==> 使用仓库 bin/ladder-agent"
@@ -168,8 +170,189 @@ resolve_binary() {
     return
   fi
 
-  # 3) default: GitHub Release
   download_release_binary
+}
+
+# Collect SANs for the agent server cert (DNS + IPs Panel may dial).
+build_san_list() {
+  local -a sans=()
+  local h ip primary
+
+  sans+=("DNS:localhost")
+  sans+=("IP:127.0.0.1")
+  sans+=("IP:::1")
+
+  h="$(hostname -f 2>/dev/null || hostname 2>/dev/null || true)"
+  if [[ -n "${h}" && "${h}" != "localhost" ]]; then
+    sans+=("DNS:${h}")
+  fi
+  h="$(hostname -s 2>/dev/null || true)"
+  if [[ -n "${h}" && "${h}" != "localhost" ]]; then
+    sans+=("DNS:${h}")
+  fi
+
+  # Non-loopback IPv4s
+  if command -v hostname >/dev/null 2>&1; then
+    for ip in $(hostname -I 2>/dev/null || true); do
+      case "${ip}" in
+        127.*|::1) continue ;;
+        *:*) sans+=("IP:${ip}") ;; # v6
+        *) sans+=("IP:${ip}") ;;
+      esac
+    done
+  fi
+
+  # Optional public IP (best-effort; skip if offline)
+  if command -v curl >/dev/null 2>&1; then
+    primary="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+    if [[ "${primary}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      sans+=("IP:${primary}")
+    fi
+  fi
+
+  if [[ -n "${TLS_EXTRA_SANS}" ]]; then
+    local IFS=','
+    local extra
+    for extra in ${TLS_EXTRA_SANS}; do
+      extra="$(echo "${extra}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [[ -n "${extra}" ]] || continue
+      case "${extra}" in
+        DNS:*|IP:*) sans+=("${extra}") ;;
+        *:* ) sans+=("IP:${extra}") ;; # likely v6
+        *.*)
+          if [[ "${extra}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            sans+=("IP:${extra}")
+          else
+            sans+=("DNS:${extra}")
+          fi
+          ;;
+        *) sans+=("DNS:${extra}") ;;
+      esac
+    done
+  fi
+
+  # Dedup preserving order
+  local -a out=()
+  local s seen
+  for s in "${sans[@]}"; do
+    seen=0
+    for x in "${out[@]+"${out[@]}"}"; do
+      if [[ "${x}" == "${s}" ]]; then seen=1; break; fi
+    done
+    if [[ "${seen}" -eq 0 ]]; then
+      out+=("${s}")
+    fi
+  done
+
+  local joined=""
+  for s in "${out[@]}"; do
+    if [[ -z "${joined}" ]]; then
+      joined="${s}"
+    else
+      joined="${joined},${s}"
+    fi
+  done
+  echo "${joined}"
+}
+
+# Generate node-local CA + leaf cert if missing. Idempotent.
+ensure_tls_material() {
+  need_cmd openssl
+
+  mkdir -p "${TLS_DIR}"
+  local ca_key="${TLS_DIR}/ca.key"
+  local ca_crt="${TLS_DIR}/ca.crt"
+  local srv_key="${TLS_DIR}/server.key"
+  local srv_crt="${TLS_DIR}/server.crt"
+  local srv_csr="${TLS_DIR}/server.csr"
+  local srv_ext="${TLS_DIR}/server.ext"
+
+  if [[ -f "${ca_crt}" && -f "${srv_crt}" && -f "${srv_key}" ]]; then
+    echo "==> TLS 证书已存在，复用: ${TLS_DIR}"
+    return
+  fi
+
+  echo "==> 生成自签 TLS 材料 → ${TLS_DIR}"
+  local cn="${TLS_CN}"
+  if [[ -z "${cn}" ]]; then
+    cn="$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo ladder-agent)"
+  fi
+  local san
+  san="$(build_san_list)"
+  echo "    CN=${cn}"
+  echo "    SAN=${san}"
+
+  openssl genrsa -out "${ca_key}" 2048 2>/dev/null
+  openssl req -x509 -new -nodes \
+    -key "${ca_key}" \
+    -sha256 \
+    -days "${TLS_DAYS}" \
+    -subj "/CN=LadderAirport Agent CA ($(hostname -s 2>/dev/null || echo node))" \
+    -out "${ca_crt}"
+
+  openssl genrsa -out "${srv_key}" 2048 2>/dev/null
+  openssl req -new \
+    -key "${srv_key}" \
+    -subj "/CN=${cn}" \
+    -out "${srv_csr}"
+
+  cat >"${srv_ext}" <<EOF
+basicConstraints=CA:FALSE
+keyUsage=digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=${san}
+EOF
+
+  openssl x509 -req \
+    -in "${srv_csr}" \
+    -CA "${ca_crt}" \
+    -CAkey "${ca_key}" \
+    -CAcreateserial \
+    -out "${srv_crt}" \
+    -days "${TLS_DAYS}" \
+    -sha256 \
+    -extfile "${srv_ext}"
+
+  rm -f "${srv_csr}" "${srv_ext}" "${TLS_DIR}/ca.srl"
+
+  # CA key stays on node for re-issue; lock down
+  chmod 600 "${ca_key}" "${srv_key}"
+  chmod 644 "${ca_crt}" "${srv_crt}"
+  chown -R root:"${GROUP_NAME}" "${TLS_DIR}"
+  # ladder user needs read server cert/key at runtime
+  chmod 640 "${srv_key}"
+  # ca.key only root
+  chmod 600 "${ca_key}"
+}
+
+write_panel_import() {
+  local import_file="${CONF_DIR}/panel-import.txt"
+  local ca_crt="${TLS_DIR}/ca.crt"
+  local addr_hint
+  addr_hint="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  [[ -n "${addr_hint}" ]] || addr_hint="<本机公网或内网 IP>"
+
+  {
+    echo "# Panel 节点登记（本文件含敏感信息，权限 640）"
+    echo "# 生成时间: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo
+    echo "Address     : ${addr_hint}"
+    echo "gRPC 端口   : ${GRPC_PORT}"
+    echo "Token       : ${ACTIVE_TOKEN}"
+    echo "TLS         : enabled (paste CA below into ca_cert_pem)"
+    echo "tls_skip_verify : false  # 填了 CA 后保持 false"
+    echo
+    echo "-----BEGIN PANEL_CA_PEM-----"
+    if [[ -f "${ca_crt}" ]]; then
+      cat "${ca_crt}"
+    fi
+    echo "-----END PANEL_CA_PEM-----"
+    echo
+    echo "# 也可整段 CA PEM 写入节点 ca_cert_pem 字段（含 BEGIN/END 行）"
+  } >"${import_file}"
+  chmod 640 "${import_file}"
+  chown root:"${GROUP_NAME}" "${import_file}"
+  echo "${import_file}"
 }
 
 echo "==> 创建用户/组 ${USER_NAME}"
@@ -191,22 +374,59 @@ SRC="$(resolve_binary)"
 echo "==> 安装二进制 → ${INSTALL_BIN}"
 install -m 0755 "${SRC}" "${INSTALL_BIN}"
 
+TLS_CERT_PATH=""
+TLS_KEY_PATH=""
+case "${TLS_ENABLE}" in
+  1|true|TRUE|yes|YES|on|ON)
+    ensure_tls_material
+    TLS_CERT_PATH="${TLS_DIR}/server.crt"
+    TLS_KEY_PATH="${TLS_DIR}/server.key"
+    ;;
+  0|false|FALSE|no|NO|off|OFF)
+    echo "==> LADDER_TLS=${TLS_ENABLE}: 跳过 TLS（明文 gRPC lab 模式）"
+    ;;
+  *)
+    die "LADDER_TLS 取值无效: ${TLS_ENABLE}（用 1 或 0）"
+    ;;
+esac
+
 ENV_FILE="${CONF_DIR}/agent.env"
 echo "==> 配置 ${ENV_FILE}"
 if [[ -f "${ENV_FILE}" ]]; then
-  echo "    已存在，不覆盖（改 Token 请手动编辑后 restart）"
-  grep -E '^LADDER_TOKEN=' "${ENV_FILE}" || true
+  echo "    已存在，不覆盖（改 Token/TLS 请手动编辑后 restart）"
+  # If TLS newly enabled but env lacks cert paths, append once
+  if [[ -n "${TLS_CERT_PATH}" ]]; then
+    if ! grep -q '^LADDER_TLS_CERT=' "${ENV_FILE}" 2>/dev/null; then
+      {
+        echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
+        echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
+      } >>"${ENV_FILE}"
+      echo "    已追加 LADDER_TLS_CERT/KEY"
+    fi
+  fi
+  grep -E '^LADDER_TOKEN=|^LADDER_TLS_' "${ENV_FILE}" || true
 else
-  cat >"${ENV_FILE}" <<EOF
-LADDER_LISTEN=${LISTEN}
-LADDER_TOKEN=${TOKEN}
-LADDER_DATA_DIR=${DATA_DIR}
-EOF
+  {
+    echo "LADDER_LISTEN=${LISTEN}"
+    echo "LADDER_TOKEN=${TOKEN}"
+    echo "LADDER_DATA_DIR=${DATA_DIR}"
+    if [[ -n "${TLS_CERT_PATH}" ]]; then
+      echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
+      echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
+    fi
+  } >"${ENV_FILE}"
   chmod 640 "${ENV_FILE}"
   chown root:"${GROUP_NAME}" "${ENV_FILE}"
 fi
 
 GRPC_PORT="${LISTEN##*:}"
+ACTIVE_TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
+
+# Build ExecStart TLS args only when certs configured
+TLS_EXEC_ARGS=""
+if [[ -n "${TLS_CERT_PATH}" ]]; then
+  TLS_EXEC_ARGS=" -tls-cert \${LADDER_TLS_CERT} -tls-key \${LADDER_TLS_KEY}"
+fi
 
 echo "==> 写入 systemd: ${SERVICE_DST}"
 cat >"${SERVICE_DST}" <<EOF
@@ -221,7 +441,7 @@ User=${USER_NAME}
 Group=${GROUP_NAME}
 WorkingDirectory=${DATA_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${INSTALL_BIN} -listen \${LADDER_LISTEN} -token \${LADDER_TOKEN} -data-dir \${LADDER_DATA_DIR}
+ExecStart=${INSTALL_BIN} -listen \${LADDER_LISTEN} -token \${LADDER_TOKEN} -data-dir \${LADDER_DATA_DIR}${TLS_EXEC_ARGS}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
@@ -229,6 +449,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=${DATA_DIR}
+ReadOnlyPaths=${CONF_DIR}
 PrivateTmp=true
 
 [Install]
@@ -241,7 +462,10 @@ systemctl restart ladder-agent.service
 sleep 0.8
 systemctl --no-pager --full status ladder-agent.service || true
 
-ACTIVE_TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
+IMPORT_FILE=""
+if [[ -n "${TLS_CERT_PATH}" ]]; then
+  IMPORT_FILE="$(write_panel_import)"
+fi
 
 echo
 echo "======== 安装完成 ========"
@@ -250,11 +474,27 @@ echo "  配置:    ${ENV_FILE}"
 echo "  数据:    ${DATA_DIR}"
 echo "  服务:    ladder-agent.service (已 enable + start)"
 echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
+if [[ -n "${TLS_CERT_PATH}" ]]; then
+  echo "  TLS:     ON  cert=${TLS_CERT_PATH}"
+  echo "  登记提示: ${IMPORT_FILE}"
+else
+  echo "  TLS:     OFF（明文 gRPC）"
+fi
 echo
 echo "在 Panel「节点」里登记:"
-echo "  Address : <本机 IP>"
+echo "  Address : <本机 IP（对 Panel 可达）>"
 echo "  gRPC端口: ${GRPC_PORT}"
 echo "  Token   : ${ACTIVE_TOKEN}"
+if [[ -n "${TLS_CERT_PATH}" ]]; then
+  echo "  ca_cert_pem : 粘贴 ${TLS_DIR}/ca.crt 全文（或见 ${IMPORT_FILE}）"
+  echo "  tls_skip_verify : false"
+  echo
+  echo "CA 证书预览:"
+  sed 's/^/  /' "${TLS_DIR}/ca.crt" || true
+else
+  echo "  （明文模式无需 CA）"
+fi
 echo
 echo "运维: systemctl status|restart ladder-agent ; journalctl -u ladder-agent -f"
-echo "升级: 重新执行本脚本（会覆盖二进制，保留 agent.env）"
+echo "升级: 重新执行本脚本（会覆盖二进制，保留 agent.env 与 TLS 证书）"
+echo "强制重签 TLS: 删除 ${TLS_DIR} 后设 LADDER_TLS=1 再装，并更新 Panel 上的 CA"

@@ -9,7 +9,9 @@ User=ladder
 Group=ladder
 WorkingDirectory=/var/lib/ladder-agent
 EnvironmentFile=/etc/ladder-agent/agent.env
-ExecStart=/usr/local/bin/ladder-agent -listen ${LADDER_LISTEN} -token ${LADDER_TOKEN} -data-dir ${LADDER_DATA_DIR}
+# If LADDER_TLS_CERT/KEY set in agent.env, append:
+#   -tls-cert ${LADDER_TLS_CERT} -tls-key ${LADDER_TLS_KEY}
+ExecStart=/usr/local/bin/ladder-agent -listen ${LADDER_LISTEN} -token ${LADDER_TOKEN} -data-dir ${LADDER_DATA_DIR} -tls-cert ${LADDER_TLS_CERT} -tls-key ${LADDER_TLS_KEY}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
@@ -17,6 +19,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/ladder-agent
+ReadOnlyPaths=/etc/ladder-agent
 PrivateTmp=true
 
 [Install]

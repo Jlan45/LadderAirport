@@ -134,11 +134,15 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
   | sudo LADDER_TOKEN='你的密钥' bash
 ```
 
-指定版本 / 本地编译：
+默认 **`LADDER_TLS=1`**：安装时生成节点自签 CA + 服务端证书，systemd 自动带上 `-tls-cert/-tls-key`。  
+装完在 Panel 登记节点时，把 `/etc/ladder-agent/tls/ca.crt`（或 `panel-import.txt`）贴到 **ca_cert_pem**。
 
 ```bash
+# 明文 lab（不推荐公网）
+curl -fsSL ... | sudo LADDER_TLS=0 LADDER_TOKEN='secret' bash
+
 # 指定 Release 标签
-curl -fsSL ... | sudo LADDER_VERSION=v0.1.0 LADDER_TOKEN='secret' bash
+curl -fsSL ... | sudo LADDER_VERSION=v0.2.0 LADDER_TOKEN='secret' bash
 
 # 仓库内本地编译安装
 sudo LADDER_FROM=local LADDER_TOKEN='secret' ./scripts/install-agent.sh
@@ -147,6 +151,7 @@ sudo LADDER_FROM=local LADDER_TOKEN='secret' ./scripts/install-agent.sh
 ```bash
 systemctl status ladder-agent
 journalctl -u ladder-agent -f
+sudo cat /etc/ladder-agent/panel-import.txt   # Token + CA，方便登记
 ```
 
 ### 烟雾测试
@@ -182,7 +187,7 @@ journalctl -u ladder-agent -f
 
 - 修改默认管理员密码 `admin`、节点 Token、`-session-secret`
 - gRPC Token 错误必须无法管控节点
-- 生产环境使用正规 TLS，避免 `tls_skip_verify`
+- 生产至少用安装脚本默认 TLS + Panel 填入节点 CA；有条件时换正规证书，避免 `tls_skip_verify`
 - 浏览器不直连 Agent；仅 Panel 访问 Agent 控制口
 - `deploy/dev` 下证书仅限实验室
 
