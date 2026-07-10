@@ -14,7 +14,7 @@ export default function Login() {
     setBusy(true)
     try {
       await login(password)
-      navigate('/nodes', { replace: true })
+      navigate('/', { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message || '登录失败')

@@ -1,12 +1,9 @@
-import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
+import { Navigate, NavLink, Outlet, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { ApiError, listNodes } from './api/client'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import Nodes from './pages/Nodes'
+import Fleet from './pages/Fleet'
 import Inbounds from './pages/Inbounds'
-import NodeDetail from './pages/NodeDetail'
-import Batch from './pages/Batch'
 import Subscriptions from './pages/Subscriptions'
 import Settings from './pages/Settings'
 
@@ -66,14 +63,10 @@ function AppLayout() {
         <div className="brand">Ladder Airport</div>
         <nav>
           <NavLink to="/" end>
-            总览
-          </NavLink>
-          <NavLink to="/nodes" end={false}>
             节点
           </NavLink>
           <NavLink to="/inbounds">入站</NavLink>
           <NavLink to="/subscriptions">订阅</NavLink>
-          <NavLink to="/batch">批量操作</NavLink>
           <NavLink to="/settings">设置</NavLink>
         </nav>
       </header>
@@ -84,17 +77,24 @@ function AppLayout() {
   )
 }
 
+/** Legacy /nodes/:id → /?node=id */
+function NodeIdRedirect() {
+  const { id } = useParams()
+  if (!id) return <Navigate to="/" replace />
+  return <Navigate to={`/?node=${encodeURIComponent(id)}`} replace />
+}
+
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<AppLayout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/nodes" element={<Nodes />} />
-        <Route path="/nodes/:id" element={<NodeDetail />} />
+        <Route path="/" element={<Fleet />} />
+        <Route path="/nodes" element={<Navigate to="/" replace />} />
+        <Route path="/nodes/:id" element={<NodeIdRedirect />} />
+        <Route path="/batch" element={<Navigate to="/" replace />} />
         <Route path="/inbounds" element={<Inbounds />} />
         <Route path="/subscriptions" element={<Subscriptions />} />
-        <Route path="/batch" element={<Batch />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

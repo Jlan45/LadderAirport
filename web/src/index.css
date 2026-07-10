@@ -840,3 +840,131 @@ table.kv tr:last-child td {
   font-size: 0.8rem !important;
   min-height: auto;
 }
+
+/* Text-as-link buttons (table / card titles) */
+button.link-btn {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: var(--accent) !important;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  min-height: auto !important;
+}
+button.link-btn:hover {
+  color: var(--accent-hover) !important;
+  text-decoration: underline;
+}
+button.link-btn.link-danger {
+  color: var(--danger) !important;
+}
+button.node-card-title.link-btn {
+  color: var(--text) !important;
+  font-weight: 700;
+  font-size: 1.05rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+button.node-card-title.link-btn:hover {
+  color: var(--accent) !important;
+  text-decoration: none;
+}
+
+/* Install command block */
+.install-cmd-block {
+  margin: 0;
+  padding: 1rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  overflow: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--mono);
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  backdrop-filter: blur(2px);
+}
+.modal-panel {
+  width: min(520px, 100%);
+  max-height: min(90vh, 900px);
+  overflow: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.35rem 1.5rem;
+  box-shadow: var(--shadow-lg);
+}
+
+/* Side drawer (node detail) */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  justify-content: flex-end;
+  backdrop-filter: blur(1px);
+}
+.drawer-panel {
+  width: min(480px, 100vw);
+  height: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in 0.18s ease-out;
+}
+@keyframes drawer-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0.85;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1.15rem 1.25rem;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem 2rem;
+}
+.drawer-section {
+  margin-bottom: 1rem;
+}
+.drawer-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
