@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -336,6 +337,38 @@ func (s *Store) GetNode(id string) (*Node, error) {
 		return nil, fmt.Errorf("get node: %w", err)
 	}
 	return n, nil
+}
+
+// GetNodeByToken returns the unique node with this non-empty control token.
+// Empty token is rejected. Multiple matches return an error (ambiguous).
+func (s *Store) GetNodeByToken(token string) (*Node, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, fmt.Errorf("token required")
+	}
+	rows, err := s.db.Query(`SELECT `+nodeSelectCols+` FROM nodes WHERE token = ?`, token)
+	if err != nil {
+		return nil, fmt.Errorf("get node by token: %w", err)
+	}
+	defer rows.Close()
+	var found *Node
+	for rows.Next() {
+		n, err := scanNode(rows)
+		if err != nil {
+			return nil, fmt.Errorf("get node by token scan: %w", err)
+		}
+		if found != nil {
+			return nil, fmt.Errorf("multiple nodes share this token")
+		}
+		found = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if found == nil {
+		return nil, fmt.Errorf("node not found for token")
+	}
+	return found, nil
 }
 
 func (s *Store) ListNodes() ([]Node, error) {

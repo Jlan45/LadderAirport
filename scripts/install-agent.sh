@@ -44,6 +44,11 @@ TLS_ENABLE="${LADDER_TLS:-1}"
 TLS_DAYS="${LADDER_TLS_DAYS:-825}"
 TLS_CN="${LADDER_TLS_CN:-}"
 TLS_EXTRA_SANS="${LADDER_TLS_EXTRA_SANS:-}" # 逗号分隔: DNS:foo,IP:1.2.3.4
+# Panel auto-enroll (set by Panel-generated install command)
+PANEL_URL="${LADDER_PANEL:-}"          # e.g. https://panel.example.com
+NODE_ID="${LADDER_NODE_ID:-}"
+REPORT_ADDR="${LADDER_REPORT_ADDRESS:-}" # force reported address; else auto-detect
+GRPC_PORT_HINT="${LADDER_GRPC_PORT:-}"
 TMPDIR_DL=""
 
 cleanup() {
@@ -329,7 +334,7 @@ write_panel_import() {
   local import_file="${CONF_DIR}/panel-import.txt"
   local ca_crt="${TLS_DIR}/ca.crt"
   local addr_hint
-  addr_hint="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  addr_hint="$(detect_report_address)"
   [[ -n "${addr_hint}" ]] || addr_hint="<本机公网或内网 IP>"
 
   {
@@ -339,20 +344,110 @@ write_panel_import() {
     echo "Address     : ${addr_hint}"
     echo "gRPC 端口   : ${GRPC_PORT}"
     echo "Token       : ${ACTIVE_TOKEN}"
-    echo "TLS         : enabled (paste CA below into ca_cert_pem)"
-    echo "tls_skip_verify : false  # 填了 CA 后保持 false"
+    if [[ -n "${PANEL_URL}" ]]; then
+      echo "Panel       : ${PANEL_URL} (auto-enroll attempted)"
+    fi
+    echo "TLS         : see LADDER_TLS / ca.crt"
     echo
     echo "-----BEGIN PANEL_CA_PEM-----"
     if [[ -f "${ca_crt}" ]]; then
       cat "${ca_crt}"
     fi
     echo "-----END PANEL_CA_PEM-----"
-    echo
-    echo "# 也可整段 CA PEM 写入节点 ca_cert_pem 字段（含 BEGIN/END 行）"
   } >"${import_file}"
   chmod 640 "${import_file}"
   chown root:"${GROUP_NAME}" "${import_file}"
   echo "${import_file}"
+}
+
+# Pick an address Panel should dial (override with LADDER_REPORT_ADDRESS).
+detect_report_address() {
+  if [[ -n "${REPORT_ADDR}" ]]; then
+    echo "${REPORT_ADDR}"
+    return
+  fi
+  local ip pub
+  # Prefer first non-loopback from hostname -I
+  for ip in $(hostname -I 2>/dev/null || true); do
+    case "${ip}" in
+      127.*|::1) continue ;;
+      *)
+        echo "${ip}"
+        return
+        ;;
+    esac
+  done
+  if command -v curl >/dev/null 2>&1; then
+    pub="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+    if [[ "${pub}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "${pub}"
+      return
+    fi
+  fi
+  echo ""
+}
+
+# POST address + CA to Panel so operator need not paste manually.
+enroll_to_panel() {
+  local panel="${PANEL_URL%/}"
+  if [[ -z "${panel}" ]]; then
+    echo "==> 未设置 LADDER_PANEL，跳过自动上报（请在 Panel 设置 Public Base URL 后重新生成安装命令）"
+    return 0
+  fi
+  need_cmd curl
+  local addr ca_pem="" tls_json="true" port payload
+  addr="$(detect_report_address)"
+  port="${GRPC_PORT_HINT:-${GRPC_PORT}}"
+  if [[ -z "${addr}" ]]; then
+    echo "WARNING: 无法探测上报地址，跳过 enroll（可设 LADDER_REPORT_ADDRESS）" >&2
+    return 0
+  fi
+  if [[ -f "${TLS_DIR}/ca.crt" ]]; then
+    ca_pem="$(cat "${TLS_DIR}/ca.crt")"
+  else
+    tls_json="false"
+  fi
+  echo "==> 向 Panel 自动上报: ${panel}/api/v1/agent/enroll"
+  echo "    address=${addr} port=${port} node_id=${NODE_ID:-auto}"
+
+  if command -v python3 >/dev/null 2>&1; then
+    payload="$(PANEL="${panel}" TOKEN="${ACTIVE_TOKEN}" NODE_ID="${NODE_ID}" \
+      ADDR="${addr}" PORT="${port}" CA="${ca_pem}" TLS="${tls_json}" HOST="$(hostname -f 2>/dev/null || hostname)" \
+      python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "token": os.environ.get("TOKEN", ""),
+  "node_id": os.environ.get("NODE_ID", ""),
+  "address": os.environ.get("ADDR", ""),
+  "grpc_port": int(os.environ.get("PORT") or "50051"),
+  "ca_cert_pem": os.environ.get("CA", ""),
+  "hostname": os.environ.get("HOST", ""),
+  "tls_enabled": os.environ.get("TLS", "true").lower() in ("1", "true", "yes"),
+}))
+PY
+)"
+  else
+    echo "WARNING: 需要 python3 以安全编码 enroll JSON，跳过自动上报" >&2
+    return 0
+  fi
+
+  local resp code
+  resp="$(curl -fsS -w '\n%{http_code}' -X POST "${panel}/api/v1/agent/enroll" \
+    -H "Authorization: Bearer ${ACTIVE_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "${payload}" 2>&1)" || {
+    echo "WARNING: enroll 请求失败: ${resp}" >&2
+    return 0
+  }
+  code="$(echo "${resp}" | tail -n1)"
+  body="$(echo "${resp}" | sed '$d')"
+  if [[ "${code}" == "200" ]]; then
+    echo "    enroll 成功 (HTTP ${code})"
+    echo "${body}" | head -c 400
+    echo
+  else
+    echo "WARNING: enroll HTTP ${code}: ${body}" >&2
+  fi
 }
 
 echo "==> 创建用户/组 ${USER_NAME}"
@@ -463,9 +558,12 @@ sleep 0.8
 systemctl --no-pager --full status ladder-agent.service || true
 
 IMPORT_FILE=""
-if [[ -n "${TLS_CERT_PATH}" ]]; then
+if [[ -n "${TLS_CERT_PATH}" ]] || [[ -n "${PANEL_URL}" ]]; then
   IMPORT_FILE="$(write_panel_import)"
 fi
+
+# Auto-report address + CA to Panel (no manual paste when LADDER_PANEL is set).
+enroll_to_panel
 
 echo
 echo "======== 安装完成 ========"
@@ -476,25 +574,20 @@ echo "  服务:    ladder-agent.service (已 enable + start)"
 echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
 if [[ -n "${TLS_CERT_PATH}" ]]; then
   echo "  TLS:     ON  cert=${TLS_CERT_PATH}"
-  echo "  登记提示: ${IMPORT_FILE}"
 else
   echo "  TLS:     OFF（明文 gRPC）"
 fi
-echo
-echo "在 Panel「节点」里登记:"
-echo "  Address : <本机 IP（对 Panel 可达）>"
-echo "  gRPC端口: ${GRPC_PORT}"
-echo "  Token   : ${ACTIVE_TOKEN}"
-if [[ -n "${TLS_CERT_PATH}" ]]; then
-  echo "  ca_cert_pem : 粘贴 ${TLS_DIR}/ca.crt 全文（或见 ${IMPORT_FILE}）"
-  echo "  tls_skip_verify : false"
-  echo
-  echo "CA 证书预览:"
-  sed 's/^/  /' "${TLS_DIR}/ca.crt" || true
+if [[ -n "${PANEL_URL}" ]]; then
+  echo "  Panel:   ${PANEL_URL}（已尝试自动 enroll）"
+  echo "  请在 Panel 刷新节点 → 探测"
 else
-  echo "  （明文模式无需 CA）"
+  echo "  Panel:   未设置 LADDER_PANEL（无自动上报）"
+  echo "  Token  : ${ACTIVE_TOKEN}"
+  if [[ -n "${IMPORT_FILE}" ]]; then
+    echo "  登记提示: ${IMPORT_FILE}"
+  fi
 fi
 echo
 echo "运维: systemctl status|restart ladder-agent ; journalctl -u ladder-agent -f"
 echo "升级: 重新执行本脚本（会覆盖二进制，保留 agent.env 与 TLS 证书）"
-echo "强制重签 TLS: 删除 ${TLS_DIR} 后设 LADDER_TLS=1 再装，并更新 Panel 上的 CA"
+echo "强制重签 TLS: 删除 ${TLS_DIR} 后 LADDER_TLS=1 再装（会再次 enroll）"

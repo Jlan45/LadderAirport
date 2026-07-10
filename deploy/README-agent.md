@@ -47,18 +47,24 @@ cd LadderAirport && git submodule update --init --recursive
 sudo LADDER_TOKEN='secret' LADDER_FROM=local ./scripts/install-agent.sh
 ```
 
-## 装完后在 Panel 登记
+## 装完后 / 自动 enroll
 
-| 字段 | 值 |
-|------|-----|
-| Address | 节点 IP（对 Panel 可达，跨机勿用 `127.0.0.1`） |
-| gRPC 端口 | `50051`（默认） |
-| Token | 与 `/etc/ladder-agent/agent.env` 中 `LADDER_TOKEN` 一致 |
-| **ca_cert_pem** | 粘贴 `/etc/ladder-agent/tls/ca.crt` 全文（或 `panel-import.txt` 中 CA 段） |
-| tls_skip_verify | **false**（已贴 CA 时不要开） |
+**推荐：** 在 Panel「设置」填写 **Public Base URL**，再在「节点」点 **添加节点并生成安装命令**。  
+生成的命令会带 `LADDER_PANEL` / `LADDER_TOKEN` / `LADDER_NODE_ID`，装完后脚本自动：
+
+`POST {Panel}/api/v1/agent/enroll` → 上报地址、gRPC 端口、CA PEM  
+
+Panel 写回节点记录，**无需手贴 CA / 手填 IP**。刷新列表后点「探测」即可。
+
+| 变量 | 说明 |
+|------|------|
+| `LADDER_PANEL` | Panel 根 URL，如 `https://panel.example.com` |
+| `LADDER_NODE_ID` | 预创建的节点 ID |
+| `LADDER_REPORT_ADDRESS` | 强制上报地址（可选，默认自动探测） |
+| `LADDER_GRPC_PORT` | 上报端口（默认与监听端口一致） |
 
 ```bash
-# 快速查看登记信息
+# 手动查看本机材料（自动 enroll 失败时备用）
 sudo cat /etc/ladder-agent/panel-import.txt
 sudo cat /etc/ladder-agent/tls/ca.crt
 ```

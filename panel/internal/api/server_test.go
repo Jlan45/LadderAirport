@@ -9,8 +9,10 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ladderairport/panel/internal/api"
 	"github.com/ladderairport/panel/internal/batch"
@@ -280,6 +282,94 @@ func TestFleetFlow(t *testing.T) {
 	nodeID, _ := nodeObj["id"].(string)
 	if nodeID == "" {
 		t.Fatalf("missing node id: %v", nodeObj)
+	}
+
+	// Set public base URL so install command includes auto-enroll.
+	resp, _ = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/settings", map[string]any{
+		"public_base_url": ts.URL,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put settings for public_base_url status = %d", resp.StatusCode)
+	}
+
+	// Bootstrap node with install command.
+	resp, boot := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/nodes/bootstrap", map[string]any{
+		"name": "edge-boot", "grpc_port": 50051,
+		"enable_tls": true,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("bootstrap status = %d body=%v", resp.StatusCode, boot)
+	}
+	cmd, _ := boot["install_command"].(string)
+	if !strings.Contains(cmd, "LADDER_TOKEN=") || !strings.Contains(cmd, "LADDER_TLS=1") {
+		t.Fatalf("install_command = %q", cmd)
+	}
+	if !strings.Contains(cmd, "LADDER_PANEL=") {
+		t.Fatalf("expected LADDER_PANEL in command: %q", cmd)
+	}
+	if boot["enroll_enabled"] != true {
+		t.Fatalf("enroll_enabled = %v", boot["enroll_enabled"])
+	}
+	bootNode, _ := boot["node"].(map[string]any)
+	bootID, _ := bootNode["id"].(string)
+	bootToken, _ := boot["token"].(string)
+	if bootID == "" || bootToken == "" {
+		t.Fatalf("bootstrap node id/token missing: %v", boot)
+	}
+	resp, inst := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+bootID+"/install-command", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("install-command status = %d", resp.StatusCode)
+	}
+	if _, ok := inst["install_command"].(string); !ok {
+		t.Fatalf("install-command body = %v", inst)
+	}
+
+	// Agent enroll without admin session (new client, no cookies).
+	enrollClient := &http.Client{Timeout: 10 * time.Second}
+	enrollBody := map[string]any{
+		"token": bootToken, "node_id": bootID,
+		"address": "203.0.113.50", "grpc_port": 50051,
+		"ca_cert_pem": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+		"tls_enabled": true,
+	}
+	raw, _ := json.Marshal(enrollBody)
+	ereq, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/agent/enroll", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ereq.Header.Set("Content-Type", "application/json")
+	ereq.Header.Set("Authorization", "Bearer "+bootToken)
+	eresp, err := enrollClient.Do(ereq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eresp.Body.Close()
+	if eresp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(eresp.Body)
+		t.Fatalf("enroll status = %d body=%s", eresp.StatusCode, b)
+	}
+	// Admin list should show updated address/CA.
+	resp, nodesList := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list nodes after enroll: %d", resp.StatusCode)
+	}
+	// nodes may be array directly or wrapped — doJSON returns map for objects; arrays?
+	// list returns JSON array — doJSON might fail. Check existing patterns.
+	_ = nodesList
+	// Fetch via install-command node re-get by updating — use probe path not needed.
+	// Get node by re-bootstrap list: call GET node not exist — use store via bootstrap node fields after enroll.
+	// Re-get install-command which embeds node
+	resp, inst2 := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+bootID+"/install-command", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("install-command after enroll: %d", resp.StatusCode)
+	}
+	node2, _ := inst2["node"].(map[string]any)
+	if node2["address"] != "203.0.113.50" {
+		t.Fatalf("address after enroll = %v", node2["address"])
+	}
+	ca, _ := node2["ca_cert_pem"].(string)
+	if !strings.Contains(ca, "BEGIN CERTIFICATE") {
+		t.Fatalf("ca after enroll = %q", ca)
 	}
 
 	// Create inbound (shadowsocks).

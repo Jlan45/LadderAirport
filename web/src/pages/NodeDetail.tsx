@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   applyNode,
+  getNodeInstallCommand,
   getNodeMetrics,
   listInbounds,
   listNodeInbounds,
@@ -11,9 +12,11 @@ import {
   startNode,
   stopNode,
   streamNodeLogs,
+  updateNode,
   type InboundConfig,
   type Metrics,
   type Node,
+  type NodeInstallInfo,
   type Task,
 } from '../api/client'
 
@@ -33,6 +36,14 @@ export default function NodeDetail() {
   const abortRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
+  // connection settings
+  const [editAddress, setEditAddress] = useState('')
+  const [editPort, setEditPort] = useState(50051)
+  const [editCA, setEditCA] = useState('')
+  const [editTLSSkip, setEditTLSSkip] = useState(false)
+  const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
+  const [copied, setCopied] = useState(false)
+
   const load = useCallback(async () => {
     if (!id) return
     setError('')
@@ -44,6 +55,12 @@ export default function NodeDetail() {
       ])
       const n = (nodes ?? []).find((x) => x.id === id) ?? null
       setNode(n)
+      if (n) {
+        setEditAddress(n.address || '')
+        setEditPort(n.grpc_port || 50051)
+        setEditCA(n.ca_cert_pem || '')
+        setEditTLSSkip(!!n.tls_skip_verify)
+      }
       setAllInbounds(all ?? [])
       setAttachedIds(new Set((attached ?? []).map((a) => a.id)))
     } catch (err) {
@@ -200,6 +217,53 @@ export default function NodeDetail() {
     abortRef.current?.abort()
   }
 
+  async function onSaveConnection() {
+    if (!id || !node) return
+    setBusy(true)
+    setError('')
+    setMsg('')
+    try {
+      const updated = await updateNode(id, {
+        ...node,
+        address: editAddress.trim(),
+        grpc_port: editPort,
+        ca_cert_pem: editCA,
+        tls_skip_verify: editTLSSkip,
+        status: editAddress.trim() ? (node.status === 'pending' ? 'unknown' : node.status) : 'pending',
+      })
+      setNode(updated)
+      setMsg('连接设置已保存')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onShowInstall() {
+    if (!id) return
+    setError('')
+    setCopied(false)
+    try {
+      const info = await getNodeInstallCommand(id, { tls: !editTLSSkip })
+      setInstallInfo(info)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '获取安装命令失败')
+    }
+  }
+
+  async function copyInstall() {
+    if (!installInfo?.install_command) return
+    try {
+      await navigator.clipboard.writeText(installInfo.install_command)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('复制失败，请手动选择命令')
+    }
+  }
+
   if (!id) {
     return <div className="error">缺少节点 ID</div>
   }
@@ -213,7 +277,7 @@ export default function NodeDetail() {
       {node ? (
         <p className="muted" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <code>
-            {node.address}:{node.grpc_port}
+            {node.address || '（待填）'}:{node.grpc_port}
           </code>{' '}
           · <span>状态:</span>
           <span className={`status status-${node.status || 'unknown'}`}>
@@ -236,6 +300,88 @@ export default function NodeDetail() {
 
       {error ? <div className="error">{error}</div> : null}
       {msg ? <div className="ok">{msg}</div> : null}
+
+      <section className="card">
+        <h2>连接与 TLS</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          装机后填写地址，并将节点上的 <code>ca.crt</code> 粘贴到下方（TLS 模式）。
+        </p>
+        <div className="form-grid">
+          <div className="form-row">
+            <label htmlFor="nd-addr">节点地址</label>
+            <input
+              id="nd-addr"
+              value={editAddress}
+              onChange={(e) => setEditAddress(e.target.value)}
+              placeholder="对 Panel 可达的 IP 或域名"
+            />
+          </div>
+          <div className="form-row">
+            <label htmlFor="nd-port">gRPC 端口</label>
+            <input
+              id="nd-port"
+              type="number"
+              value={editPort}
+              onChange={(e) => setEditPort(Number(e.target.value))}
+            />
+          </div>
+          <div className="form-row">
+            <label htmlFor="nd-ca">CA 证书 (ca_cert_pem)</label>
+            <textarea
+              id="nd-ca"
+              rows={6}
+              value={editCA}
+              onChange={(e) => setEditCA(e.target.value)}
+              placeholder="-----BEGIN CERTIFICATE----- ..."
+              style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}
+            />
+          </div>
+          <div className="form-row">
+            <label htmlFor="nd-skip" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                id="nd-skip"
+                type="checkbox"
+                checked={editTLSSkip}
+                onChange={(e) => setEditTLSSkip(e.target.checked)}
+              />{' '}
+              跳过 TLS 证书验证（仅 lab）
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" disabled={busy} onClick={() => void onSaveConnection()}>
+              保存连接设置
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => void onShowInstall()}>
+              显示安装命令
+            </button>
+          </div>
+        </div>
+        {installInfo ? (
+          <div style={{ marginTop: '1rem' }}>
+            <div className="row-between">
+              <strong>一键安装</strong>
+              <button type="button" className="btn-secondary" onClick={() => void copyInstall()}>
+                {copied ? '已复制' : '复制'}
+              </button>
+            </div>
+            <pre
+              style={{
+                marginTop: '0.5rem',
+                padding: '1rem',
+                background: '#0f172a',
+                color: '#e2e8f0',
+                borderRadius: 8,
+                overflow: 'auto',
+                fontSize: '0.85rem',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}
+            >
+              {installInfo.install_command}
+            </pre>
+          </div>
+        ) : null}
+      </section>
 
       <section className="card">
         <h2>关联入站配置</h2>

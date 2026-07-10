@@ -165,12 +165,34 @@ export interface Metrics {
 
 export interface CreateNodeInput {
   name: string
-  address: string
+  address?: string
   grpc_port?: number
   token?: string
   labels?: string[]
   tls_skip_verify?: boolean
   ca_cert_pem?: string
+}
+
+export interface BootstrapNodeInput {
+  name: string
+  address?: string
+  grpc_port?: number
+  token?: string
+  labels?: string[]
+  enable_tls?: boolean
+  agent_version?: string
+  tls_skip_verify?: boolean
+  ca_cert_pem?: string
+}
+
+export interface NodeInstallInfo {
+  node: Node
+  token: string
+  enable_tls: boolean
+  install_command: string
+  steps: string[]
+  panel_base_url?: string
+  enroll_enabled?: boolean
 }
 
 export interface CreateInboundInput {
@@ -218,6 +240,24 @@ export function listNodes(): Promise<Node[]> {
 
 export function createNode(body: CreateNodeInput): Promise<Node> {
   return request('POST', '/nodes', body)
+}
+
+/** Create node + return one-click agent install command. */
+export function bootstrapNode(body: BootstrapNodeInput): Promise<NodeInstallInfo> {
+  return request('POST', '/nodes/bootstrap', body)
+}
+
+/** Regenerate install command for an existing node. */
+export function getNodeInstallCommand(
+  id: string,
+  opts?: { tls?: boolean; version?: string },
+): Promise<NodeInstallInfo> {
+  const q = new URLSearchParams()
+  if (opts?.tls === false) q.set('tls', '0')
+  if (opts?.tls === true) q.set('tls', '1')
+  if (opts?.version) q.set('version', opts.version)
+  const qs = q.toString()
+  return request('GET', `/nodes/${id}/install-command${qs ? `?${qs}` : ''}`)
 }
 
 export function updateNode(id: string, body: Partial<Node>): Promise<Node> {

@@ -6,11 +6,37 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ladderairport/panel/internal/converter"
 	"github.com/ladderairport/panel/internal/store"
 )
+
+// nodeBootstrapRequest creates a node and returns a one-click agent install command.
+type nodeBootstrapRequest struct {
+	Name           string   `json:"name"`
+	Address        string   `json:"address"` // optional; fill after install if empty
+	GRPCPort       int      `json:"grpc_port"`
+	Token          string   `json:"token"` // optional; auto-generated when empty
+	Labels         []string `json:"labels"`
+	EnableTLS      *bool    `json:"enable_tls"` // default true
+	AgentVersion   string   `json:"agent_version"`
+	InstallScript  string   `json:"install_script_url"` // optional override
+	TLSSkipVerify  *bool    `json:"tls_skip_verify"`    // default: false when TLS, true when plain
+	CACertPEM      string   `json:"ca_cert_pem"`
+}
+
+// nodeInstallResponse is returned after bootstrap or when regenerating the install command.
+type nodeInstallResponse struct {
+	Node           store.Node `json:"node"`
+	Token          string     `json:"token"`
+	EnableTLS      bool       `json:"enable_tls"`
+	InstallCommand string     `json:"install_command"`
+	Steps          []string   `json:"steps"`
+	PanelBaseURL   string     `json:"panel_base_url,omitempty"`
+	EnrollEnabled  bool       `json:"enroll_enabled"`
+}
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.ListNodes()
@@ -27,21 +53,174 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if n.Name == "" || n.Address == "" {
-		writeError(w, http.StatusBadRequest, "name and address required")
+	if n.Name == "" {
+		writeError(w, http.StatusBadRequest, "name required")
 		return
 	}
+	// Address may be empty when the operator will install first and fill IP later.
 	if n.GRPCPort == 0 {
 		n.GRPCPort = 50051
 	}
 	if n.Status == "" {
-		n.Status = "unknown"
+		if strings.TrimSpace(n.Address) == "" {
+			n.Status = "pending"
+		} else {
+			n.Status = "unknown"
+		}
 	}
 	if err := s.Store.CreateNode(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, n)
+}
+
+// handleBootstrapNode creates a node with an auto token and returns a one-click install command.
+// POST /api/v1/nodes/bootstrap
+func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
+	var req nodeBootstrapRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name required")
+		return
+	}
+	enableTLS := true
+	if req.EnableTLS != nil {
+		enableTLS = *req.EnableTLS
+	}
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		var err error
+		token, err = randomAgentToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "generate token: "+err.Error())
+			return
+		}
+	}
+	port := req.GRPCPort
+	if port == 0 {
+		port = 50051
+	}
+	tlsSkip := !enableTLS
+	if req.TLSSkipVerify != nil {
+		tlsSkip = *req.TLSSkipVerify
+	}
+	addr := strings.TrimSpace(req.Address)
+	status := "unknown"
+	if addr == "" {
+		status = "pending"
+	}
+	n := store.Node{
+		Name:          req.Name,
+		Address:       addr,
+		GRPCPort:      port,
+		Token:         token,
+		Labels:        req.Labels,
+		TLSSkipVerify: tlsSkip,
+		CACertPEM:     req.CACertPEM,
+		Status:        status,
+	}
+	if err := s.Store.CreateNode(&n); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// Re-read for assigned id/timestamps.
+	created, err := s.Store.GetNode(n.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	panelBase := ""
+	if st, err := s.Store.GetSettings(); err == nil {
+		panelBase = panelBaseFromSettings(st.PublicBaseURL)
+	}
+	cmd := buildInstallCommand(installCommandOpts{
+		ScriptURL:    req.InstallScript,
+		Token:        token,
+		AgentVersion: strings.TrimSpace(req.AgentVersion),
+		EnableTLS:    enableTLS,
+		PanelBaseURL: panelBase,
+		NodeID:       created.ID,
+		GRPCPort:     port,
+	})
+	enrollOK := panelBase != ""
+	writeJSON(w, http.StatusCreated, nodeInstallResponse{
+		Node:           *created,
+		Token:          token,
+		EnableTLS:      enableTLS,
+		InstallCommand: cmd,
+		Steps:          installSteps(enableTLS, addr, port, panelBase, enrollOK),
+		PanelBaseURL:   panelBase,
+		EnrollEnabled:  enrollOK,
+	})
+}
+
+// handleNodeInstallCommand regenerates the one-click install command for an existing node.
+// GET /api/v1/nodes/{id}/install-command
+func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	n, err := s.Store.GetNode(id)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	token := strings.TrimSpace(n.Token)
+	if token == "" {
+		// Fall back to panel default agent token.
+		st, err := s.Store.GetSettings()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		token = strings.TrimSpace(st.DefaultAgentToken)
+	}
+	if token == "" {
+		writeError(w, http.StatusBadRequest, "node has no token; set node token or default_agent_token in settings")
+		return
+	}
+	// Prefer TLS install when the node expects cert verification.
+	enableTLS := !n.TLSSkipVerify
+	q := r.URL.Query()
+	if v := q.Get("tls"); v == "0" || v == "false" {
+		enableTLS = false
+	} else if v == "1" || v == "true" {
+		enableTLS = true
+	}
+	version := q.Get("version")
+	panelBase := ""
+	if st, err := s.Store.GetSettings(); err == nil {
+		panelBase = panelBaseFromSettings(st.PublicBaseURL)
+	}
+	if v := strings.TrimSpace(q.Get("panel")); v != "" {
+		panelBase = panelBaseFromSettings(v)
+	}
+	cmd := buildInstallCommand(installCommandOpts{
+		ScriptURL:    q.Get("script_url"),
+		Token:        token,
+		AgentVersion: version,
+		EnableTLS:    enableTLS,
+		PanelBaseURL: panelBase,
+		NodeID:       n.ID,
+		GRPCPort:     n.GRPCPort,
+	})
+	enrollOK := panelBase != ""
+	writeJSON(w, http.StatusOK, nodeInstallResponse{
+		Node:           *n,
+		Token:          token,
+		EnableTLS:      enableTLS,
+		InstallCommand: cmd,
+		Steps:          installSteps(enableTLS, n.Address, n.GRPCPort, panelBase, enrollOK),
+		PanelBaseURL:   panelBase,
+		EnrollEnabled:  enrollOK,
+	})
 }
 
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {

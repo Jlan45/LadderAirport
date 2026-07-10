@@ -116,6 +116,10 @@ func isPublicAPI(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/login" {
 		return true
 	}
+	// Agent install enrollment (auth via node token, not admin session).
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/enroll" {
+		return true
+	}
 	// Public subscription pull (token in path).
 	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/sub/") {
 		return true
@@ -128,6 +132,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sub/{token}", s.handlePublicSubscription)
 
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /api/v1/agent/enroll", s.handleAgentEnroll)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)
 
@@ -141,8 +146,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/nodes", s.handleListNodes)
 	mux.HandleFunc("POST /api/v1/nodes", s.handleCreateNode)
+	mux.HandleFunc("POST /api/v1/nodes/bootstrap", s.handleBootstrapNode)
 	mux.HandleFunc("PUT /api/v1/nodes/{id}", s.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/v1/nodes/{id}", s.handleDeleteNode)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/install-command", s.handleNodeInstallCommand)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/probe", s.handleProbeNode)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/inbounds", s.handleListNodeInbounds)
 	mux.HandleFunc("PUT /api/v1/nodes/{id}/inbounds", s.handleSetNodeInbounds)
