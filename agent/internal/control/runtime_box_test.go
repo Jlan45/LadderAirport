@@ -80,3 +80,62 @@ func TestBoxRuntimeStopStart(t *testing.T) {
 	}
 	_ = rt.Stop(context.Background())
 }
+
+func TestBoxRuntimeIdempotentSameHash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real box start in short mode")
+	}
+	rt := control.NewBoxRuntime(t.TempDir())
+	good := `{
+		"log": {"level": "error", "disabled": true},
+		"inbounds": [],
+		"outbounds": [{"type": "direct", "tag": "direct"}]
+	}`
+	if err := rt.Apply(context.Background(), good, "same"); err != nil {
+		t.Fatalf("apply1: %v", err)
+	}
+	defer rt.Stop(context.Background())
+	first := rt.Status(context.Background()).StartedAtUnix
+	// Second apply with identical JSON+hash must be a no-op (no restart).
+	if err := rt.Apply(context.Background(), good, "same"); err != nil {
+		t.Fatalf("apply2: %v", err)
+	}
+	second := rt.Status(context.Background()).StartedAtUnix
+	if first == 0 || first != second {
+		t.Fatalf("expected same started_at for idempotent apply, got %d then %d", first, second)
+	}
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatalf("start while running: %v", err)
+	}
+	if rt.Status(context.Background()).StartedAtUnix != first {
+		t.Fatal("Start while running should not restart box")
+	}
+}
+
+func TestBoxRuntimeReplaceConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real box start in short mode")
+	}
+	rt := control.NewBoxRuntime(t.TempDir())
+	cfg1 := `{
+		"log": {"level": "error", "disabled": true},
+		"inbounds": [],
+		"outbounds": [{"type": "direct", "tag": "direct"}]
+	}`
+	cfg2 := `{
+		"log": {"level": "warn", "disabled": true},
+		"inbounds": [],
+		"outbounds": [{"type": "direct", "tag": "direct"}]
+	}`
+	if err := rt.Apply(context.Background(), cfg1, "h1"); err != nil {
+		t.Fatalf("apply1: %v", err)
+	}
+	defer rt.Stop(context.Background())
+	if err := rt.Apply(context.Background(), cfg2, "h2"); err != nil {
+		t.Fatalf("apply2: %v", err)
+	}
+	st := rt.Status(context.Background())
+	if st.State != control.StateRunning || st.ConfigHash != "h2" {
+		t.Fatalf("after replace: state=%s hash=%s", st.State, st.ConfigHash)
+	}
+}

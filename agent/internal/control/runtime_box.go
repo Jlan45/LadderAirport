@@ -25,13 +25,14 @@ func SingboxVersion() string {
 	return "1.12.22"
 }
 
-// BoxRuntime drives an in-process sing-box instance (二开 adapter).
+// BoxRuntime drives a single in-process sing-box instance (二开 adapter).
 //
-// Hot reload (Apply):
-//  1. Parse + create + start a NEW box instance without holding the state lock
-//     (so gRPC Ping/GetStatus stay responsive during reload).
-//  2. On success, swap under lock and close the old instance.
-//  3. On failure, keep the old instance running and return the error.
+// Lifecycle (strict single-instance):
+//   - At most one *box.Box is ever started at a time in this process.
+//   - Apply serializes via applyMu; concurrent Apply/Start wait in line.
+//   - Config update: stop old completely → start new (brief downtime is OK).
+//   - Same config_hash while already running → no-op (idempotent).
+//   - If the new box fails to start, attempt to restore the previous config.
 type BoxRuntime struct {
 	mu            sync.Mutex
 	dataDir       string
@@ -48,7 +49,7 @@ type BoxRuntime struct {
 	prevUplink   int64
 	prevDownlink int64
 
-	// applyMu serializes reloads so two Applies don't start two boxes concurrently.
+	// applyMu serializes all lifecycle transitions (Apply/Start/Stop).
 	applyMu sync.Mutex
 }
 
@@ -62,18 +63,103 @@ func NewBoxRuntime(dataDir string) *BoxRuntime {
 }
 
 func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) error {
-	// Only one reload at a time; do not hold state mu across Start (hot-reload).
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
+	return r.applyLocked(ctx, configJSON, hash)
+}
 
+// applyLocked requires applyMu held.
+func (r *BoxRuntime) applyLocked(ctx context.Context, configJSON string, hash string) error {
+	// Idempotent: already running this exact config — do not restart.
+	r.mu.Lock()
+	same := r.state == StateRunning && r.instance != nil && hash != "" && hash == r.configHash && configJSON == r.configJSON
+	r.mu.Unlock()
+	if same {
+		return nil
+	}
+
+	// Parse/validate BEFORE tearing down the current instance.
 	opts, err := r.parseOptions(configJSON)
 	if err != nil {
 		r.setLastError(err.Error())
 		return err
 	}
 
-	// Build + start NEW instance while old keeps serving traffic.
-	// include.Context registers inbound/outbound/endpoint/DNS/service registries (sing-box ≥1.12).
+	// Snapshot previous config for restore-on-failure.
+	r.mu.Lock()
+	prevJSON, prevHash := r.configJSON, r.configHash
+	r.mu.Unlock()
+
+	// Strict single-instance: stop old completely before starting new.
+	// Brief disconnect is acceptable; avoids dual listen on the same ports.
+	r.stopInstanceLocked()
+
+	if err := r.startInstanceLocked(opts, configJSON, hash); err != nil {
+		// Best-effort restore of previous config when reload fails mid-way.
+		if prevJSON != "" && prevJSON != configJSON {
+			if restErr := r.startInstanceFromJSONLocked(prevJSON, prevHash); restErr != nil {
+				r.setLastError(fmt.Sprintf("start failed: %v; restore also failed: %v", err, restErr))
+				return fmt.Errorf("start box: %w (restore failed: %v)", err, restErr)
+			}
+			r.setLastError("start failed, restored previous config: " + err.Error())
+			return fmt.Errorf("start box: %w (previous config restored)", err)
+		}
+		r.setLastError(err.Error())
+		return fmt.Errorf("start box: %w", err)
+	}
+
+	if r.dataDir != "" {
+		if err := r.writeCurrent(r.dataDir, configJSON); err != nil {
+			r.setLastError("box running; failed to write current.json: " + err.Error())
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		// Config already applied; do not roll back.
+	default:
+	}
+	return nil
+}
+
+// stopInstanceLocked closes the current box if any. Caller must hold applyMu.
+func (r *BoxRuntime) stopInstanceLocked() {
+	r.mu.Lock()
+	old := r.instance
+	oldCancel := r.cancel
+	oldTracker := r.tracker
+	if oldTracker != nil {
+		_, up, down := oldTracker.Snapshot()
+		r.prevUplink += up
+		r.prevDownlink += down
+	}
+	r.instance = nil
+	r.cancel = nil
+	r.tracker = nil
+	r.state = StateStopped
+	r.startedAtUnix = 0
+	// Keep configJSON/hash so Start can re-apply after Stop.
+	r.mu.Unlock()
+
+	if old != nil {
+		_ = old.Close()
+	}
+	if oldCancel != nil {
+		oldCancel()
+	}
+}
+
+// startInstanceFromJSONLocked parses and starts. Caller holds applyMu; no current instance.
+func (r *BoxRuntime) startInstanceFromJSONLocked(configJSON, hash string) error {
+	opts, err := r.parseOptions(configJSON)
+	if err != nil {
+		return err
+	}
+	return r.startInstanceLocked(opts, configJSON, hash)
+}
+
+// startInstanceLocked creates and starts a box. Caller holds applyMu; instance must be nil.
+func (r *BoxRuntime) startInstanceLocked(opts option.Options, configJSON, hash string) error {
 	boxCtx := include.Context(context.Background())
 	boxCtx, cancel := context.WithCancel(boxCtx)
 
@@ -83,33 +169,19 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 	})
 	if err != nil {
 		cancel()
-		r.setLastError(err.Error())
 		return fmt.Errorf("create box: %w", err)
 	}
 
-	// Attach traffic tracker before Start so all routed conns are counted.
 	tracker := newTrafficTracker()
 	instance.Router().AppendTracker(tracker)
 
 	if err := instance.Start(); err != nil {
 		_ = instance.Close()
 		cancel()
-		r.setLastError(err.Error())
-		// Keep previous instance if any.
-		return fmt.Errorf("start box: %w", err)
+		return err
 	}
 
-	// Success: atomic swap under state lock, then tear down old.
 	r.mu.Lock()
-	old := r.instance
-	oldCancel := r.cancel
-	oldTracker := r.tracker
-	// Roll previous instance traffic into lifetime totals so hot-reload does not reset UI counters.
-	if oldTracker != nil {
-		_, up, down := oldTracker.Snapshot()
-		r.prevUplink += up
-		r.prevDownlink += down
-	}
 	r.instance = instance
 	r.cancel = cancel
 	r.tracker = tracker
@@ -118,28 +190,7 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 	r.startedAtUnix = time.Now().Unix()
 	r.lastError = ""
 	r.state = StateRunning
-	dataDir := r.dataDir
 	r.mu.Unlock()
-
-	if old != nil {
-		_ = old.Close()
-	}
-	if oldCancel != nil {
-		oldCancel()
-	}
-
-	if dataDir != "" {
-		if err := r.writeCurrent(dataDir, configJSON); err != nil {
-			r.setLastError("box running; failed to write current.json: " + err.Error())
-		}
-	}
-
-	// Respect cancel of the RPC context after success (best-effort).
-	select {
-	case <-ctx.Done():
-		// Config already applied; do not roll back.
-	default:
-	}
 	return nil
 }
 
@@ -155,6 +206,9 @@ func (r *BoxRuntime) setLastError(msg string) {
 }
 
 func (r *BoxRuntime) Start(ctx context.Context) error {
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+
 	r.mu.Lock()
 	if r.state == StateRunning && r.instance != nil {
 		r.mu.Unlock()
@@ -167,7 +221,8 @@ func (r *BoxRuntime) Start(ctx context.Context) error {
 	if cfg == "" {
 		return fmt.Errorf("no config to start; Apply a config first")
 	}
-	return r.Apply(ctx, cfg, hash)
+	// Re-apply under same lock (idempotent if already mid-start elsewhere).
+	return r.applyLocked(ctx, cfg, hash)
 }
 
 func (r *BoxRuntime) Stop(_ context.Context) error {
@@ -175,29 +230,13 @@ func (r *BoxRuntime) Stop(_ context.Context) error {
 	defer r.applyMu.Unlock()
 
 	r.mu.Lock()
-	old := r.instance
-	oldCancel := r.cancel
-	oldTracker := r.tracker
-	if oldTracker != nil {
-		_, up, down := oldTracker.Snapshot()
-		r.prevUplink += up
-		r.prevDownlink += down
-	}
-	r.instance = nil
-	r.cancel = nil
-	r.tracker = nil
-	r.state = StateStopped
-	r.startedAtUnix = 0
+	had := r.instance != nil
 	r.mu.Unlock()
-
-	var err error
-	if old != nil {
-		err = old.Close()
+	r.stopInstanceLocked()
+	if !had {
+		return nil
 	}
-	if oldCancel != nil {
-		oldCancel()
-	}
-	return err
+	return nil
 }
 
 func (r *BoxRuntime) Status(_ context.Context) Status {

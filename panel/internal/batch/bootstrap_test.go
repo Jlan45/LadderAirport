@@ -29,7 +29,7 @@ func (b *bootRPC) Stop(context.Context) (*agentv1.StopResponse, error) {
 	return &agentv1.StopResponse{Ok: true}, nil
 }
 
-func TestBootstrapAllApplyAndStart(t *testing.T) {
+func TestBootstrapAllApplyOnly(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "t.db")
 	st, err := store.Open(db)
 	if err != nil {
@@ -63,15 +63,16 @@ func TestBootstrapAllApplyAndStart(t *testing.T) {
 	if err := r.BootstrapAll(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if rpc.applies != 1 || rpc.starts != 1 {
-		t.Fatalf("applies=%d starts=%d", rpc.applies, rpc.starts)
+	// Apply alone starts the agent core; no separate Start RPC.
+	if rpc.applies != 1 || rpc.starts != 0 {
+		t.Fatalf("applies=%d starts=%d want 1/0", rpc.applies, rpc.starts)
 	}
 	tasks, err := st.ListTasks()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) < 2 {
-		t.Fatalf("expected apply+start tasks, got %d", len(tasks))
+	if len(tasks) != 1 || tasks[0].Type != "apply" {
+		t.Fatalf("expected single apply task, got %+v", tasks)
 	}
 }
 
@@ -122,8 +123,8 @@ func TestBootstrapPendingSkipsSynced(t *testing.T) {
 	if err := r.BootstrapPending(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// Only the unsynced node should be touched.
-	if rpc.applies != 1 || rpc.starts != 1 {
-		t.Fatalf("applies=%d starts=%d want 1/1", rpc.applies, rpc.starts)
+	// Only the unsynced node should be applied (no Start).
+	if rpc.applies != 1 || rpc.starts != 0 {
+		t.Fatalf("applies=%d starts=%d want 1/0", rpc.applies, rpc.starts)
 	}
 }

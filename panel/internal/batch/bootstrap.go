@@ -9,13 +9,11 @@ import (
 	"github.com/ladderairport/panel/internal/store"
 )
 
-// BootstrapAll applies config then starts every registered node.
-// Intended for panel process start: agents that are up get hot-loaded;
-// unreachable nodes are logged and skipped without failing the whole run.
+// BootstrapAll applies config to every registered node.
+// Apply already starts the agent core (single-instance lifecycle);
+// a separate Start is not issued (avoids double reload on panel restart).
 //
-// Per node:
-//  1. Apply current attached inbounds (fails cleanly if none)
-//  2. Start runtime (no-op if already running after Apply)
+// Unreachable nodes are logged and skipped without failing the whole run.
 func (r *Runner) BootstrapAll(ctx context.Context) error {
 	if r == nil || r.Store == nil {
 		return fmt.Errorf("runner not configured")
@@ -35,8 +33,9 @@ func (r *Runner) BootstrapAll(ctx context.Context) error {
 	return r.bootstrapIDs(ctx, ids, "bootstrap")
 }
 
-// BootstrapPending applies+starts only nodes that look unsynced:
+// BootstrapPending applies only nodes that look unsynced:
 // not online, or core not running, and have at least one enabled inbound.
+// Apply alone starts the core when the agent accepts the config.
 func (r *Runner) BootstrapPending(ctx context.Context) error {
 	if r == nil || r.Store == nil {
 		return fmt.Errorf("runner not configured")
@@ -142,6 +141,8 @@ func (r *Runner) bootstrapIDs(ctx context.Context, ids []string, label string) e
 	if len(ids) == 0 {
 		return nil
 	}
+	// Single apply task only. Agent Apply is idempotent for same hash and
+	// always leaves at most one sing-box instance running.
 	applyTask := &store.Task{
 		Type:    "apply",
 		Status:  "pending",
@@ -150,14 +151,6 @@ func (r *Runner) bootstrapIDs(ctx context.Context, ids []string, label string) e
 	if err := r.Store.CreateTask(applyTask); err != nil {
 		return fmt.Errorf("create apply task: %w", err)
 	}
-	startTask := &store.Task{
-		Type:    "start",
-		Status:  "pending",
-		NodeIDs: ids,
-	}
-	if err := r.Store.CreateTask(startTask); err != nil {
-		return fmt.Errorf("create start task: %w", err)
-	}
 
 	log.Printf("%s: applying config to %d node(s) (task=%s)", label, len(ids), applyTask.ID)
 	if err := r.RunTask(ctx, applyTask.ID); err != nil {
@@ -165,14 +158,6 @@ func (r *Runner) bootstrapIDs(ctx context.Context, ids []string, label string) e
 	}
 	if t, err := r.Store.GetTask(applyTask.ID); err == nil {
 		logBootstrapResults(label+" apply", t)
-	}
-
-	log.Printf("%s: starting runtimes on %d node(s) (task=%s)", label, len(ids), startTask.ID)
-	if err := r.RunTask(ctx, startTask.ID); err != nil {
-		log.Printf("%s: start task error: %v", label, err)
-	}
-	if t, err := r.Store.GetTask(startTask.ID); err == nil {
-		logBootstrapResults(label+" start", t)
 	}
 	return nil
 }
@@ -197,7 +182,7 @@ func shortID(id string) string {
 	return id
 }
 
-// BootstrapNode applies + starts a single node (used by tests or manual hooks).
+// BootstrapNode applies config to a single node (starts core via Apply).
 func (r *Runner) BootstrapNode(ctx context.Context, nodeID string) error {
 	return r.bootstrapIDs(ctx, []string{nodeID}, "bootstrap-node")
 }

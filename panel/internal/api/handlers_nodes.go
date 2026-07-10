@@ -355,7 +355,7 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Auto deploy: apply config + start runtime so operators never click a separate "应用配置".
+	// Auto deploy via Apply only (agent starts core inside Apply; no separate Start).
 	node, err := s.Store.GetNode(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -377,14 +377,9 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	applyTask, startTask, depMsg := s.deployNodeInbounds(r.Context(), id)
+	applyTask, depMsg := s.deployNodeInbounds(r.Context(), id)
 	out.ApplyTask = applyTask
-	out.StartTask = startTask
 	out.DeployMessage = depMsg
-	if applyTask != nil && applyTask.Status == "success" {
-		out.Deployed = true
-	}
-	// Partial success (apply ok, start fail) still counts as config pushed.
 	if applyTask != nil {
 		for _, res := range applyTask.Results {
 			if res.OK {
@@ -392,72 +387,47 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		if applyTask.Status == "success" {
+			out.Deployed = true
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-// deployNodeInbounds runs apply then start for one node; returns tasks and a user-facing message.
-func (s *Server) deployNodeInbounds(ctx context.Context, nodeID string) (applyTask, startTask *store.Task, msg string) {
+// deployNodeInbounds runs a single apply for one node (core starts with Apply).
+func (s *Server) deployNodeInbounds(ctx context.Context, nodeID string) (applyTask *store.Task, msg string) {
 	applyTask = &store.Task{
 		Type:    "apply",
 		Status:  "pending",
 		NodeIDs: []string{nodeID},
 	}
 	if err := s.Store.CreateTask(applyTask); err != nil {
-		return nil, nil, "关联已保存；创建下发任务失败: " + err.Error()
+		return nil, "关联已保存；创建下发任务失败: " + err.Error()
 	}
 	if err := s.Runner.RunTask(ctx, applyTask.ID); err != nil {
 		t, _ := s.Store.GetTask(applyTask.ID)
-		return t, nil, "关联已保存；下发配置失败: " + err.Error()
+		return t, "关联已保存；下发配置失败: " + err.Error()
 	}
 	applyTask, _ = s.Store.GetTask(applyTask.ID)
-
-	startTask = &store.Task{
-		Type:    "start",
-		Status:  "pending",
-		NodeIDs: []string{nodeID},
-	}
-	if err := s.Store.CreateTask(startTask); err != nil {
-		return applyTask, nil, deployMsgFromTasks(applyTask, nil) + "；启动任务创建失败: " + err.Error()
-	}
-	if err := s.Runner.RunTask(ctx, startTask.ID); err != nil {
-		t, _ := s.Store.GetTask(startTask.ID)
-		return applyTask, t, deployMsgFromTasks(applyTask, t) + "；启动失败: " + err.Error()
-	}
-	startTask, _ = s.Store.GetTask(startTask.ID)
-	return applyTask, startTask, deployMsgFromTasks(applyTask, startTask)
+	return applyTask, deployMsgFromApply(applyTask)
 }
 
-func deployMsgFromTasks(applyTask, startTask *store.Task) string {
-	applyOK := applyTask != nil && applyTask.Status == "success"
-	startOK := startTask != nil && startTask.Status == "success"
-	if applyOK && startOK {
-		return "已关联并下发配置，核心已启动"
-	}
-	// Prefer concrete agent messages
-	var parts []string
-	if applyTask != nil {
-		for _, res := range applyTask.Results {
-			if res.OK {
-				parts = append(parts, "配置已下发")
-			} else if res.Message != "" {
-				parts = append(parts, "下发: "+res.Message)
-			}
-		}
-	}
-	if startTask != nil {
-		for _, res := range startTask.Results {
-			if res.OK {
-				parts = append(parts, "核心已启动")
-			} else if res.Message != "" {
-				parts = append(parts, "启动: "+res.Message)
-			}
-		}
-	}
-	if len(parts) == 0 {
+func deployMsgFromApply(applyTask *store.Task) string {
+	if applyTask == nil {
 		return "关联已保存；下发结果未知"
 	}
-	return "关联已保存；" + strings.Join(parts, "；")
+	if applyTask.Status == "success" {
+		return "已关联并下发配置（核心已启动）"
+	}
+	for _, res := range applyTask.Results {
+		if res.OK {
+			return "已关联并下发配置（核心已启动）"
+		}
+		if res.Message != "" {
+			return "关联已保存；下发: " + res.Message
+		}
+	}
+	return "关联已保存；下发状态=" + applyTask.Status
 }
 
 func (s *Server) handleNodePreview(w http.ResponseWriter, r *http.Request) {

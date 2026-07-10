@@ -87,14 +87,20 @@ cd agent && go test -tags "with_quic,with_utls" ./internal/control/ -short
 
 ## BoxRuntime behaviour
 
-`Apply` algorithm (keep-old-on-failure):
+**Single-instance lifecycle** (never two sing-box cores listening at once):
 
-1. Parse JSON into `option.Options` with inbound/outbound/endpoint/DNS/service registries.
-2. Create a **new** box instance (old still running).
-3. `Start` new; on error close new, set `LastError`, return error (**old kept**).
-4. On success close old, swap, update hash / `startedAt`, write `dataDir/current.json` when set.
+`Apply` algorithm (stop-then-start; brief disconnect OK):
 
-`Start` re-applies the last good config if stopped. `Stop` closes the instance.
+1. If already **running** with the **same** `config_json` + `config_hash` → **no-op**.
+2. Parse JSON into `option.Options` (fail here keeps the old instance if any).
+3. **Stop/close** the current instance completely (ports released).
+4. Create and `Start` the new box.
+5. On start failure: best-effort **restore** previous config; set `LastError`.
+6. On success: update hash / `startedAt`, write `dataDir/current.json` when set.
+
+All Apply/Start/Stop share one mutex — concurrent Panel RPCs queue, never dual-start.
+
+`Start` is a no-op if already running; otherwise re-applies the last good config. `Stop` closes the instance (config kept for later Start).
 
 ### Metrics
 
