@@ -1,3 +1,4 @@
+import { Checkbox, Input, InputNumber, Select } from 'tdesign-react'
 import type { Field } from '../api/client'
 
 export interface DynamicFormProps {
@@ -6,27 +7,38 @@ export interface DynamicFormProps {
   onChange: (next: Record<string, unknown>) => void
 }
 
-/** Renders form inputs from protocol template fields (string|int|bool|select|password). */
+/**
+ * Renders form inputs from protocol template fields (string|int|bool|select|password).
+ *
+ * Important: do NOT wrap controlled inputs in tdesign Form.FormItem here.
+ * FormItem injects its own formValue into children and overwrites our value prop,
+ * which clears template defaults (listen=0.0.0.0, method, tls_mode, etc.).
+ */
 export default function DynamicForm({ fields, value, onChange }: DynamicFormProps) {
   function setField(name: string, v: unknown) {
     onChange({ ...value, [name]: v })
   }
 
   return (
-    <div className="dynamic-form">
+    <div className="la-field-grid">
       {fields.map((f) => {
-        const id = `field-${f.name}`
-        const current = value[f.name] ?? f.default ?? (f.type === 'bool' ? false : '')
+        // Prefer live params; fall back to template default for display.
+        const current =
+          value[f.name] !== undefined && value[f.name] !== null
+            ? value[f.name]
+            : f.default !== undefined
+              ? f.default
+              : f.type === 'bool'
+                ? false
+                : ''
         return (
-          <div className="form-row" key={f.name}>
-            <label htmlFor={id}>
+          <div className="la-field" key={f.name}>
+            <div className="la-field-label">
               {f.label}
-              {f.required ? <span className="req"> *</span> : null}
-            </label>
-            {f.description ? (
-              <div className="field-hint">{f.description}</div>
-            ) : null}
-            {renderInput(f, id, current, setField)}
+              {f.required ? <span className="la-field-req"> *</span> : null}
+            </div>
+            {f.description ? <div className="la-field-help">{f.description}</div> : null}
+            <div className="la-field-control">{renderInput(f, current, setField)}</div>
           </div>
         )
       })}
@@ -36,73 +48,62 @@ export default function DynamicForm({ fields, value, onChange }: DynamicFormProp
 
 function renderInput(
   f: Field,
-  id: string,
   current: unknown,
   setField: (name: string, v: unknown) => void,
 ) {
   switch (f.type) {
     case 'bool':
       return (
-        <input
-          id={id}
-          type="checkbox"
-          checked={Boolean(current)}
-          onChange={(e) => setField(f.name, e.target.checked)}
-        />
+        <Checkbox checked={Boolean(current)} onChange={(checked) => setField(f.name, checked)}>
+          启用
+        </Checkbox>
       )
     case 'int':
       return (
-        <input
-          id={id}
-          type="number"
-          value={current === '' || current == null ? '' : String(current)}
-          required={f.required}
-          onChange={(e) => {
-            const raw = e.target.value
-            if (raw === '') {
-              setField(f.name, '')
-              return
-            }
-            const n = Number(raw)
-            setField(f.name, Number.isFinite(n) ? n : raw)
-          }}
+        <InputNumber
+          theme="normal"
+          style={{ width: '100%' }}
+          value={current === '' || current == null ? undefined : Number(current)}
+          onChange={(v) => setField(f.name, v === undefined || v === null ? '' : v)}
+          placeholder={f.default != null && f.default !== '' ? `默认 ${String(f.default)}` : undefined}
         />
       )
     case 'select':
       return (
-        <select
-          id={id}
+        <Select
           value={current == null ? '' : String(current)}
-          required={f.required}
-          onChange={(e) => setField(f.name, e.target.value)}
-        >
-          {(f.options ?? []).map((opt) => (
-            <option key={opt === '' ? '__empty' : opt} value={opt}>
-              {opt === '' ? '(默认)' : opt}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => setField(f.name, v)}
+          options={(f.options ?? []).map((opt) => ({
+            label: opt === '' ? '(默认 / 不限制)' : opt,
+            value: opt,
+          }))}
+          clearable={!f.required}
+          placeholder="请选择"
+        />
       )
     case 'password':
       return (
-        <input
-          id={id}
+        <Input
           type="password"
-          autoComplete="new-password"
+          autocomplete="new-password"
           value={current == null ? '' : String(current)}
-          required={f.required}
-          onChange={(e) => setField(f.name, e.target.value)}
+          onChange={(v) => setField(f.name, v)}
+          clearable
+          placeholder="留空则服务端自动生成"
         />
       )
     case 'string':
     default:
       return (
-        <input
-          id={id}
-          type="text"
+        <Input
           value={current == null ? '' : String(current)}
-          required={f.required}
-          onChange={(e) => setField(f.name, e.target.value)}
+          onChange={(v) => setField(f.name, v)}
+          clearable
+          placeholder={
+            f.default != null && f.default !== ''
+              ? `默认 ${String(f.default)}`
+              : undefined
+          }
         />
       )
   }

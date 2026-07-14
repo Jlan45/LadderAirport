@@ -1,4 +1,18 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Button,
+  Card,
+  Checkbox,
+  DialogPlugin,
+  Form,
+  Input,
+  MessagePlugin,
+  Select,
+  Space,
+  Table,
+  Tag,
+  type PrimaryTableCol,
+} from 'tdesign-react'
 import {
   createInbound,
   deleteInbound,
@@ -12,8 +26,6 @@ import DynamicForm, { defaultsFromFields } from '../components/DynamicForm'
 export default function Inbounds() {
   const [inbounds, setInbounds] = useState<InboundConfig[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
-  const [error, setError] = useState('')
-  const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
 
   const [name, setName] = useState('')
@@ -29,7 +41,6 @@ export default function Inbounds() {
   )
 
   const load = useCallback(async () => {
-    setError('')
     try {
       const [ins, tmpls] = await Promise.all([listInbounds(), listTemplates()])
       setInbounds(ins ?? [])
@@ -40,7 +51,7 @@ export default function Inbounds() {
         setParams(defaultsFromFields(tlist[0].fields))
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '加载失败')
     }
   }, [protocol])
 
@@ -55,208 +66,198 @@ export default function Inbounds() {
     if (t) setParams(defaultsFromFields(t.fields))
   }
 
-  async function onCreate(e: FormEvent) {
-    e.preventDefault()
+  async function onCreate() {
     if (!protocol) {
-      setError('请选择传输协议')
+      MessagePlugin.warning('请选择传输协议')
+      return
+    }
+    if (!name.trim()) {
+      MessagePlugin.warning('请填写配置名称')
       return
     }
     setBusy(true)
-    setError('')
-    setMsg('')
     try {
-      // Coerce empty int fields out; keep numbers as numbers.
       const clean: Record<string, unknown> = {}
       for (const [k, v] of Object.entries(params)) {
         if (v === '') continue
         clean[k] = v
       }
       const created = await createInbound({
-        name,
+        name: name.trim(),
         protocol,
         params: clean,
         enabled,
       })
       setName('')
       setLastCreated(created)
-      setMsg('入站配置创建成功；密码 / UUID / 证书密钥已自动生成，请在下方查看')
+      MessagePlugin.success('入站配置创建成功；密码 / UUID / 证书密钥已自动生成')
       if (selectedTemplate) {
         setParams(defaultsFromFields(selectedTemplate.fields))
       }
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '创建失败')
     } finally {
       setBusy(false)
     }
   }
 
-  async function onDelete(id: string, n: string) {
-    if (!confirm(`确定要删除入站配置 "${n}" 吗？`)) return
-    try {
-      await deleteInbound(id)
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
-    }
+  function onDelete(id: string, n: string) {
+    const dialog = DialogPlugin.confirm({
+      header: '删除入站',
+      body: `确定要删除入站配置「${n}」吗？`,
+      theme: 'danger',
+      confirmBtn: { content: '删除', theme: 'danger' },
+      onConfirm: async () => {
+        try {
+          await deleteInbound(id)
+          await load()
+          MessagePlugin.success('已删除')
+          dialog.destroy()
+        } catch (err) {
+          MessagePlugin.error(err instanceof Error ? err.message : '删除失败')
+        }
+      },
+    })
   }
+
+  const columns: PrimaryTableCol<InboundConfig>[] = [
+    {
+      colKey: 'name',
+      title: '配置名称',
+      cell: ({ row }) => <strong>{row.name}</strong>,
+    },
+    {
+      colKey: 'protocol',
+      title: '传输协议',
+      width: 120,
+      cell: ({ row }) => <code className="la-mono">{row.protocol}</code>,
+    },
+    {
+      colKey: 'enabled',
+      title: '是否启用',
+      width: 100,
+      cell: ({ row }) => (
+        <Tag theme={row.enabled ? 'success' : 'default'} variant="light">
+          {row.enabled ? '已启用' : '已禁用'}
+        </Tag>
+      ),
+    },
+    {
+      colKey: 'params',
+      title: '核心参数预览',
+      cell: ({ row }) => (
+        <div>
+          <code className="la-mono">{summarizeParams(row.params)}</code>
+          {expandedId === row.id ? (
+            <pre className="la-pre" style={{ marginTop: 8 }}>
+              {formatSecrets(row.params)}
+            </pre>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      colKey: 'ops',
+      title: '操作',
+      width: 200,
+      cell: ({ row }) => (
+        <Space>
+          <Button
+            size="small"
+            variant="outline"
+            onClick={() => setExpandedId((id) => (id === row.id ? null : row.id))}
+          >
+            {expandedId === row.id ? '隐藏凭据' : '查看凭据'}
+          </Button>
+          <Button size="small" theme="danger" variant="outline" onClick={() => onDelete(row.id, row.name)}>
+            删除
+          </Button>
+        </Space>
+      ),
+    },
+  ]
 
   return (
     <div>
-      <h1>入站配置管理</h1>
-      {error ? <div className="error">{error}</div> : null}
-      {msg ? <div className="ok">{msg}</div> : null}
+      <div className="la-page-header">
+        <div>
+          <h1 className="la-page-title">入站配置管理</h1>
+          <p className="la-page-desc">创建协议模板并生成凭据，再关联到节点下发</p>
+        </div>
+      </div>
 
-      <section className="card">
-        <h2>创建入站配置</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
+      <Card bordered className="la-section" title="创建入站配置">
+        <p className="la-page-desc" style={{ marginTop: 0 }}>
           只需填写名称、协议和端口等基础项。密码、UUID、TLS 证书、Reality 密钥会在服务端自动生成。
         </p>
-        <form onSubmit={onCreate}>
-          <div className="form-grid">
-            <div className="form-row">
-              <label htmlFor="in-name">配置名称</label>
-              <input
-                id="in-name"
+        <Form labelAlign="top">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            <Form.FormItem label="配置名称" requiredMark>
+              <Input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
+                onChange={(v) => setName(String(v))}
                 placeholder="例如: ss-edge-1"
+                clearable
               />
-            </div>
-            <div className="form-row">
-              <label htmlFor="in-proto">传输协议</label>
-              <select
-                id="in-proto"
+            </Form.FormItem>
+            <Form.FormItem label="传输协议" requiredMark>
+              <Select
                 value={protocol}
-                onChange={(e) => onProtocolChange(e.target.value)}
-                required
-              >
-                {templates.map((t) => (
-                  <option key={t.id} value={t.protocol}>
-                    {t.name} ({t.protocol})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="form-row" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '0.2rem' }}>
-              <label htmlFor="in-en" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
-                <input
-                  id="in-en"
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={(e) => setEnabled(e.target.checked)}
-                />{' '}
+                onChange={(v) => onProtocolChange(String(v))}
+                options={templates.map((t) => ({
+                  label: `${t.name} (${t.protocol})`,
+                  value: t.protocol,
+                }))}
+              />
+            </Form.FormItem>
+            <Form.FormItem label=" ">
+              <Checkbox checked={enabled} onChange={(c) => setEnabled(Boolean(c))}>
                 立即启用此配置
-              </label>
-            </div>
+              </Checkbox>
+            </Form.FormItem>
           </div>
 
           {selectedTemplate ? (
             <>
-              <h3 className="subhead">{selectedTemplate.name} 参数配置</h3>
-              <DynamicForm
-                fields={selectedTemplate.fields}
-                value={params}
-                onChange={setParams}
-              />
+              <h3 style={{ margin: '8px 0 4px', fontSize: 14 }}>{selectedTemplate.name} 参数配置</h3>
+              <DynamicForm fields={selectedTemplate.fields} value={params} onChange={setParams} />
             </>
           ) : null}
 
-          <button type="submit" disabled={busy || !protocol} style={{ marginTop: '0.5rem' }}>
-            创建入站配置
-          </button>
-        </form>
-        {lastCreated ? (
-          <div className="card" style={{ marginTop: '1rem', background: 'var(--surface-2, #1a1f2e)' }}>
-            <h3 className="subhead">已生成凭据 — {lastCreated.name}</h3>
-            <pre className="params-preview" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {formatSecrets(lastCreated.params)}
-            </pre>
-          </div>
-        ) : null}
-      </section>
+          <Form.FormItem style={{ marginBottom: 0 }}>
+            <Button theme="primary" loading={busy} disabled={!protocol} onClick={() => void onCreate()}>
+              创建入站配置
+            </Button>
+          </Form.FormItem>
+        </Form>
 
-      <section className="card">
-        <div className="row-between">
-          <h2>已有入站</h2>
-          <button type="button" className="btn-secondary" onClick={() => void load()}>
+        {lastCreated ? (
+          <Card bordered size="small" style={{ marginTop: 16 }} title={`已生成凭据 — ${lastCreated.name}`}>
+            <pre className="la-pre">{formatSecrets(lastCreated.params)}</pre>
+          </Card>
+        ) : null}
+      </Card>
+
+      <Card
+        bordered
+        className="la-section"
+        title="已有入站"
+        actions={
+          <Button variant="outline" onClick={() => void load()}>
             刷新列表
-          </button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>配置名称</th>
-              <th>传输协议</th>
-              <th>是否启用</th>
-              <th>核心参数预览</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {inbounds.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="muted" style={{ textAlign: 'center', padding: '2rem' }}>
-                  暂无入站配置数据
-                </td>
-              </tr>
-            ) : (
-              inbounds.map((inb) => (
-                <tr key={inb.id}>
-                  <td style={{ fontWeight: 600 }}>{inb.name}</td>
-                  <td>
-                    <code>{inb.protocol}</code>
-                  </td>
-                  <td>
-                    <span className={`status ${inb.enabled ? 'status-success' : 'status-failed'}`}>
-                      {inb.enabled ? '已启用' : '已禁用'}
-                    </span>
-                  </td>
-                  <td>
-                    <code className="params-preview">
-                      {summarizeParams(inb.params)}
-                    </code>
-                    {expandedId === inb.id ? (
-                      <pre
-                        className="params-preview"
-                        style={{
-                          display: 'block',
-                          marginTop: '0.5rem',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        {formatSecrets(inb.params)}
-                      </pre>
-                    ) : null}
-                  </td>
-                  <td className="actions">
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
-                      onClick={() =>
-                        setExpandedId((id) => (id === inb.id ? null : inb.id))
-                      }
-                    >
-                      {expandedId === inb.id ? '隐藏凭据' : '查看凭据'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-danger"
-                      style={{ padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
-                      onClick={() => void onDelete(inb.id, inb.name)}
-                    >
-                      删除
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </section>
+          </Button>
+        }
+      >
+        <Table
+          rowKey="id"
+          data={inbounds}
+          columns={columns}
+          empty="暂无入站配置数据"
+          hover
+          size="small"
+        />
+      </Card>
     </div>
   )
 }

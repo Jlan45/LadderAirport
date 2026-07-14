@@ -1,4 +1,18 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Button,
+  Card,
+  Checkbox,
+  DialogPlugin,
+  Form,
+  Input,
+  MessagePlugin,
+  Select,
+  Space,
+  Table,
+  Tag,
+  type PrimaryTableCol,
+} from 'tdesign-react'
 import {
   createSubscription,
   deleteSubscription,
@@ -13,8 +27,6 @@ import {
 export default function Subscriptions() {
   const [list, setList] = useState<Subscription[]>([])
   const [inbounds, setInbounds] = useState<InboundConfig[]>([])
-  const [error, setError] = useState('')
-  const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [preview, setPreview] = useState('')
 
@@ -24,13 +36,12 @@ export default function Subscriptions() {
   const [allInbounds, setAllInbounds] = useState(true)
 
   const load = useCallback(async () => {
-    setError('')
     try {
       const [subs, ins] = await Promise.all([listSubscriptions(), listInbounds()])
       setList(subs ?? [])
       setInbounds(ins ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '加载失败')
     }
   }, [])
 
@@ -47,24 +58,25 @@ export default function Subscriptions() {
     })
   }
 
-  async function onCreate(e: FormEvent) {
-    e.preventDefault()
+  async function onCreate() {
+    if (!name.trim()) {
+      MessagePlugin.warning('请填写订阅名称')
+      return
+    }
     setBusy(true)
-    setError('')
-    setMsg('')
     try {
       const body = {
-        name,
+        name: name.trim(),
         format,
         inbound_ids: allInbounds ? [] : Array.from(selectedInbounds),
         enabled: true,
       }
       const sub = await createSubscription(body)
       setName('')
-      setMsg(`已创建订阅：${sub.url || sub.token}`)
+      MessagePlugin.success(`已创建订阅：${sub.url || sub.token}`)
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '创建失败')
     } finally {
       setBusy(false)
     }
@@ -74,199 +86,215 @@ export default function Subscriptions() {
     if (!url) return
     try {
       await navigator.clipboard.writeText(url)
-      setMsg('订阅链接已复制')
+      MessagePlugin.success('订阅链接已复制')
     } catch {
-      setMsg(url)
+      MessagePlugin.info(url)
     }
   }
 
   async function onPreview(id: string) {
-    setError('')
     try {
       const text = await previewSubscription(id)
       setPreview(text)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '预览失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '预览失败')
     }
   }
 
-  async function onRotate(id: string) {
-    if (!confirm('轮换 Token 后旧链接将失效，继续？')) return
-    try {
-      const sub = await updateSubscription(id, { rotate_token: true })
-      setMsg(`新链接：${sub.url}`)
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '轮换失败')
-    }
+  function onRotate(id: string) {
+    const dialog = DialogPlugin.confirm({
+      header: '轮换 Token',
+      body: '轮换 Token 后旧链接将失效，继续？',
+      theme: 'warning',
+      onConfirm: async () => {
+        try {
+          const sub = await updateSubscription(id, { rotate_token: true })
+          MessagePlugin.success(`新链接：${sub.url}`)
+          await load()
+          dialog.destroy()
+        } catch (err) {
+          MessagePlugin.error(err instanceof Error ? err.message : '轮换失败')
+        }
+      },
+    })
   }
 
   async function onToggle(sub: Subscription) {
     try {
       await updateSubscription(sub.id, { enabled: !sub.enabled })
       await load()
+      MessagePlugin.success(sub.enabled ? '已禁用' : '已启用')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '更新失败')
     }
   }
 
-  async function onDelete(sub: Subscription) {
-    if (!confirm(`删除订阅「${sub.name}」？`)) return
-    try {
-      await deleteSubscription(sub.id)
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败')
-    }
+  function onDelete(sub: Subscription) {
+    const dialog = DialogPlugin.confirm({
+      header: '删除订阅',
+      body: `删除订阅「${sub.name}」？`,
+      theme: 'danger',
+      confirmBtn: { content: '删除', theme: 'danger' },
+      onConfirm: async () => {
+        try {
+          await deleteSubscription(sub.id)
+          await load()
+          MessagePlugin.success('已删除')
+          dialog.destroy()
+        } catch (err) {
+          MessagePlugin.error(err instanceof Error ? err.message : '删除失败')
+        }
+      },
+    })
   }
+
+  const columns: PrimaryTableCol<Subscription>[] = [
+    {
+      colKey: 'name',
+      title: '名称',
+      cell: ({ row }) => <strong>{row.name}</strong>,
+    },
+    {
+      colKey: 'format',
+      title: '格式',
+      width: 100,
+      cell: ({ row }) => <code className="la-mono">{row.format}</code>,
+    },
+    {
+      colKey: 'enabled',
+      title: '状态',
+      width: 90,
+      cell: ({ row }) => (
+        <Tag theme={row.enabled ? 'success' : 'default'} variant="light">
+          {row.enabled ? '启用' : '禁用'}
+        </Tag>
+      ),
+    },
+    {
+      colKey: 'url',
+      title: '链接',
+      cell: ({ row }) => <code className="la-mono">{row.url}</code>,
+    },
+    {
+      colKey: 'ops',
+      title: '操作',
+      width: 320,
+      cell: ({ row }) => (
+        <Space size={4} breakLine>
+          <Button size="small" variant="outline" onClick={() => void onCopy(row.url)}>
+            复制
+          </Button>
+          <Button size="small" variant="outline" onClick={() => void onPreview(row.id)}>
+            预览
+          </Button>
+          <Button size="small" variant="outline" onClick={() => void onToggle(row)}>
+            {row.enabled ? '禁用' : '启用'}
+          </Button>
+          <Button size="small" variant="outline" onClick={() => onRotate(row.id)}>
+            轮换 Token
+          </Button>
+          <Button size="small" theme="danger" variant="outline" onClick={() => onDelete(row)}>
+            删除
+          </Button>
+        </Space>
+      ),
+    },
+  ]
 
   return (
     <div>
-      <h1>订阅</h1>
-      <p className="muted">
-        生成 Clash / sing-box 客户端订阅。基础 CN 分流：局域网与中国大陆直连，其余走代理。
-        节点 <code>Address</code> 会作为客户端连接的服务器地址。
-      </p>
-      {error ? <div className="error">{error}</div> : null}
-      {msg ? <div className="ok">{msg}</div> : null}
+      <div className="la-page-header">
+        <div>
+          <h1 className="la-page-title">订阅</h1>
+          <p className="la-page-desc">
+            生成 Clash / sing-box 客户端订阅。基础 CN 分流：局域网与中国大陆直连，其余走代理。节点{' '}
+            <code>Address</code> 会作为客户端连接的服务器地址。
+          </p>
+        </div>
+      </div>
 
-      <section className="card">
-        <h2>创建订阅</h2>
-        <form onSubmit={onCreate}>
-          <div className="form-grid">
-            <div className="form-row">
-              <label htmlFor="sub-name">名称</label>
-              <input
-                id="sub-name"
+      <Card bordered className="la-section" title="创建订阅">
+        <Form labelAlign="top">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            <Form.FormItem label="名称" requiredMark>
+              <Input
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
+                onChange={(v) => setName(String(v))}
                 placeholder="例如: 主力 Clash"
+                clearable
               />
-            </div>
-            <div className="form-row">
-              <label htmlFor="sub-fmt">格式</label>
-              <select
-                id="sub-fmt"
+            </Form.FormItem>
+            <Form.FormItem label="格式">
+              <Select
                 value={format}
-                onChange={(e) => setFormat(e.target.value as 'clash' | 'singbox')}
-              >
-                <option value="clash">Clash / Mihomo (YAML)</option>
-                <option value="singbox">sing-box (JSON)</option>
-              </select>
-            </div>
+                onChange={(v) => setFormat(v as 'clash' | 'singbox')}
+                options={[
+                  { label: 'Clash / Mihomo (YAML)', value: 'clash' },
+                  { label: 'sing-box (JSON)', value: 'singbox' },
+                ]}
+              />
+            </Form.FormItem>
           </div>
 
-          <div className="form-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={allInbounds}
-                onChange={(e) => setAllInbounds(e.target.checked)}
-              />{' '}
+          <Form.FormItem>
+            <Checkbox checked={allInbounds} onChange={(c) => setAllInbounds(Boolean(c))}>
               包含所有已启用入站（按节点关联展开）
-            </label>
-          </div>
+            </Checkbox>
+          </Form.FormItem>
 
           {!allInbounds ? (
-            <div className="check-list">
+            <div className="la-check-list" style={{ marginBottom: 16 }}>
               {inbounds.length === 0 ? (
-                <p className="muted">暂无入站配置</p>
+                <span className="la-page-desc">暂无入站配置</span>
               ) : (
                 inbounds.map((inb) => (
-                  <label key={inb.id} className="check-item">
-                    <input
-                      type="checkbox"
-                      checked={selectedInbounds.has(inb.id)}
-                      onChange={() => toggleInbound(inb.id)}
-                    />
-                    <span>
-                      {inb.name} <code>{inb.protocol}</code>
-                      {!inb.enabled ? ' (已禁用)' : ''}
-                    </span>
-                  </label>
+                  <Checkbox
+                    key={inb.id}
+                    checked={selectedInbounds.has(inb.id)}
+                    onChange={() => toggleInbound(inb.id)}
+                  >
+                    {inb.name} <code className="la-mono">{inb.protocol}</code>
+                    {!inb.enabled ? ' (已禁用)' : ''}
+                  </Checkbox>
                 ))
               )}
             </div>
           ) : null}
 
-          <button type="submit" disabled={busy}>
-            创建订阅
-          </button>
-        </form>
-      </section>
+          <Form.FormItem style={{ marginBottom: 0 }}>
+            <Button theme="primary" loading={busy} onClick={() => void onCreate()}>
+              创建订阅
+            </Button>
+          </Form.FormItem>
+        </Form>
+      </Card>
 
-      <section className="card">
-        <div className="row-between">
-          <h2>订阅列表</h2>
-          <button type="button" className="btn-secondary" onClick={() => void load()}>
+      <Card
+        bordered
+        className="la-section"
+        title="订阅列表"
+        actions={
+          <Button variant="outline" onClick={() => void load()}>
             刷新
-          </button>
-        </div>
-        {list.length === 0 ? (
-          <p className="muted">暂无订阅</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>格式</th>
-                <th>状态</th>
-                <th>链接</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((sub) => (
-                <tr key={sub.id}>
-                  <td style={{ fontWeight: 600 }}>{sub.name}</td>
-                  <td>
-                    <code>{sub.format}</code>
-                  </td>
-                  <td>
-                    <span className={`status ${sub.enabled ? 'status-success' : 'status-failed'}`}>
-                      {sub.enabled ? '启用' : '禁用'}
-                    </span>
-                  </td>
-                  <td>
-                    <code className="params-preview" style={{ fontSize: '0.75rem' }}>
-                      {sub.url}
-                    </code>
-                  </td>
-                  <td className="actions">
-                    <button type="button" className="btn-secondary" onClick={() => void onCopy(sub.url)}>
-                      复制
-                    </button>
-                    <button type="button" className="btn-secondary" onClick={() => void onPreview(sub.id)}>
-                      预览
-                    </button>
-                    <button type="button" className="btn-secondary" onClick={() => void onToggle(sub)}>
-                      {sub.enabled ? '禁用' : '启用'}
-                    </button>
-                    <button type="button" className="btn-secondary" onClick={() => void onRotate(sub.id)}>
-                      轮换 Token
-                    </button>
-                    <button type="button" className="btn-danger" onClick={() => void onDelete(sub)}>
-                      删除
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+          </Button>
+        }
+      >
+        <Table rowKey="id" data={list} columns={columns} empty="暂无订阅" hover size="small" />
+      </Card>
 
       {preview ? (
-        <section className="card">
-          <div className="row-between">
-            <h2>配置预览</h2>
-            <button type="button" className="btn-secondary" onClick={() => setPreview('')}>
+        <Card
+          bordered
+          className="la-section"
+          title="配置预览"
+          actions={
+            <Button size="small" variant="outline" onClick={() => setPreview('')}>
               关闭
-            </button>
-          </div>
-          <pre className="code-block">{preview}</pre>
-        </section>
+            </Button>
+          }
+        >
+          <pre className="la-pre">{preview}</pre>
+        </Card>
       ) : null}
     </div>
   )

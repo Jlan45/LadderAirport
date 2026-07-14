@@ -1,4 +1,15 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  MessagePlugin,
+  Row,
+  Space,
+} from 'tdesign-react'
 import { getSettings, putSettings } from '../api/client'
 
 export default function Settings() {
@@ -9,12 +20,11 @@ export default function Settings() {
   const [publicBase, setPublicBase] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [error, setError] = useState('')
-  const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
-    setError('')
+    setLoading(true)
     try {
       const s = await getSettings()
       setToken(s.default_agent_token || '')
@@ -23,7 +33,9 @@ export default function Settings() {
       setListenAddr(s.listen_addr || '')
       setPublicBase(s.public_base_url || '')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载系统设置失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '加载系统设置失败')
+    } finally {
+      setLoading(false)
     }
   }, [])
 
@@ -31,12 +43,9 @@ export default function Settings() {
     void load()
   }, [load])
 
-  async function onSave(e: FormEvent) {
-    e.preventDefault()
-    setError('')
-    setMsg('')
+  async function onSave() {
     if (newPassword && newPassword !== confirmPassword) {
-      setError('两次输入的密码不一致')
+      MessagePlugin.warning('两次输入的密码不一致')
       return
     }
     setBusy(true)
@@ -59,107 +68,156 @@ export default function Settings() {
       setPublicBase(s.public_base_url || '')
       setNewPassword('')
       setConfirmPassword('')
-      setMsg('系统设置保存成功')
+      MessagePlugin.success('系统设置保存成功')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '保存失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '保存失败')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div>
-      <h1>系统设置</h1>
-      {error ? <div className="error">{error}</div> : null}
-      {msg ? <div className="ok">{msg}</div> : null}
+    <div className="la-settings">
+      <div className="la-page-header">
+        <div>
+          <h1 className="la-page-title">系统设置</h1>
+          <p className="la-page-desc">管理节点连接默认值、Panel 对外地址与管理员账号</p>
+        </div>
+        <Space>
+          <Button variant="outline" loading={loading} onClick={() => void load()}>
+            重新加载
+          </Button>
+          <Button theme="primary" loading={busy} onClick={() => void onSave()}>
+            保存全部
+          </Button>
+        </Space>
+      </div>
 
-      <section className="card">
-        <form onSubmit={onSave}>
-          <div className="form-row">
-            <label htmlFor="tok">默认 Agent 访问令牌</label>
-            <input
-              id="tok"
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              autoComplete="off"
-              placeholder="全局默认的连接校验令牌"
-            />
-          </div>
-          <div className="form-row">
-            <label htmlFor="to">gRPC 超时时间 (秒)</label>
-            <input
-              id="to"
-              type="number"
-              min={1}
-              value={timeoutSec}
-              onChange={(e) => setTimeoutSec(Number(e.target.value))}
-              required
-            />
-          </div>
-          <div className="form-row">
-            <label htmlFor="cc">最大并发任务数</label>
-            <input
-              id="cc"
-              type="number"
-              min={1}
-              value={concurrency}
-              onChange={(e) => setConcurrency(Number(e.target.value))}
-              required
-            />
-          </div>
-          <div className="form-row">
-            <label htmlFor="la">面板监听地址</label>
-            <input
-              id="la"
-              value={listenAddr}
-              onChange={(e) => setListenAddr(e.target.value)}
-              placeholder="例如: :8080"
-            />
-            <div className="field-hint">
-              仅保存做参考之用；更改此项可能需要手动重启面板服务。
-            </div>
-          </div>
-          <div className="form-row">
-            <label htmlFor="pbu">订阅公网基址（Public Base URL）</label>
-            <input
-              id="pbu"
-              value={publicBase}
-              onChange={(e) => setPublicBase(e.target.value)}
-              placeholder="例如: https://panel.example.com"
-            />
-            <div className="field-hint">用于生成完整订阅链接；留空则按当前访问 Host 拼接</div>
-          </div>
+      <div className="la-settings-grid">
+        <Card bordered className="la-section" title="连接与任务" subtitle="节点 gRPC 管控默认参数">
+          <Form labelAlign="top" disabled={loading}>
+            <Form.FormItem
+              label="默认 Agent 访问令牌"
+              help="新建节点未单独填写 Token 时使用；也用于生成安装命令"
+            >
+              <Input
+                type="password"
+                value={token}
+                onChange={(v) => setToken(String(v))}
+                autocomplete="off"
+                placeholder="长随机串，请勿使用弱口令"
+                clearable
+              />
+            </Form.FormItem>
+            <Row gutter={[16, 0]}>
+              <Col xs={12} sm={12} md={6}>
+                <Form.FormItem label="gRPC 超时（秒）" help="单次探测 / 下发 / 启停的等待上限">
+                  <InputNumber
+                    theme="column"
+                    style={{ width: '100%' }}
+                    min={1}
+                    max={600}
+                    value={timeoutSec}
+                    onChange={(v) => setTimeoutSec(Number(v) || 1)}
+                    suffix="秒"
+                  />
+                </Form.FormItem>
+              </Col>
+              <Col xs={12} sm={12} md={6}>
+                <Form.FormItem label="最大并发任务数" help="批量下发 / 启动时的并行上限">
+                  <InputNumber
+                    theme="column"
+                    style={{ width: '100%' }}
+                    min={1}
+                    max={256}
+                    value={concurrency}
+                    onChange={(v) => setConcurrency(Number(v) || 1)}
+                  />
+                </Form.FormItem>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
 
-          <h3 className="subhead">修改管理员密码</h3>
-          <div className="form-row">
-            <label htmlFor="np">新密码</label>
-            <input
-              id="np"
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              autoComplete="new-password"
-              placeholder="留空则不修改密码"
-            />
-          </div>
-          <div className="form-row">
-            <label htmlFor="cp">确认新密码</label>
-            <input
-              id="cp"
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              autoComplete="new-password"
-              placeholder="再次输入新密码以确认"
-            />
-          </div>
+        <Card bordered className="la-section" title="服务与订阅" subtitle="Panel 自身监听与对外公开地址">
+          <Form labelAlign="top" disabled={loading}>
+            <Form.FormItem
+              label="Public Base URL"
+              help="用于完整订阅链接，以及「添加节点」安装命令里的 LADDER_PANEL 自动 enroll"
+            >
+              <Input
+                value={publicBase}
+                onChange={(v) => setPublicBase(String(v))}
+                placeholder="https://panel.example.com"
+                clearable
+              />
+            </Form.FormItem>
+            <Form.FormItem
+              label="面板监听地址"
+              help="仅记录在设置中，修改后通常需要重启 Panel 进程才生效"
+            >
+              <Input
+                value={listenAddr}
+                onChange={(v) => setListenAddr(String(v))}
+                placeholder=":8080 或 127.0.0.1:8080"
+                clearable
+              />
+            </Form.FormItem>
+          </Form>
+        </Card>
 
-          <button type="submit" disabled={busy} style={{ marginTop: '0.5rem' }}>
-            {busy ? '保存中…' : '保存设置'}
-          </button>
-        </form>
-      </section>
+        <Card bordered className="la-section" title="安全" subtitle="控制台管理员密码">
+          <Form labelAlign="top" disabled={loading}>
+            <Row gutter={[16, 0]}>
+              <Col xs={12} sm={12} md={6}>
+                <Form.FormItem label="新密码" help="留空表示不修改">
+                  <Input
+                    type="password"
+                    value={newPassword}
+                    onChange={(v) => setNewPassword(String(v))}
+                    autocomplete="new-password"
+                    placeholder="新管理员密码"
+                    clearable
+                  />
+                </Form.FormItem>
+              </Col>
+              <Col xs={12} sm={12} md={6}>
+                <Form.FormItem label="确认新密码">
+                  <Input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(v) => setConfirmPassword(String(v))}
+                    autocomplete="new-password"
+                    placeholder="再次输入以确认"
+                    clearable
+                    status={
+                      confirmPassword && newPassword && confirmPassword !== newPassword
+                        ? 'error'
+                        : undefined
+                    }
+                    tips={
+                      confirmPassword && newPassword && confirmPassword !== newPassword
+                        ? '两次输入不一致'
+                        : undefined
+                    }
+                  />
+                </Form.FormItem>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+      </div>
+
+      <div className="la-settings-footer">
+        <Space>
+          <Button variant="outline" loading={loading} onClick={() => void load()}>
+            放弃未保存并重载
+          </Button>
+          <Button theme="primary" loading={busy} onClick={() => void onSave()}>
+            保存设置
+          </Button>
+        </Space>
+      </div>
     </div>
   )
 }

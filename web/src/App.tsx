@@ -1,5 +1,12 @@
-import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Layout, Loading, Menu } from 'tdesign-react'
+import {
+  RootListIcon,
+  SettingIcon,
+  ShareIcon,
+  SystemSettingIcon,
+} from 'tdesign-icons-react'
 import { ApiError, listNodes } from './api/client'
 import Login from './pages/Login'
 import Fleet from './pages/Fleet'
@@ -7,9 +14,20 @@ import Inbounds from './pages/Inbounds'
 import Subscriptions from './pages/Subscriptions'
 import Settings from './pages/Settings'
 
+const { Header, Content } = Layout
+const { HeadMenu, MenuItem } = Menu
+
+const NAV = [
+  { path: '/', label: '节点', icon: <RootListIcon /> },
+  { path: '/inbounds', label: '入站', icon: <SystemSettingIcon /> },
+  { path: '/subscriptions', label: '订阅', icon: <ShareIcon /> },
+  { path: '/settings', label: '设置', icon: <SettingIcon /> },
+] as const
+
 /** Layout with nav; redirects to /login if session is invalid. */
 function AppLayout() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(false)
 
@@ -45,10 +63,18 @@ function AppLayout() {
     }
   }, [ready, authed, navigate])
 
+  const active = useMemo(() => {
+    const p = location.pathname
+    if (p.startsWith('/inbounds')) return '/inbounds'
+    if (p.startsWith('/subscriptions')) return '/subscriptions'
+    if (p.startsWith('/settings')) return '/settings'
+    return '/'
+  }, [location.pathname])
+
   if (!ready) {
     return (
-      <div className="login-page">
-        <p className="muted">加载中…</p>
+      <div className="la-loading-page">
+        <Loading text="加载中…" size="medium" />
       </div>
     )
   }
@@ -58,22 +84,26 @@ function AppLayout() {
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">Ladder Airport</div>
-        <nav>
-          <NavLink to="/" end>
-            节点
-          </NavLink>
-          <NavLink to="/inbounds">入站</NavLink>
-          <NavLink to="/subscriptions">订阅</NavLink>
-          <NavLink to="/settings">设置</NavLink>
-        </nav>
-      </header>
-      <main className="main">
+    <Layout className="la-layout">
+      <Header className="la-header">
+        <HeadMenu
+          theme="light"
+          value={active}
+          onChange={(v: string | number) => navigate(String(v))}
+          className="la-header-menu"
+          logo={<div className="la-brand">Ladder Airport</div>}
+        >
+          {NAV.map((item) => (
+            <MenuItem key={item.path} value={item.path} icon={item.icon}>
+              {item.label}
+            </MenuItem>
+          ))}
+        </HeadMenu>
+      </Header>
+      <Content className="la-content">
         <Outlet />
-      </main>
-    </div>
+      </Content>
+    </Layout>
   )
 }
 

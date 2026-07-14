@@ -1,4 +1,14 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import {
+  Button,
+  Checkbox,
+  Dialog,
+  Form,
+  Input,
+  InputNumber,
+  MessagePlugin,
+  Space,
+} from 'tdesign-react'
 import { bootstrapNode, type NodeInstallInfo } from '../api/client'
 
 type Props = {
@@ -16,7 +26,6 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
   const [enableTLS, setEnableTLS] = useState(true)
   const [agentVersion, setAgentVersion] = useState('latest')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -29,30 +38,20 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
     setEnableTLS(true)
     setAgentVersion('latest')
     setBusy(false)
-    setError('')
     setInstallInfo(null)
     setCopied(false)
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+  async function onSubmit() {
+    if (!name.trim()) {
+      MessagePlugin.warning('请填写节点名称')
+      return
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-
-  if (!open) return null
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
     setBusy(true)
-    setError('')
     setCopied(false)
     try {
       const info = await bootstrapNode({
-        name,
+        name: name.trim(),
         address: address.trim() || undefined,
         grpc_port: grpcPort,
         labels: labels
@@ -64,8 +63,9 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
       })
       setInstallInfo(info)
       onCreated()
+      MessagePlugin.success('节点已创建，请复制安装命令')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '创建失败')
+      MessagePlugin.error(err instanceof Error ? err.message : '创建失败')
     } finally {
       setBusy(false)
     }
@@ -76,141 +76,127 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
     try {
       await navigator.clipboard.writeText(installInfo.install_command)
       setCopied(true)
+      MessagePlugin.success('已复制安装命令')
       setTimeout(() => setCopied(false), 2000)
     } catch {
-      setError('复制失败，请手动选择命令文本')
+      MessagePlugin.error('复制失败，请手动选择命令文本')
     }
   }
 
   return (
-    <div className="modal-overlay" role="presentation" onClick={onClose}>
-      <div
-        className="modal-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-node-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="row-between" style={{ marginBottom: '0.75rem' }}>
-          <h2 id="add-node-title" style={{ margin: 0 }}>
-            {installInfo ? `安装命令 · ${installInfo.node.name}` : '添加节点'}
-          </h2>
-          <button type="button" className="btn-secondary" onClick={onClose}>
-            关闭
-          </button>
-        </div>
-
-        {error ? <div className="error">{error}</div> : null}
-
-        {!installInfo ? (
-          <>
-            <p className="muted" style={{ marginTop: 0 }}>
-              创建节点并生成安装命令。目标机执行后会<strong>自动向 Panel 上报地址与 CA</strong>
-              （需在「设置」填写 Public Base URL）。地址可留空，由 Agent 探测上报。
-            </p>
-            <form className="form-grid" onSubmit={(e) => void onSubmit(e)}>
-              <div className="form-row">
-                <label htmlFor="add-n-name">节点名称</label>
-                <input
-                  id="add-n-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  placeholder="例如: 香港 01"
-                />
-              </div>
-              <div className="form-row">
-                <label htmlFor="add-n-addr">节点地址（可选）</label>
-                <input
-                  id="add-n-addr"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="可先留空，装完再填 IP/域名"
-                />
-              </div>
-              <div className="form-row">
-                <label htmlFor="add-n-port">gRPC 端口</label>
-                <input
-                  id="add-n-port"
-                  type="number"
-                  value={grpcPort}
-                  onChange={(e) => setGrpcPort(Number(e.target.value))}
-                />
-              </div>
-              <div className="form-row">
-                <label htmlFor="add-n-labels">节点标签（英文逗号分隔）</label>
-                <input
-                  id="add-n-labels"
-                  value={labels}
-                  onChange={(e) => setLabels(e.target.value)}
-                  placeholder="例如: edge,prod,hk"
-                />
-              </div>
-              <div className="form-row">
-                <label htmlFor="add-n-ver">Agent 版本</label>
-                <input
-                  id="add-n-ver"
-                  value={agentVersion}
-                  onChange={(e) => setAgentVersion(e.target.value)}
-                  placeholder="latest 或 v0.2.0"
-                />
-              </div>
-              <div className="form-row">
-                <label htmlFor="add-n-tls" style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-                  <input
-                    id="add-n-tls"
-                    type="checkbox"
-                    checked={enableTLS}
-                    onChange={(e) => setEnableTLS(e.target.checked)}
-                  />{' '}
-                  安装时启用 TLS（推荐）
-                </label>
-              </div>
-              <button type="submit" disabled={busy}>
-                {busy ? '生成中…' : '添加并生成安装命令'}
-              </button>
-            </form>
-          </>
+    <Dialog
+      visible={open}
+      header={installInfo ? `安装命令 · ${installInfo.node.name}` : '添加节点'}
+      width={640}
+      footer={
+        installInfo ? (
+          <Space>
+            <Button
+              theme="primary"
+              onClick={() => {
+                onOpenDetail(installInfo.node.id)
+                onClose()
+              }}
+            >
+              打开节点详情
+            </Button>
+            <Button variant="outline" onClick={onClose}>
+              完成
+            </Button>
+          </Space>
         ) : (
-          <>
-            <p className="muted" style={{ marginBottom: '0.5rem' }}>
-              Token 已写入节点；命令含 <code>LADDER_TOKEN</code>
-              {installInfo.enable_tls ? ' + TLS' : '（明文）'}
-              {installInfo.enroll_enabled
-                ? `；装机后自动 enroll 到 ${installInfo.panel_base_url || 'Panel'}。`
-                : '。未配置 Public Base URL 时无法自动上报，请先到「设置」填写。'}
-            </p>
-            <div className="row-between" style={{ marginBottom: '0.5rem' }}>
-              <strong>一键安装</strong>
-              <button type="button" className="btn-secondary" onClick={() => void copyCommand()}>
-                {copied ? '已复制' : '复制命令'}
-              </button>
-            </div>
-            <pre className="install-cmd-block">{installInfo.install_command}</pre>
-            <ol style={{ marginTop: '1rem', paddingLeft: '1.25rem' }}>
-              {installInfo.steps.map((s) => (
-                <li key={s} style={{ marginBottom: '0.35rem' }}>
-                  {s}
-                </li>
-              ))}
-            </ol>
-            <div className="actions" style={{ marginTop: '1rem' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  onOpenDetail(installInfo.node.id)
-                  onClose()
-                }}
-              >
-                打开节点详情
-              </button>
-              <button type="button" className="btn-secondary" onClick={onClose}>
-                完成
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+          <Space>
+            <Button variant="outline" onClick={onClose}>
+              取消
+            </Button>
+            <Button theme="primary" loading={busy} onClick={() => void onSubmit()}>
+              添加并生成安装命令
+            </Button>
+          </Space>
+        )
+      }
+      onClose={onClose}
+      destroyOnClose
+    >
+      {!installInfo ? (
+        <>
+          <p className="la-page-desc" style={{ marginTop: 0 }}>
+            创建节点并生成安装命令。目标机执行后会<strong>自动向 Panel 上报地址与 CA</strong>
+            （需在「设置」填写 Public Base URL）。地址可留空，由 Agent 探测上报。
+          </p>
+          <Form labelAlign="top">
+            <Form.FormItem label="节点名称" requiredMark>
+              <Input
+                value={name}
+                onChange={(v) => setName(String(v))}
+                placeholder="例如: 香港 01"
+                clearable
+              />
+            </Form.FormItem>
+            <Form.FormItem label="节点地址（可选）">
+              <Input
+                value={address}
+                onChange={(v) => setAddress(String(v))}
+                placeholder="可先留空，装完再填 IP/域名"
+                clearable
+              />
+            </Form.FormItem>
+            <Form.FormItem label="gRPC 端口">
+              <InputNumber
+                theme="normal"
+                style={{ width: '100%' }}
+                value={grpcPort}
+                onChange={(v) => setGrpcPort(Number(v) || 50051)}
+              />
+            </Form.FormItem>
+            <Form.FormItem label="节点标签（英文逗号分隔）">
+              <Input
+                value={labels}
+                onChange={(v) => setLabels(String(v))}
+                placeholder="例如: edge,prod,hk"
+                clearable
+              />
+            </Form.FormItem>
+            <Form.FormItem label="Agent 版本">
+              <Input
+                value={agentVersion}
+                onChange={(v) => setAgentVersion(String(v))}
+                placeholder="latest 或 v0.3.1"
+                clearable
+              />
+            </Form.FormItem>
+            <Form.FormItem>
+              <Checkbox checked={enableTLS} onChange={(c) => setEnableTLS(Boolean(c))}>
+                安装时启用 TLS（推荐）
+              </Checkbox>
+            </Form.FormItem>
+          </Form>
+        </>
+      ) : (
+        <>
+          <p className="la-page-desc" style={{ marginTop: 0 }}>
+            Token 已写入节点；命令含 <code>LADDER_TOKEN</code>
+            {installInfo.enable_tls ? ' + TLS' : '（明文）'}
+            {installInfo.enroll_enabled
+              ? `；装机后自动 enroll 到 ${installInfo.panel_base_url || 'Panel'}。`
+              : '。未配置 Public Base URL 时无法自动上报，请先到「设置」填写。'}
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+            <strong>一键安装</strong>
+            <Button size="small" variant="outline" onClick={() => void copyCommand()}>
+              {copied ? '已复制' : '复制命令'}
+            </Button>
+          </div>
+          <pre className="la-pre">{installInfo.install_command}</pre>
+          <ol style={{ marginTop: 16, paddingLeft: 20 }}>
+            {installInfo.steps.map((s) => (
+              <li key={s} style={{ marginBottom: 6 }}>
+                {s}
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+    </Dialog>
   )
 }

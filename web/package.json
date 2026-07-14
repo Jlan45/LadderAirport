@@ -11,7 +11,9 @@
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.1.0"
+    "react-router-dom": "^7.1.0",
+    "tdesign-icons-react": "^0.6.6",
+    "tdesign-react": "^1.18.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

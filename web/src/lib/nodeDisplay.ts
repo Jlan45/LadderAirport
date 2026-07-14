@@ -36,11 +36,12 @@ export function statusLabel(s?: string): string {
   }
 }
 
-export function statusClass(s?: string): string {
-  if (s === 'online' || s === 'running') return 'status status-success'
-  if (s === 'unreachable' || s === 'unauthorized') return 'status status-failed'
-  if (s === 'pending') return 'status status-pending'
-  return 'status'
+/** Map connectivity status to TDesign Tag theme. */
+export function statusTheme(s?: string): 'success' | 'danger' | 'warning' | 'default' {
+  if (s === 'online' || s === 'running') return 'success'
+  if (s === 'unreachable' || s === 'unauthorized') return 'danger'
+  if (s === 'pending') return 'warning'
+  return 'default'
 }
 
 export function isOnlineStatus(s?: string): boolean {
@@ -58,6 +59,12 @@ export function runtimeLabel(s?: string): string {
     default:
       return s || '未知'
   }
+}
+
+export function runtimeTheme(s?: string): 'success' | 'danger' | 'default' {
+  if (s === 'running') return 'success'
+  if (s === 'error') return 'danger'
+  return 'default'
 }
 
 export function taskKindLabel(kind: string): string {
@@ -90,4 +97,12 @@ export function taskStatusLabel(status: string): string {
     default:
       return status || '未知'
   }
+}
+
+// Keep legacy class helper for any residual callers.
+export function statusClass(s?: string): string {
+  if (s === 'online' || s === 'running') return 'status status-success'
+  if (s === 'unreachable' || s === 'unauthorized') return 'status status-failed'
+  if (s === 'pending') return 'status status-pending'
+  return 'status'
 }
