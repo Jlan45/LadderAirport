@@ -248,7 +248,9 @@ func (r *Runner) applyNode(ctx context.Context, client NodeRPC, taskID string, n
 	if err != nil {
 		return "", fmt.Errorf("list inbounds: %w", err)
 	}
-	cfgBytes, err := converter.Convert(inbounds)
+	cfgBytes, err := converter.Convert(inbounds, converter.ConvertOptions{
+		BindInterface: node.EgressInterface,
+	})
 	if err != nil {
 		return "", fmt.Errorf("convert: %w", err)
 	}

@@ -92,6 +92,14 @@ func (s *Server) GetMetrics(ctx context.Context, _ *agentv1.GetMetricsRequest) (
 	}, nil
 }
 
+func (s *Server) ListInterfaces(context.Context, *agentv1.ListInterfacesRequest) (*agentv1.ListInterfacesResponse, error) {
+	ifaces, err := listHostInterfaces()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list interfaces: %v", err)
+	}
+	return &agentv1.ListInterfacesResponse{Interfaces: ifaces}, nil
+}
+
 func (s *Server) StreamLogs(req *agentv1.StreamLogsRequest, stream agentv1.AgentControl_StreamLogsServer) error {
 	levelFilter := ""
 	tailN := 0

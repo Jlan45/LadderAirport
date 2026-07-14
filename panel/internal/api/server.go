@@ -26,6 +26,7 @@ type NodeLive interface {
 	Ping(ctx context.Context) (*agentv1.PingResponse, error)
 	GetStatus(ctx context.Context) (*agentv1.GetStatusResponse, error)
 	GetMetrics(ctx context.Context) (*agentv1.GetMetricsResponse, error)
+	ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesResponse, error)
 	StreamLogs(ctx context.Context, level string, tail int32) (agentv1.AgentControl_StreamLogsClient, error)
 }
 
@@ -158,6 +159,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/nodes/{id}/start", s.handleNodeStart)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/stop", s.handleNodeStop)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/metrics", s.handleNodeMetrics)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/interfaces", s.handleNodeInterfaces)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/logs", s.handleNodeLogs)
 
 	mux.HandleFunc("POST /api/v1/batch/apply", s.handleBatchApply)

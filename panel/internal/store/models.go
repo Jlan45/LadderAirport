@@ -9,9 +9,12 @@ type Node struct {
 	Labels        []string `json:"labels"`
 	TLSSkipVerify bool     `json:"tls_skip_verify"`
 	CACertPEM     string   `json:"ca_cert_pem,omitempty"`
-	Status        string   `json:"status"` // online | unreachable | unauthorized | unknown
-	LastSeenUnix  int64    `json:"last_seen_unix"`
-	ConfigHash    string   `json:"config_hash"`
+	// EgressInterface is the host NIC name for sing-box direct bind_interface.
+	// Empty means OS default routing.
+	EgressInterface string `json:"egress_interface"`
+	Status          string `json:"status"` // online | unreachable | unauthorized | unknown
+	LastSeenUnix    int64  `json:"last_seen_unix"`
+	ConfigHash      string `json:"config_hash"`
 	// Live monitoring cache (updated by fleet refresh / probe).
 	RuntimeState   string  `json:"runtime_state"` // running | stopped | error | ""
 	AgentVersion   string  `json:"agent_version"`
@@ -40,7 +43,7 @@ type InboundConfig struct {
 
 type Task struct {
 	ID            string           `json:"id"`
-	Type          string           `json:"type"` // apply|start|stop
+	Type          string           `json:"type"`   // apply|start|stop
 	Status        string           `json:"status"` // pending|running|success|partial|failed
 	NodeIDs       []string         `json:"node_ids"`
 	Results       []TaskNodeResult `json:"results"`
@@ -68,8 +71,8 @@ type Settings struct {
 type Subscription struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
-	Format        string   `json:"format"` // clash | singbox
-	Token         string   `json:"token"`  // URL secret for public /sub/{token}
+	Format        string   `json:"format"`      // clash | singbox
+	Token         string   `json:"token"`       // URL secret for public /sub/{token}
 	InboundIDs    []string `json:"inbound_ids"` // empty = all enabled inbounds attached to any node
 	Enabled       bool     `json:"enabled"`
 	CreatedAtUnix int64    `json:"created_at_unix"`

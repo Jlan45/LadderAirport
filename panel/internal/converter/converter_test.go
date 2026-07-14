@@ -143,17 +143,17 @@ func TestConvertVMessGolden(t *testing.T) {
 }
 
 func TestConvertEmptyError(t *testing.T) {
-	if _, err := Convert(nil); err == nil {
+	if _, err := Convert(nil, ConvertOptions{}); err == nil {
 		t.Fatal("expected error for empty list")
 	}
-	if _, err := Convert([]store.InboundConfig{}); err == nil {
+	if _, err := Convert([]store.InboundConfig{}, ConvertOptions{}); err == nil {
 		t.Fatal("expected error for empty list")
 	}
 	// only disabled
 	if _, err := Convert([]store.InboundConfig{{
 		Name: "x", Protocol: "shadowsocks", Enabled: false,
 		Params: map[string]any{"port": 1, "method": "aes-256-gcm", "password": "p"},
-	}}); err == nil {
+	}}, ConvertOptions{}); err == nil {
 		t.Fatal("expected error when all disabled")
 	}
 }
@@ -173,7 +173,7 @@ func TestConvertPortConflict(t *testing.T) {
 			"method": "aes-256-gcm", "password": "p2",
 		},
 	}
-	_, err := Convert([]store.InboundConfig{a, b})
+	_, err := Convert([]store.InboundConfig{a, b}, ConvertOptions{})
 	if err == nil {
 		t.Fatal("expected port conflict error")
 	}
@@ -187,7 +187,7 @@ func TestConvertInvalidUUID(t *testing.T) {
 			"uuid": "not-a-uuid", "tls_mode": "none",
 		},
 	}
-	_, err := Convert([]store.InboundConfig{in})
+	_, err := Convert([]store.InboundConfig{in}, ConvertOptions{})
 	if err == nil {
 		t.Fatal("expected invalid UUID error")
 	}
@@ -216,14 +216,14 @@ func TestConvertMissingRequired(t *testing.T) {
 		ID: "ss", Name: "ss", Protocol: "shadowsocks", Enabled: true,
 		Params: map[string]any{"port": float64(8388), "method": "aes-256-gcm"},
 	}
-	if _, err := Convert([]store.InboundConfig{in}); err == nil {
+	if _, err := Convert([]store.InboundConfig{in}, ConvertOptions{}); err == nil {
 		t.Fatal("expected missing password error")
 	}
 }
 
 func assertGolden(t *testing.T, inbounds []store.InboundConfig, goldenName string) {
 	t.Helper()
-	got, err := Convert(inbounds)
+	got, err := Convert(inbounds, ConvertOptions{})
 	if err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
@@ -243,5 +243,46 @@ func assertGolden(t *testing.T, inbounds []store.InboundConfig, goldenName strin
 		gotPretty, _ := json.MarshalIndent(gotObj, "", "  ")
 		wantPretty, _ := json.MarshalIndent(wantObj, "", "  ")
 		t.Fatalf("golden mismatch for %s\n--- got ---\n%s\n--- want ---\n%s", goldenName, gotPretty, wantPretty)
+	}
+}
+
+func TestConvertBindInterface(t *testing.T) {
+	in := store.InboundConfig{
+		ID: "ss-001", Name: "ss-main", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{
+			"listen": "0.0.0.0", "port": float64(8388),
+			"method": "aes-256-gcm", "password": "ss-secret", "network": "tcp",
+		},
+	}
+	got, err := Convert([]store.InboundConfig{in}, ConvertOptions{BindInterface: "eth1"})
+	if err != nil {
+		t.Fatalf("Convert: %v", err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(got, &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	outs, _ := cfg["outbounds"].([]any)
+	if len(outs) != 1 {
+		t.Fatalf("outbounds len = %d", len(outs))
+	}
+	ob, _ := outs[0].(map[string]any)
+	if ob["bind_interface"] != "eth1" {
+		t.Fatalf("bind_interface = %v", ob["bind_interface"])
+	}
+
+	// whitespace-only must omit the key
+	got2, err := Convert([]store.InboundConfig{in}, ConvertOptions{BindInterface: "  "})
+	if err != nil {
+		t.Fatalf("Convert blank: %v", err)
+	}
+	var cfg2 map[string]any
+	if err := json.Unmarshal(got2, &cfg2); err != nil {
+		t.Fatalf("unmarshal blank: %v", err)
+	}
+	outs2, _ := cfg2["outbounds"].([]any)
+	ob2, _ := outs2[0].(map[string]any)
+	if _, ok := ob2["bind_interface"]; ok {
+		t.Fatalf("expected no bind_interface for blank, got %v", ob2["bind_interface"])
 	}
 }

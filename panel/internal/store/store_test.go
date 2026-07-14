@@ -273,3 +273,29 @@ func TestSaveAndLatestSnapshot(t *testing.T) {
 		t.Fatalf("latest = %+v", snap)
 	}
 }
+
+func TestNodeEgressInterface(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "egress", Address: "1.2.3.4", GRPCPort: 50051, EgressInterface: "eth1"}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	got, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if got.EgressInterface != "eth1" {
+		t.Fatalf("EgressInterface = %q", got.EgressInterface)
+	}
+	n.EgressInterface = ""
+	if err := s.UpdateNode(n); err != nil {
+		t.Fatalf("UpdateNode clear: %v", err)
+	}
+	got, err = s.GetNode(n.ID)
+	if err != nil {
+		t.Fatalf("GetNode after clear: %v", err)
+	}
+	if got.EgressInterface != "" {
+		t.Fatalf("expected empty EgressInterface, got %q", got.EgressInterface)
+	}
+}

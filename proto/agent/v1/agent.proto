@@ -12,6 +12,7 @@ service AgentControl {
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
   rpc StreamLogs(StreamLogsRequest) returns (stream LogLine);
+  rpc ListInterfaces(ListInterfacesRequest) returns (ListInterfacesResponse);
 }
 
 message PingRequest {}
@@ -67,4 +68,19 @@ message LogLine {
   int64 ts_unix_ms = 1;
   string level = 2;
   string message = 3;
+}
+
+message ListInterfacesRequest {}
+
+message NetworkInterface {
+  string name = 1;
+  repeated string addresses = 2;
+  bool up = 3;
+  bool loopback = 4;
+  int32 mtu = 5;
+  string hardware_addr = 6;
+}
+
+message ListInterfacesResponse {
+  repeated NetworkInterface interfaces = 1;
 }

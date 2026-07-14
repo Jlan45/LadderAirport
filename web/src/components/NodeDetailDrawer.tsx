@@ -10,6 +10,7 @@ import {
   Input,
   InputNumber,
   MessagePlugin,
+  Select,
   Space,
   Textarea,
 } from 'tdesign-react'
@@ -19,6 +20,7 @@ import {
   getNodeMetrics,
   listInbounds,
   listNodeInbounds,
+  listNodeInterfaces,
   listNodes,
   previewNodeConfig,
   setNodeInbounds,
@@ -28,6 +30,7 @@ import {
   updateNode,
   type InboundConfig,
   type Metrics,
+  type NetworkInterface,
   type Node,
   type NodeInstallInfo,
   type Task,
@@ -60,8 +63,27 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [editPort, setEditPort] = useState(50051)
   const [editCA, setEditCA] = useState('')
   const [editTLSSkip, setEditTLSSkip] = useState(false)
+  const [editEgress, setEditEgress] = useState('')
+  const [ifaces, setIfaces] = useState<NetworkInterface[]>([])
+  const [ifacesError, setIfacesError] = useState('')
+  const [ifacesLoading, setIfacesLoading] = useState(false)
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
+
+  const loadInterfaces = useCallback(async () => {
+    if (!id) return
+    setIfacesLoading(true)
+    setIfacesError('')
+    try {
+      const res = await listNodeInterfaces(id)
+      setIfaces(res.interfaces ?? [])
+    } catch (err) {
+      setIfaces([])
+      setIfacesError(err instanceof Error ? err.message : '无法拉取网卡列表')
+    } finally {
+      setIfacesLoading(false)
+    }
+  }, [id])
 
   const load = useCallback(async () => {
     if (!id) return
@@ -78,6 +100,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         setEditPort(n.grpc_port || 50051)
         setEditCA(n.ca_cert_pem || '')
         setEditTLSSkip(!!n.tls_skip_verify)
+        setEditEgress(n.egress_interface || '')
       }
       setAllInbounds(all ?? [])
       setAttachedIds(new Set((attached ?? []).map((a) => a.id)))
@@ -96,10 +119,14 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       setTask(null)
       setInstallInfo(null)
       setNode(null)
+      setIfaces([])
+      setIfacesError('')
+      setEditEgress('')
       return
     }
     void load()
-  }, [open, load])
+    void loadInterfaces()
+  }, [open, load, loadInterfaces])
 
   useEffect(() => {
     return () => {
@@ -222,10 +249,11 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         grpc_port: editPort,
         ca_cert_pem: editCA,
         tls_skip_verify: editTLSSkip,
+        egress_interface: editEgress.trim(),
         status: editAddress.trim() ? (node.status === 'pending' ? 'unknown' : node.status) : 'pending',
       })
       setNode(updated)
-      MessagePlugin.success('连接设置已保存')
+      MessagePlugin.success('连接设置已保存（出口网卡需下发配置后生效）')
       await load()
       onChanged()
     } catch (err) {
@@ -233,6 +261,33 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     } finally {
       setBusy(false)
     }
+  }
+
+  function ifaceLabel(iface: NetworkInterface): string {
+    const flags: string[] = []
+    if (iface.up) flags.push('up')
+    else flags.push('down')
+    if (iface.loopback) flags.push('loopback')
+    const addr = (iface.addresses && iface.addresses.length > 0 ? iface.addresses[0] : '') || ''
+    const flagStr = flags.length ? ` (${flags.join(', ')})` : ''
+    return addr ? `${iface.name}${flagStr} · ${addr}` : `${iface.name}${flagStr}`
+  }
+
+  function egressOptions() {
+    const opts: { label: string; value: string }[] = [
+      { label: '系统默认（不绑定网卡）', value: '' },
+    ]
+    const seen = new Set<string>([''])
+    for (const iface of ifaces) {
+      if (!iface.name || seen.has(iface.name)) continue
+      seen.add(iface.name)
+      opts.push({ label: ifaceLabel(iface), value: iface.name })
+    }
+    // Keep a saved value that is no longer in the live list.
+    if (editEgress && !seen.has(editEgress)) {
+      opts.push({ label: `${editEgress}（已保存，当前列表中不存在）`, value: editEgress })
+    }
+    return opts
   }
 
   async function onShowInstall() {
@@ -313,6 +368,31 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
             <Checkbox checked={editTLSSkip} onChange={(c) => setEditTLSSkip(Boolean(c))}>
               跳过 TLS 证书验证（仅 lab）
             </Checkbox>
+          </Form.FormItem>
+          <Form.FormItem label="出口网卡">
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Select
+                value={editEgress}
+                onChange={(v) => setEditEgress(String(v ?? ''))}
+                options={egressOptions()}
+                placeholder="系统默认"
+                clearable
+                filterable
+                style={{ width: '100%' }}
+                empty={ifacesLoading ? '加载网卡中…' : '暂无网卡数据'}
+              />
+              <Space>
+                <Button size="small" variant="outline" loading={ifacesLoading} onClick={() => void loadInterfaces()}>
+                  刷新网卡
+                </Button>
+              </Space>
+              <p className="la-page-desc" style={{ margin: 0 }}>
+                留空使用系统默认路由。修改后需「下发配置」才写入节点。Linux 绑定网卡通常需要 root / CAP_NET_RAW。
+              </p>
+              {ifacesError ? (
+                <Alert theme="warning" message={`无法从 Agent 拉取网卡：${ifacesError}`} />
+              ) : null}
+            </Space>
           </Form.FormItem>
           <Space>
             <Button theme="primary" loading={busy} onClick={() => void onSaveConnection()}>

@@ -102,11 +102,11 @@ func (m *mockLive) GetMetrics(_ context.Context) (*agentv1.GetMetricsResponse, e
 		return nil, context.DeadlineExceeded
 	}
 	return &agentv1.GetMetricsResponse{
-		Connections:     3,
-		UplinkBytes:     100,
-		DownlinkBytes:   200,
-		CpuPercent:      1.5,
-		MemoryRssBytes:  4096,
+		Connections:    3,
+		UplinkBytes:    100,
+		DownlinkBytes:  200,
+		CpuPercent:     1.5,
+		MemoryRssBytes: 4096,
 	}, nil
 }
 
@@ -131,6 +131,15 @@ func (s *logStream) CloseSend() error             { return nil }
 func (s *logStream) Context() context.Context     { return context.Background() }
 func (s *logStream) SendMsg(any) error            { return nil }
 func (s *logStream) RecvMsg(any) error            { return io.EOF }
+
+func (m *mockLive) ListInterfaces(_ context.Context) (*agentv1.ListInterfacesResponse, error) {
+	return &agentv1.ListInterfacesResponse{
+		Interfaces: []*agentv1.NetworkInterface{
+			{Name: "eth0", Addresses: []string{"10.0.0.2/24"}, Up: true},
+			{Name: "lo0", Addresses: []string{"127.0.0.1/8"}, Up: true, Loopback: true},
+		},
+	}, nil
+}
 
 func (m *mockLive) StreamLogs(_ context.Context, _ string, _ int32) (agentv1.AgentControl_StreamLogsClient, error) {
 	return &logStream{lines: []*agentv1.LogLine{

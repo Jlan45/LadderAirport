@@ -15,16 +15,16 @@ import (
 
 // nodeBootstrapRequest creates a node and returns a one-click agent install command.
 type nodeBootstrapRequest struct {
-	Name           string   `json:"name"`
-	Address        string   `json:"address"` // optional; fill after install if empty
-	GRPCPort       int      `json:"grpc_port"`
-	Token          string   `json:"token"` // optional; auto-generated when empty
-	Labels         []string `json:"labels"`
-	EnableTLS      *bool    `json:"enable_tls"` // default true
-	AgentVersion   string   `json:"agent_version"`
-	InstallScript  string   `json:"install_script_url"` // optional override
-	TLSSkipVerify  *bool    `json:"tls_skip_verify"`    // default: false when TLS, true when plain
-	CACertPEM      string   `json:"ca_cert_pem"`
+	Name          string   `json:"name"`
+	Address       string   `json:"address"` // optional; fill after install if empty
+	GRPCPort      int      `json:"grpc_port"`
+	Token         string   `json:"token"` // optional; auto-generated when empty
+	Labels        []string `json:"labels"`
+	EnableTLS     *bool    `json:"enable_tls"` // default true
+	AgentVersion  string   `json:"agent_version"`
+	InstallScript string   `json:"install_script_url"` // optional override
+	TLSSkipVerify *bool    `json:"tls_skip_verify"`    // default: false when TLS, true when plain
+	CACertPEM     string   `json:"ca_cert_pem"`
 }
 
 // nodeInstallResponse is returned after bootstrap or when regenerating the install command.
@@ -432,7 +432,8 @@ func deployMsgFromApply(applyTask *store.Task) string {
 
 func (s *Server) handleNodePreview(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
-	if _, err := s.Store.GetNode(id); err != nil {
+	node, err := s.Store.GetNode(id)
+	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
@@ -445,7 +446,9 @@ func (s *Server) handleNodePreview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	cfgBytes, err := converter.Convert(inbounds)
+	cfgBytes, err := converter.Convert(inbounds, converter.ConvertOptions{
+		BindInterface: node.EgressInterface,
+	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -596,12 +599,66 @@ func (s *Server) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"connections":       resp.GetConnections(),
-		"uplink_bytes":      resp.GetUplinkBytes(),
-		"downlink_bytes":    resp.GetDownlinkBytes(),
-		"cpu_percent":       resp.GetCpuPercent(),
-		"memory_rss_bytes":  resp.GetMemoryRssBytes(),
+		"connections":      resp.GetConnections(),
+		"uplink_bytes":     resp.GetUplinkBytes(),
+		"downlink_bytes":   resp.GetDownlinkBytes(),
+		"cpu_percent":      resp.GetCpuPercent(),
+		"memory_rss_bytes": resp.GetMemoryRssBytes(),
 	})
+}
+
+func (s *Server) handleNodeInterfaces(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	node, err := s.Store.GetNode(id)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
+	defer cancel()
+
+	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("dial: %v", err))
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	resp, err := client.ListInterfaces(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	type ifaceJSON struct {
+		Name         string   `json:"name"`
+		Addresses    []string `json:"addresses"`
+		Up           bool     `json:"up"`
+		Loopback     bool     `json:"loopback"`
+		MTU          int32    `json:"mtu"`
+		HardwareAddr string   `json:"hardware_addr"`
+	}
+	list := make([]ifaceJSON, 0, len(resp.GetInterfaces()))
+	for _, iface := range resp.GetInterfaces() {
+		addrs := iface.GetAddresses()
+		if addrs == nil {
+			addrs = []string{}
+		}
+		list = append(list, ifaceJSON{
+			Name:         iface.GetName(),
+			Addresses:    addrs,
+			Up:           iface.GetUp(),
+			Loopback:     iface.GetLoopback(),
+			MTU:          iface.GetMtu(),
+			HardwareAddr: iface.GetHardwareAddr(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"interfaces": list})
 }
 
 func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {

@@ -158,6 +158,11 @@ func (c *Client) GetMetrics(ctx context.Context) (*agentv1.GetMetricsResponse, e
 	return c.api.GetMetrics(c.withAuth(ctx), &agentv1.GetMetricsRequest{})
 }
 
+// ListInterfaces lists host network interfaces on the agent for egress selection.
+func (c *Client) ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesResponse, error) {
+	return c.api.ListInterfaces(c.withAuth(ctx), &agentv1.ListInterfacesRequest{})
+}
+
 // StreamLogs opens a server-streaming log subscription.
 func (c *Client) StreamLogs(ctx context.Context, level string, tail int32) (agentv1.AgentControl_StreamLogsClient, error) {
 	return c.api.StreamLogs(c.withAuth(ctx), &agentv1.StreamLogsRequest{

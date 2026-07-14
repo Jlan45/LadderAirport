@@ -11,10 +11,17 @@ import (
 	"github.com/ladderairport/panel/internal/store"
 )
 
+// ConvertOptions controls node-level knobs injected into the generated config.
+type ConvertOptions struct {
+	// BindInterface sets sing-box direct outbound bind_interface.
+	// Empty means OS default routing (field omitted).
+	BindInterface string
+}
+
 // Convert builds a full sing-box JSON config from inbound configs.
 // Disabled inbounds are skipped. Returns an error if no enabled inbounds remain,
 // if listen/port conflicts exist, or if required fields/validation fail.
-func Convert(inbounds []store.InboundConfig) ([]byte, error) {
+func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error) {
 	enabled := make([]store.InboundConfig, 0, len(inbounds))
 	for _, in := range inbounds {
 		if in.Enabled {
@@ -42,14 +49,20 @@ func Convert(inbounds []store.InboundConfig) ([]byte, error) {
 		outInbounds = append(outInbounds, mapped)
 	}
 
+	direct := map[string]any{
+		"type": "direct",
+		"tag":  "direct",
+	}
+	if iface := strings.TrimSpace(opts.BindInterface); iface != "" {
+		direct["bind_interface"] = iface
+	}
+
 	cfg := map[string]any{
 		"log": map[string]any{
 			"level": "info",
 		},
-		"inbounds": outInbounds,
-		"outbounds": []map[string]any{
-			{"type": "direct", "tag": "direct"},
-		},
+		"inbounds":  outInbounds,
+		"outbounds": []map[string]any{direct},
 		"route": map[string]any{
 			"final": "direct",
 		},

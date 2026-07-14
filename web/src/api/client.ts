@@ -59,6 +59,8 @@ export interface Node {
   labels: string[]
   tls_skip_verify: boolean
   ca_cert_pem?: string
+  /** Host NIC for sing-box direct bind_interface; empty = OS default route. */
+  egress_interface?: string
   status: string
   last_seen_unix: number
   config_hash: string
@@ -75,6 +77,15 @@ export interface Node {
   inbound_count?: number
   created_at_unix: number
   updated_at_unix: number
+}
+
+export interface NetworkInterface {
+  name: string
+  addresses: string[]
+  up: boolean
+  loopback: boolean
+  mtu?: number
+  hardware_addr?: string
 }
 
 export interface FleetOverview {
@@ -314,6 +325,10 @@ export function stopNode(id: string): Promise<Task> {
 
 export function getNodeMetrics(id: string): Promise<Metrics> {
   return request('GET', `/nodes/${id}/metrics`)
+}
+
+export function listNodeInterfaces(id: string): Promise<{ interfaces: NetworkInterface[] }> {
+  return request('GET', `/nodes/${id}/interfaces`)
 }
 
 /**
