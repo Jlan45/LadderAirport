@@ -1,0 +1,25 @@
+[Unit]
+Description=LadderAirport Panel (control plane)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ladder-panel
+Group=ladder-panel
+WorkingDirectory=/var/lib/ladder-panel
+EnvironmentFile=/etc/ladder-panel/panel.env
+# panel.env 示例见 deploy/panel.env.example
+ExecStart=/usr/local/bin/ladder-panel -listen ${LADDER_LISTEN} -db ${LADDER_DB} -session-secret ${LADDER_SESSION_SECRET} -bootstrap=${LADDER_BOOTSTRAP} -bootstrap-timeout ${LADDER_BOOTSTRAP_TIMEOUT} -bootstrap-retry=${LADDER_BOOTSTRAP_RETRY} -bootstrap-retry-interval ${LADDER_BOOTSTRAP_RETRY_INTERVAL}
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ladder-panel
+ReadOnlyPaths=/etc/ladder-panel
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

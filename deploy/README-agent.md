@@ -1,5 +1,7 @@
 # 快速部署 Agent（systemd）
 
+> 控制面 Panel 的一键安装见 [README-panel.md](README-panel.md)。
+
 ## 一键安装（推荐：从 Release 拉最新二进制）
 
 节点上**无需 Go / 源码 / 子模块**，只要能访问 GitHub：
@@ -14,14 +16,15 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 明文 lab（不推荐公网）：
 
 ```bash
-curl -fsSL ... | sudo LADDER_TLS=0 LADDER_TOKEN='secret' bash
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+  | sudo LADDER_TLS=0 LADDER_TOKEN='你的长密钥' bash
 ```
 
 指定版本：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
-  | sudo LADDER_TOKEN='secret' LADDER_VERSION=v0.2.0 bash
+  | sudo LADDER_TOKEN='你的长密钥' LADDER_VERSION=v0.3.1 bash
 ```
 
 ### 行为说明
@@ -98,9 +101,13 @@ Panel 开启 bootstrap 时会自动下发配置并启动 sing-box。
 systemctl status ladder-agent
 journalctl -u ladder-agent -f
 systemctl restart ladder-agent
+```
 
-# 升级到最新 Release（保留 agent.env 与 TLS 证书）
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh | sudo bash
+升级到最新 Release（保留 `agent.env` 与 TLS 证书）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+  | sudo bash
 ```
 
 ## 防火墙

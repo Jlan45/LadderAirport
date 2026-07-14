@@ -2,16 +2,18 @@
 # 一键安装 ladder-agent 为 systemd 服务（默认从 GitHub Release 拉最新二进制）。
 #
 # 无需克隆仓库（推荐）:
-#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh | sudo bash
-#   curl -fsSL ... | sudo LADDER_TOKEN=mysecret bash
+#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+#     | sudo LADDER_TOKEN=mysecret bash
 #
 # 默认开启 TLS（自签 CA + 节点证书）。关闭:
-#   sudo LADDER_TLS=0 ... bash
+#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+#     | sudo LADDER_TLS=0 LADDER_TOKEN=mysecret bash
 #
 # 指定版本 / 本地文件 / 源码编译:
-#   sudo LADDER_VERSION=v0.2.0 ./scripts/install-agent.sh
-#   sudo ./scripts/install-agent.sh /path/to/ladder-agent
-#   sudo LADDER_FROM=local ./scripts/install-agent.sh   # 使用仓库 bin/ 或 make agent
+#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+#     | sudo LADDER_VERSION=v0.3.1 LADDER_TOKEN=mysecret bash
+#   sudo LADDER_TOKEN=mysecret ./scripts/install-agent.sh /path/to/ladder-agent
+#   sudo LADDER_FROM=local LADDER_TOKEN=mysecret ./scripts/install-agent.sh
 #
 set -euo pipefail
 

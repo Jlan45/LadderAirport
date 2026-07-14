@@ -1,4 +1,4 @@
-.PHONY: proto panel agent web test
+.PHONY: proto panel panel-bin agent web test install-panel install-agent
 
 # Default agent tags: QUIC (TUIC/Hy2) + uTLS (Reality/AnyTLS client fingerprints).
 AGENT_TAGS ?= with_quic,with_utls
@@ -21,6 +21,10 @@ web:
 panel: web
 	cd panel && go build -o ../bin/panel ./cmd/panel
 
+# Build panel with committed embed dist only (no npm). Useful for offline / CI-like installs.
+panel-bin:
+	cd panel && go build -trimpath -ldflags="-s -w" -o ../bin/panel ./cmd/panel
+
 agent:
 	cd agent && go build -tags "$(AGENT_TAGS)" -ldflags "$(AGENT_LDFLAGS)" -o ../bin/ladder-agent ./cmd/ladder-agent
 
@@ -28,3 +32,10 @@ test:
 	cd pkg && go test ./...
 	cd panel && go test ./...
 	cd agent && go test -tags "$(AGENT_TAGS)" ./... -timeout 120s
+
+# Local systemd install helpers (require root). Prefer curl|bash from Release on servers.
+install-panel:
+	sudo LADDER_FROM=local ./scripts/install-panel.sh
+
+install-agent:
+	sudo LADDER_FROM=local ./scripts/install-agent.sh
