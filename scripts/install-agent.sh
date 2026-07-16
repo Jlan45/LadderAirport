@@ -431,6 +431,17 @@ enroll_to_panel() {
   else
     tls_json="false"
   fi
+  # Private RFC1918 is fine when Panel shares the LAN/VPN; for NAT + port-forward
+  # set LADDER_REPORT_ADDRESS to the public/VPN host Panel should dial, and set
+  # the external mapped port in Panel (enroll will not overwrite non-empty address/port).
+  case "${addr}" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*)
+      if [[ -z "${REPORT_ADDR}" ]]; then
+        echo "WARNING: 上报地址 ${addr} 看起来是内网 IP。若 Panel 不在同一网络/VPN，请设置 LADDER_REPORT_ADDRESS=公网或可达地址，或在 Panel 节点详情手填控制面地址。" >&2
+        echo "         端口转发时 grpc_port 请在 Panel 填外部映射端口；已有控制面地址时 enroll 不会覆盖。" >&2
+      fi
+      ;;
+  esac
   echo "==> 向 Panel 自动上报: ${panel}/api/v1/agent/enroll"
   echo "    address=${addr} port=${port} node_id=${NODE_ID:-auto}"
 

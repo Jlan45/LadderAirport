@@ -22,6 +22,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [grpcPort, setGrpcPort] = useState(50051)
+  const [publicAddress, setPublicAddress] = useState('')
   const [labels, setLabels] = useState('')
   const [enableTLS, setEnableTLS] = useState(true)
   const [agentVersion, setAgentVersion] = useState('latest')
@@ -34,6 +35,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
     setName('')
     setAddress('')
     setGrpcPort(50051)
+    setPublicAddress('')
     setLabels('')
     setEnableTLS(true)
     setAgentVersion('latest')
@@ -54,6 +56,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
         name: name.trim(),
         address: address.trim() || undefined,
         grpc_port: grpcPort,
+        public_address: publicAddress.trim() || undefined,
         labels: labels
           .split(',')
           .map((s) => s.trim())
@@ -122,7 +125,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
         <>
           <p className="la-page-desc" style={{ marginTop: 0 }}>
             创建节点并生成安装命令。目标机执行后会<strong>自动向 Panel 上报地址与 CA</strong>
-            （需在「设置」填写 Public Base URL）。地址可留空，由 Agent 探测上报。
+            （需在「设置」填写 Public Base URL）。控制面地址可留空由 Agent 探测；若已预填则 enroll 不会覆盖。
           </p>
           <Form labelAlign="top">
             <Form.FormItem label="节点名称" requiredMark>
@@ -133,20 +136,28 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                 clearable
               />
             </Form.FormItem>
-            <Form.FormItem label="节点地址（可选）">
+            <Form.FormItem label="控制面地址（可选，Panel 拨号）">
               <Input
                 value={address}
                 onChange={(v) => setAddress(String(v))}
-                placeholder="可先留空，装完再填 IP/域名"
+                placeholder="可先留空；已填则 enroll 不覆盖"
                 clearable
               />
             </Form.FormItem>
-            <Form.FormItem label="gRPC 端口">
+            <Form.FormItem label="控制面 gRPC 端口">
               <InputNumber
                 theme="normal"
                 style={{ width: '100%' }}
                 value={grpcPort}
                 onChange={(v) => setGrpcPort(Number(v) || 50051)}
+              />
+            </Form.FormItem>
+            <Form.FormItem label="公网地址（可选，订阅用）">
+              <Input
+                value={publicAddress}
+                onChange={(v) => setPublicAddress(String(v))}
+                placeholder="客户端入口；空则回退控制面地址"
+                clearable
               />
             </Form.FormItem>
             <Form.FormItem label="节点标签（英文逗号分隔）">

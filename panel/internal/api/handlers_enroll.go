@@ -90,11 +90,13 @@ func (s *Server) handleAgentEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply reported fields.
-	if addr != "" {
+	// Manual-first: only fill empty control dial fields so NAT/public overrides
+	// set in the Panel are not clobbered by install-time private IP detection.
+	// public_address is never written by enroll (operator/UI only).
+	if addr != "" && strings.TrimSpace(n.Address) == "" {
 		n.Address = addr
 	}
-	if req.GRPCPort > 0 && req.GRPCPort <= 65535 {
+	if req.GRPCPort > 0 && req.GRPCPort <= 65535 && n.GRPCPort == 0 {
 		n.GRPCPort = req.GRPCPort
 	}
 	if ca != "" {

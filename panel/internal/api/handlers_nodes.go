@@ -16,9 +16,10 @@ import (
 // nodeBootstrapRequest creates a node and returns a one-click agent install command.
 type nodeBootstrapRequest struct {
 	Name          string   `json:"name"`
-	Address       string   `json:"address"` // optional; fill after install if empty
+	Address       string   `json:"address"` // optional control dial host; fill after install if empty
 	GRPCPort      int      `json:"grpc_port"`
-	Token         string   `json:"token"` // optional; auto-generated when empty
+	PublicAddress string   `json:"public_address"` // optional subscription client host
+	Token         string   `json:"token"`          // optional; auto-generated when empty
 	Labels        []string `json:"labels"`
 	EnableTLS     *bool    `json:"enable_tls"` // default true
 	AgentVersion  string   `json:"agent_version"`
@@ -124,6 +125,7 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		Name:          req.Name,
 		Address:       addr,
 		GRPCPort:      port,
+		PublicAddress: strings.TrimSpace(req.PublicAddress),
 		Token:         token,
 		Labels:        req.Labels,
 		TLSSkipVerify: tlsSkip,

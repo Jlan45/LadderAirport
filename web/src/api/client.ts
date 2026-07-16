@@ -55,6 +55,8 @@ export interface Node {
   name: string
   address: string
   grpc_port: number
+  /** Client-facing host for subscriptions; empty falls back to address. */
+  public_address?: string
   token?: string
   labels: string[]
   tls_skip_verify: boolean
@@ -178,6 +180,7 @@ export interface CreateNodeInput {
   name: string
   address?: string
   grpc_port?: number
+  public_address?: string
   token?: string
   labels?: string[]
   tls_skip_verify?: boolean
@@ -188,6 +191,7 @@ export interface BootstrapNodeInput {
   name: string
   address?: string
   grpc_port?: number
+  public_address?: string
   token?: string
   labels?: string[]
   enable_tls?: boolean

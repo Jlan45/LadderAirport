@@ -67,6 +67,35 @@ func TestCollectEndpoints(t *testing.T) {
 	}
 }
 
+func TestCollectEndpointsPrefersPublicAddress(t *testing.T) {
+	nodes := []store.Node{{
+		ID: "n1", Name: "hk",
+		Address: "10.0.0.1", PublicAddress: "edge.example.com",
+	}}
+	ins := map[string][]store.InboundConfig{
+		"n1": {{
+			ID: "i1", Name: "ss", Protocol: "shadowsocks", Enabled: true,
+			Params: map[string]any{"port": float64(9000), "method": "aes-128-gcm", "password": "p"},
+		}},
+	}
+	eps, err := CollectEndpoints(nodes, ins, nil)
+	if err != nil || len(eps) != 1 {
+		t.Fatalf("eps=%v err=%v", eps, err)
+	}
+	if eps[0].Server != "edge.example.com" {
+		t.Fatalf("server = %q, want public_address", eps[0].Server)
+	}
+}
+
+func TestClientServerHost(t *testing.T) {
+	if got := clientServerHost(store.Node{Address: "10.0.0.1"}); got != "10.0.0.1" {
+		t.Fatalf("fallback = %q", got)
+	}
+	if got := clientServerHost(store.Node{Address: "10.0.0.1", PublicAddress: " pub.example "}); got != "pub.example" {
+		t.Fatalf("prefer public = %q", got)
+	}
+}
+
 func TestRenderNewProtocols(t *testing.T) {
 	eps := []ProxyEndpoint{
 		{

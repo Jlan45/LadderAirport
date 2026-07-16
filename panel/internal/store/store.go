@@ -135,6 +135,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN metrics_at_unix INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE nodes ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN egress_interface TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alters {
@@ -219,14 +220,14 @@ func (s *Store) CreateNode(n *Node) error {
 			status, last_seen_unix, config_hash,
 			runtime_state, agent_version, singbox_version,
 			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
-			metrics_at_unix, last_error, egress_interface,
+			metrics_at_unix, last_error, egress_interface, public_address,
 			created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, boolToInt(n.TLSSkipVerify), n.CACertPEM,
 		n.Status, n.LastSeenUnix, n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
-		n.MetricsAtUnix, n.LastError, n.EgressInterface,
+		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress,
 		n.CreatedAtUnix, n.UpdatedAtUnix,
 	)
 	if err != nil {
@@ -254,7 +255,7 @@ func (s *Store) UpdateNode(n *Node) error {
 			config_hash = ?,
 			runtime_state = ?, agent_version = ?, singbox_version = ?,
 			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
-			metrics_at_unix = ?, last_error = ?, egress_interface = ?,
+			metrics_at_unix = ?, last_error = ?, egress_interface = ?, public_address = ?,
 			updated_at_unix = ?
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
@@ -262,7 +263,7 @@ func (s *Store) UpdateNode(n *Node) error {
 		n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
-		n.MetricsAtUnix, n.LastError, n.EgressInterface,
+		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress,
 		n.UpdatedAtUnix, n.ID,
 	)
 	if err != nil {
@@ -307,7 +308,7 @@ func scanNode(row interface {
 		&n.Status, &n.LastSeenUnix, &n.ConfigHash,
 		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
 		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
-		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface,
+		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface, &n.PublicAddress,
 		&n.CreatedAtUnix, &n.UpdatedAtUnix,
 	)
 	if err != nil {
@@ -325,7 +326,7 @@ const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, tls_sk
 	status, last_seen_unix, config_hash,
 	runtime_state, agent_version, singbox_version,
 	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
-	metrics_at_unix, last_error, egress_interface,
+	metrics_at_unix, last_error, egress_interface, public_address,
 	created_at_unix, updated_at_unix`
 
 func (s *Store) GetNode(id string) (*Node, error) {

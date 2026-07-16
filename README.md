@@ -106,12 +106,15 @@ cd panel && go build -o ../bin/panel ./cmd/panel
 
 | 字段 | 填写 |
 |------|------|
-| Address | 节点 IP（对 Panel 可达；跨机勿填 `127.0.0.1`） |
-| gRPC 端口 | `50051` |
+| Address（控制面） | Panel 拨号 host（对 Panel 可达；跨机勿填 `127.0.0.1`；NAT 填映射后的公网/VPN 地址） |
+| gRPC 端口 | 控制面端口（默认 `50051`；端口转发填**外部映射端口**） |
+| 公网地址 | 可选；订阅客户端 `server` host，空则回退 Address |
 | Token | 与 Agent 的 `-token` 一致 |
 
 创建入站 → 节点详情里关联 → 下发配置。  
 Panel 默认会在启动时 **自动下发并启动** 所有节点，并对未上线节点定时重试。
+
+节点在 NAT 后：见 [deploy/README-agent.md](deploy/README-agent.md)「NAT / 端口转发」。控制面与订阅地址可拆分；enroll 不会覆盖已手填的控制面地址。
 
 ### 常用 Panel 参数
 

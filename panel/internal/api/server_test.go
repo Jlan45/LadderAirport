@@ -636,3 +636,106 @@ func TestBatchByLabels(t *testing.T) {
 		t.Fatalf("batch apply results = %v, want 2", results)
 	}
 }
+
+func TestAgentEnrollManualFirst(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+
+	// Pre-create node with operator-chosen NAT control address/port + public_address.
+	n := &store.Node{
+		Name:          "nat-node",
+		Address:       "203.0.113.9",
+		GRPCPort:      55051,
+		Token:         "enroll-token-keep",
+		PublicAddress: "edge.example.com",
+		Status:        "unknown",
+	}
+	if err := st.CreateNode(n); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	// Enroll reports private IP + different port + CA. Must not clobber address/port/public.
+	enrollClient := &http.Client{Timeout: 10 * time.Second}
+	body := map[string]any{
+		"token": n.Token, "node_id": n.ID,
+		"address": "10.0.0.8", "grpc_port": 50051,
+		"ca_cert_pem": "-----BEGIN CERTIFICATE-----\nKEEPME\n-----END CERTIFICATE-----\n",
+		"tls_enabled": true,
+	}
+	raw, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/agent/enroll", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+n.Token)
+	resp, err := enrollClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("enroll status = %d body=%s", resp.StatusCode, b)
+	}
+
+	got, err := st.GetNode(n.ID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if got.Address != "203.0.113.9" {
+		t.Fatalf("address overwritten: %q", got.Address)
+	}
+	if got.GRPCPort != 55051 {
+		t.Fatalf("grpc_port overwritten: %d", got.GRPCPort)
+	}
+	if got.PublicAddress != "edge.example.com" {
+		t.Fatalf("public_address changed: %q", got.PublicAddress)
+	}
+	if !strings.Contains(got.CACertPEM, "KEEPME") {
+		t.Fatalf("ca not updated: %q", got.CACertPEM)
+	}
+	if got.TLSSkipVerify {
+		t.Fatalf("tls_skip_verify should be false after CA enroll")
+	}
+
+	// Empty-address node still gets filled on first enroll.
+	n2 := &store.Node{
+		Name: "pending-node", Address: "", GRPCPort: 50051,
+		Token: "enroll-token-fill", Status: "pending",
+	}
+	if err := st.CreateNode(n2); err != nil {
+		t.Fatalf("CreateNode n2: %v", err)
+	}
+	body2 := map[string]any{
+		"token": n2.Token, "node_id": n2.ID,
+		"address": "198.51.100.7", "grpc_port": 50051,
+		"ca_cert_pem": "-----BEGIN CERTIFICATE-----\nFILL\n-----END CERTIFICATE-----\n",
+	}
+	raw2, _ := json.Marshal(body2)
+	req2, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/agent/enroll", bytes.NewReader(raw2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Authorization", "Bearer "+n2.Token)
+	resp2, err := enrollClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("enroll2 status = %d body=%s", resp2.StatusCode, b)
+	}
+	got2, err := st.GetNode(n2.ID)
+	if err != nil {
+		t.Fatalf("GetNode n2: %v", err)
+	}
+	if got2.Address != "198.51.100.7" {
+		t.Fatalf("empty address not filled: %q", got2.Address)
+	}
+	if got2.Status == "pending" {
+		t.Fatalf("status still pending after enroll")
+	}
+	_ = client // logged-in client unused; enroll is public
+}

@@ -125,11 +125,13 @@ func installSteps(enableTLS bool, address string, grpcPort int, panelBase string
 	}
 	if enrollOK && panelBase != "" {
 		steps = append(steps,
-			"安装结束会自动向 Panel 上报地址与 CA（POST /api/v1/agent/enroll），无需手填。",
+			"安装结束会自动向 Panel 上报地址与 CA（POST /api/v1/agent/enroll）；若节点已有控制面地址/端口则不会覆盖。",
 			"回到 Panel 刷新节点列表，确认地址/CA 已写入后点「探测」。",
 		)
 		if strings.TrimSpace(address) != "" {
-			steps = append(steps, fmt.Sprintf("若上报 IP 不对，可在节点详情改地址（期望 gRPC %d）。", grpcPort))
+			steps = append(steps, fmt.Sprintf("控制面地址已预填时 enroll 不会改写；端口转发请确认 gRPC 端口为外部映射端口（当前 %d）。", grpcPort))
+		} else {
+			steps = append(steps, "NAT/端口转发：在节点详情填写 Panel 可达的控制面地址与映射端口；客户端入口不同时再填「公网地址」。")
 		}
 	} else {
 		steps = append(steps,
@@ -137,7 +139,7 @@ func installSteps(enableTLS bool, address string, grpcPort int, panelBase string
 		)
 		if enableTLS {
 			steps = append(steps,
-				"或手动：sudo cat /etc/ladder-agent/tls/ca.crt 粘贴到节点 CA，并填写地址。",
+				"或手动：sudo cat /etc/ladder-agent/tls/ca.crt 粘贴到节点 CA，并填写控制面地址。",
 			)
 		}
 	}

@@ -336,11 +336,18 @@ export default function Fleet() {
     },
     {
       colKey: 'address',
-      title: '地址',
+      title: '控制面地址',
       cell: ({ row }) => (
-        <code className="la-mono">
-          {row.address || '（待填）'}:{row.grpc_port}
-        </code>
+        <div>
+          <code className="la-mono">
+            {row.address || '（待填）'}:{row.grpc_port}
+          </code>
+          {row.public_address && row.public_address !== row.address ? (
+            <div className="la-page-desc" style={{ margin: '2px 0 0' }}>
+              订阅 <code className="la-mono">{row.public_address}</code>
+            </div>
+          ) : null}
+        </div>
       ),
     },
     {
@@ -815,6 +822,11 @@ function NodeCard({
         <code className="la-mono">
           {n.address || '（待填）'}:{n.grpc_port}
         </code>
+        {n.public_address && n.public_address !== n.address ? (
+          <div className="la-page-desc" style={{ margin: '2px 0 0' }}>
+            订阅 <code className="la-mono">{n.public_address}</code>
+          </div>
+        ) : null}
       </div>
 
       {(n.labels?.length ?? 0) > 0 ? (

@@ -61,6 +61,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
 
   const [editAddress, setEditAddress] = useState('')
   const [editPort, setEditPort] = useState(50051)
+  const [editPublic, setEditPublic] = useState('')
   const [editCA, setEditCA] = useState('')
   const [editTLSSkip, setEditTLSSkip] = useState(false)
   const [editEgress, setEditEgress] = useState('')
@@ -99,6 +100,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       if (n) {
         setEditAddress(n.address || '')
         setEditPort(n.grpc_port || 50051)
+        setEditPublic(n.public_address || '')
         setEditCA(n.ca_cert_pem || '')
         setEditTLSSkip(!!n.tls_skip_verify)
         setEditEgress(n.egress_interface || '')
@@ -248,6 +250,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         ...node,
         address: editAddress.trim(),
         grpc_port: editPort,
+        public_address: editPublic.trim(),
         ca_cert_pem: editCA,
         tls_skip_verify: editTLSSkip,
         egress_interface: editEgress.trim(),
@@ -339,7 +342,13 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         <p className="la-page-desc" style={{ marginTop: -4 }}>
           <code className="la-mono">
             {node.address || '（待填）'}:{node.grpc_port}
-          </code>{' '}
+          </code>
+          {node.public_address ? (
+            <>
+              {' '}
+              · 订阅 <code className="la-mono">{node.public_address}</code>
+            </>
+          ) : null}{' '}
           · {taskStatusLabel(node.status || 'unknown')}
           {' '}
           · Agent <code className="la-mono">{node.agent_version || '—'}</code>
@@ -366,24 +375,38 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       <div className="la-drawer-section">
         <h3>连接与 TLS</h3>
         <p className="la-page-desc" style={{ marginTop: 0 }}>
-          装机后填写地址，并将节点上的 <code>ca.crt</code> 粘贴到下方（TLS 模式）。
+          装机后填写控制面地址（Panel 拨号）。NAT 时填映射后的公网/VPN 地址与外部端口；订阅入口不同再填公网地址。TLS 模式请粘贴节点 <code>ca.crt</code>。
         </p>
         <Form labelAlign="top">
-          <Form.FormItem label="节点地址">
+          <Form.FormItem label="控制面地址（Panel 拨号）">
             <Input
               value={editAddress}
               onChange={(v) => setEditAddress(String(v))}
-              placeholder="对 Panel 可达的 IP 或域名"
+              placeholder="Panel 可达的 IP / 域名 / VPN 地址"
               clearable
             />
           </Form.FormItem>
-          <Form.FormItem label="gRPC 端口">
+          <Form.FormItem label="控制面 gRPC 端口（Panel 拨号）">
             <InputNumber
               theme="normal"
               style={{ width: '100%' }}
               value={editPort}
               onChange={(v) => setEditPort(Number(v) || 50051)}
             />
+            <p className="la-page-desc" style={{ margin: '6px 0 0' }}>
+              端口转发时填<strong>外部映射端口</strong>，不一定是 Agent 本机 50051。
+            </p>
+          </Form.FormItem>
+          <Form.FormItem label="公网地址（订阅客户端用，可空）">
+            <Input
+              value={editPublic}
+              onChange={(v) => setEditPublic(String(v))}
+              placeholder="客户端入口域名/公网 IP；空则回退控制面地址"
+              clearable
+            />
+            <p className="la-page-desc" style={{ margin: '6px 0 0' }}>
+              仅影响订阅里的 server；不影响 Panel 拨号。NAT 且客户端入口与控制面不同时填写。
+            </p>
           </Form.FormItem>
           <Form.FormItem label="CA 证书 (ca_cert_pem)">
             <Textarea

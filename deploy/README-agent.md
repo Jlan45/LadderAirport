@@ -80,6 +80,32 @@ Panel 开启 bootstrap 时会自动下发配置并启动 sing-box。
 - SAN 自动包含：localhost、本机 hostname、`hostname -I`、尽力探测的公网 IP；可用 `LADDER_TLS_EXTRA_SANS` 追加。
 - 证书已存在则复用；强制重签：`sudo rm -rf /etc/ladder-agent/tls` 后重新执行安装（`LADDER_TLS=1`），并**更新 Panel 上的 ca_cert_pem**。
 
+## NAT / 端口转发
+
+控制面仍是 **Panel 主动 dial Agent gRPC**。Agent 在 NAT 后时，需要上层做端口转发（或 VPN），让 Panel 能连到 Agent。
+
+```
+[客户端] --入站端口--> [公网 IP / DDNS] --DNAT--> [Agent 入站]
+[Panel]  --gRPC------> [VPN 或映射的 gRPC] ------> [Agent :50051]
+```
+
+| 配置项 | 填什么 |
+|--------|--------|
+| 控制面地址 `address` | **Panel 能拨到的** host（公网 IP、DDNS、VPN IP） |
+| 控制面端口 `grpc_port` | **外部映射端口**（若 `15051→50051` 则填 `15051`） |
+| 公网地址 `public_address` | 订阅客户端用的 host；与控制面相同时可留空（回退 `address`） |
+
+建议流程：
+
+1. Agent 监听 `0.0.0.0:50051`，防火墙放行 Panel 源与客户端入站端口。  
+2. 路由器/云安全组做 DNAT：外网 gRPC 端口 → 本机 50051；各入站端口按需映射。  
+3. TLS：若 Panel 拨的是公网 IP/域名，安装时加 `LADDER_TLS_EXTRA_SANS=IP:x.x.x.x,DNS:name`。  
+4. 在 Panel 节点详情填写控制面地址/映射端口；客户端入口不同再填公网地址。  
+5. 首次装机可用 `LADDER_REPORT_ADDRESS` 填空地址；**之后重装 enroll 不会覆盖已有控制面地址/端口**（仍会更新 CA）。  
+6. 点「探测」确认 online，再预览订阅确认 `server` 为客户端可达 host。
+
+相关变量：`LADDER_REPORT_ADDRESS`、`LADDER_GRPC_PORT`、`LADDER_TLS_EXTRA_SANS`（见上文表格）。
+
 ## 环境变量
 
 | 变量 | 默认 | 说明 |

@@ -299,3 +299,37 @@ func TestNodeEgressInterface(t *testing.T) {
 		t.Fatalf("expected empty EgressInterface, got %q", got.EgressInterface)
 	}
 }
+
+func TestNodePublicAddress(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{
+		Name:          "nat",
+		Address:       "10.0.0.8",
+		GRPCPort:      50051,
+		PublicAddress: "edge.example.com",
+	}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	got, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if got.PublicAddress != "edge.example.com" {
+		t.Fatalf("PublicAddress = %q", got.PublicAddress)
+	}
+	if got.Address != "10.0.0.8" {
+		t.Fatalf("Address = %q", got.Address)
+	}
+	n.PublicAddress = ""
+	if err := s.UpdateNode(n); err != nil {
+		t.Fatalf("UpdateNode clear: %v", err)
+	}
+	got, err = s.GetNode(n.ID)
+	if err != nil {
+		t.Fatalf("GetNode after clear: %v", err)
+	}
+	if got.PublicAddress != "" {
+		t.Fatalf("expected empty PublicAddress, got %q", got.PublicAddress)
+	}
+}

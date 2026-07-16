@@ -24,6 +24,15 @@ type ProxyEndpoint struct {
 	Params   map[string]any
 }
 
+// clientServerHost returns the host clients should dial.
+// Prefer PublicAddress when set; otherwise fall back to control Address.
+func clientServerHost(n store.Node) string {
+	if s := strings.TrimSpace(n.PublicAddress); s != "" {
+		return s
+	}
+	return strings.TrimSpace(n.Address)
+}
+
 // CollectEndpoints walks nodes and their attached inbounds.
 // inboundFilter empty = all enabled inbounds; otherwise only listed IDs.
 func CollectEndpoints(nodes []store.Node, nodeInbounds map[string][]store.InboundConfig, inboundFilter []string) ([]ProxyEndpoint, error) {
@@ -49,7 +58,7 @@ func CollectEndpoints(nodes []store.Node, nodeInbounds map[string][]store.Inboun
 			if err != nil || port < 1 {
 				continue
 			}
-			server := strings.TrimSpace(n.Address)
+			server := clientServerHost(n)
 			if server == "" || server == "0.0.0.0" || server == "::" {
 				continue
 			}

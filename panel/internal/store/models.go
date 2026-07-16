@@ -3,12 +3,15 @@ package store
 type Node struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
-	Address       string   `json:"address"`
-	GRPCPort      int      `json:"grpc_port"`
+	Address       string   `json:"address"` // control dial host (Panel → Agent)
+	GRPCPort      int      `json:"grpc_port"` // control dial port (external mapped port if NAT)
 	Token         string   `json:"token,omitempty"`
 	Labels        []string `json:"labels"`
 	TLSSkipVerify bool     `json:"tls_skip_verify"`
 	CACertPEM     string   `json:"ca_cert_pem,omitempty"`
+	// PublicAddress is the client-facing host for subscriptions (Clash/sing-box server).
+	// Empty means fall back to Address. Host only — client ports come from inbound params.
+	PublicAddress string `json:"public_address"`
 	// EgressInterface is the host NIC name for sing-box direct bind_interface.
 	// Empty means OS default routing.
 	EgressInterface string `json:"egress_interface"`
