@@ -156,6 +156,18 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 sudo LADDER_FROM=local LADDER_SESSION_SECRET='请换成长随机串' ./scripts/install-panel.sh
 ```
 
+升级 / 卸载（详见 [deploy/README-panel.md](deploy/README-panel.md)）：
+
+```bash
+# 升级（保留 panel.env 与 SQLite）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+  | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
+
+# 卸载（默认保留 conf/data；全清加 LADDER_PURGE=1）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+  | sudo env LADDER_ACTION=uninstall bash
+```
+
 装完后：
 
 ```bash
@@ -163,7 +175,6 @@ systemctl status ladder-panel
 journalctl -u ladder-panel -f
 # 浏览器 http://<host>:8080 ，默认管理员密码 admin（立刻修改）
 ```
-
 ### 一键装 Agent 为系统服务
 
 **无需克隆仓库**，从 GitHub Release 拉最新二进制（详见 [deploy/README-agent.md](deploy/README-agent.md)）。
@@ -201,6 +212,18 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 sudo LADDER_FROM=local LADDER_TOKEN='请换成节点密钥' ./scripts/install-agent.sh
 ```
 
+升级 / 卸载（详见 [deploy/README-agent.md](deploy/README-agent.md)）：
+
+```bash
+# 升级（保留 agent.env 与 TLS）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+  | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
+
+# 卸载（默认保留 conf/data；全清加 LADDER_PURGE=1）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+  | sudo env LADDER_ACTION=uninstall bash
+```
+
 装完后：
 
 ```bash
@@ -208,7 +231,6 @@ systemctl status ladder-agent
 journalctl -u ladder-agent -f
 sudo cat /etc/ladder-agent/panel-import.txt   # Token + CA，方便登记
 ```
-
 ### 烟雾测试
 
 ```bash

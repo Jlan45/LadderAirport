@@ -66,3 +66,34 @@ func TestRandomAgentToken(t *testing.T) {
 		t.Fatal("tokens should differ")
 	}
 }
+
+func TestBuildUpgradeCommand(t *testing.T) {
+	cmd := buildUpgradeCommand(installCommandOpts{AgentVersion: "latest"})
+	if !strings.Contains(cmd, "LADDER_ACTION=upgrade") {
+		t.Fatalf("missing action: %s", cmd)
+	}
+	if strings.Contains(cmd, "LADDER_VERSION=") {
+		t.Fatalf("latest should omit version: %s", cmd)
+	}
+	if strings.Contains(cmd, "LADDER_TOKEN=") {
+		t.Fatalf("upgrade must not send token: %s", cmd)
+	}
+	cmd2 := buildUpgradeCommand(installCommandOpts{AgentVersion: "v0.3.1"})
+	if !strings.Contains(cmd2, "LADDER_VERSION='v0.3.1'") {
+		t.Fatalf("want pinned version: %s", cmd2)
+	}
+}
+
+func TestBuildUninstallCommand(t *testing.T) {
+	cmd := buildUninstallCommand(installCommandOpts{}, false)
+	if !strings.Contains(cmd, "LADDER_ACTION=uninstall") {
+		t.Fatalf("%s", cmd)
+	}
+	if strings.Contains(cmd, "LADDER_PURGE=") {
+		t.Fatalf("default uninstall should not purge: %s", cmd)
+	}
+	cmdPurge := buildUninstallCommand(installCommandOpts{}, true)
+	if !strings.Contains(cmdPurge, "LADDER_PURGE=1") {
+		t.Fatalf("%s", cmdPurge)
+	}
+}

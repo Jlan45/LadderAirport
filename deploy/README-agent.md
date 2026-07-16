@@ -84,9 +84,11 @@ Panel 开启 bootstrap 时会自动下发配置并启动 sing-box。
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `LADDER_TOKEN` | 随机生成 | 与 Panel 节点 Token 一致 |
+| `LADDER_ACTION` | `install` | `install` / `upgrade` / `uninstall`（也可用脚本首参） |
+| `LADDER_PURGE` | `0` | 仅卸载：`1` 时删除 conf/data/TLS/用户 |
+| `LADDER_TOKEN` | 随机生成 | 与 Panel 节点 Token 一致（**upgrade 不会改**） |
 | `LADDER_LISTEN` | `0.0.0.0:50051` | gRPC 监听 |
-| `LADDER_TLS` | `1` | `1` 生成并启用 TLS；`0` 明文 |
+| `LADDER_TLS` | `1` | `1` 生成并启用 TLS；`0` 明文（仅 install） |
 | `LADDER_TLS_DAYS` | `825` | 证书有效期（天） |
 | `LADDER_TLS_CN` | hostname | 证书 CN |
 | `LADDER_TLS_EXTRA_SANS` | 空 | 额外 SAN，逗号分隔，如 `DNS:node1.example.com,IP:203.0.113.10` |
@@ -103,13 +105,42 @@ journalctl -u ladder-agent -f
 systemctl restart ladder-agent
 ```
 
-升级到最新 Release（保留 `agent.env` 与 TLS 证书）：
+### 升级
+
+只替换二进制、刷新 systemd unit 并 restart；**保留** `agent.env`、TLS 证书与 Token。旧二进制备份为 `/usr/local/bin/ladder-agent.bak`。
 
 ```bash
+# 升到最新
 curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
-  | sudo bash
+  | sudo env LADDER_ACTION=upgrade bash
+
+# 升到指定版本
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+  | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
 ```
 
+回滚：
+
+```bash
+sudo mv /usr/local/bin/ladder-agent.bak /usr/local/bin/ladder-agent
+sudo systemctl restart ladder-agent
+```
+
+### 卸载
+
+默认只停服务、删 unit 与二进制，**保留** `/etc/ladder-agent` 与 `/var/lib/ladder-agent`。
+
+```bash
+# 保留 conf/data
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+  | sudo env LADDER_ACTION=uninstall bash
+
+# 全清（含 TLS、env、数据目录与系统用户）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+  | sudo env LADDER_ACTION=uninstall LADDER_PURGE=1 bash
+```
+
+卸载后请在 Panel 中删除对应节点记录。
 ## 防火墙
 
 ```bash

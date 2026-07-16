@@ -171,6 +171,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/v1/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/v1/settings", s.handlePutSettings)
+	mux.HandleFunc("GET /api/v1/meta", s.handleGetMeta)
 
 	mux.HandleFunc("GET /api/v1/subscriptions", s.handleListSubscriptions)
 	mux.HandleFunc("POST /api/v1/subscriptions", s.handleCreateSubscription)

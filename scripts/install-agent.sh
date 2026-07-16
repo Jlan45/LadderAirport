@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
-# 一键安装 ladder-agent 为 systemd 服务（默认从 GitHub Release 拉最新二进制）。
+# 一键安装 / 升级 / 卸载 ladder-agent（systemd）。
+# 默认从 GitHub Release 拉最新二进制。
 #
-# 无需克隆仓库（推荐）:
+# 安装（推荐）:
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
-#     | sudo LADDER_TOKEN=mysecret bash
+#     | sudo env LADDER_TOKEN=mysecret bash
 #
-# 默认开启 TLS（自签 CA + 节点证书）。关闭:
+# 升级（只换二进制 + 刷新 unit + restart；保留 agent.env 与 TLS）:
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
-#     | sudo LADDER_TLS=0 LADDER_TOKEN=mysecret bash
+#     | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
 #
-# 指定版本 / 本地文件 / 源码编译:
+# 卸载（默认保留 conf/data；LADDER_PURGE=1 全清）:
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
-#     | sudo LADDER_VERSION=v0.3.1 LADDER_TOKEN=mysecret bash
-#   sudo LADDER_TOKEN=mysecret ./scripts/install-agent.sh /path/to/ladder-agent
+#     | sudo env LADDER_ACTION=uninstall bash
+#
+# 其它:
+#   sudo LADDER_TLS=0 LADDER_TOKEN=mysecret ./scripts/install-agent.sh
 #   sudo LADDER_FROM=local LADDER_TOKEN=mysecret ./scripts/install-agent.sh
+#   sudo ./scripts/install-agent.sh upgrade
+#   sudo ./scripts/install-agent.sh uninstall
 #
 set -euo pipefail
 
@@ -28,12 +33,29 @@ if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/../Makefile" ]]; then
   ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 fi
 
-BIN_SRC="${1:-}"
+# --- action: LADDER_ACTION 或首个参数 install|upgrade|uninstall ---
+# curl|bash 时 $1 常为空，请用 LADDER_ACTION=...
+ACTION="${LADDER_ACTION:-}"
+BIN_SRC=""
+case "${1:-}" in
+  install | upgrade | uninstall)
+    ACTION="$1"
+    shift || true
+    BIN_SRC="${1:-}"
+    ;;
+  *)
+    BIN_SRC="${1:-}"
+    ;;
+esac
+ACTION="${ACTION:-install}"
+PURGE="${LADDER_PURGE:-0}"
+
 INSTALL_BIN="${INSTALL_BIN:-/usr/local/bin/ladder-agent}"
 CONF_DIR="${CONF_DIR:-/etc/ladder-agent}"
 DATA_DIR="${DATA_DIR:-/var/lib/ladder-agent}"
 TLS_DIR="${TLS_DIR:-${CONF_DIR}/tls}"
 SERVICE_DST="${SERVICE_DST:-/etc/systemd/system/ladder-agent.service}"
+SERVICE_NAME="ladder-agent.service"
 USER_NAME="${LADDER_USER:-ladder}"
 GROUP_NAME="${LADDER_GROUP:-ladder}"
 LISTEN="${LADDER_LISTEN:-0.0.0.0:50051}"
@@ -52,6 +74,7 @@ NODE_ID="${LADDER_NODE_ID:-}"
 REPORT_ADDR="${LADDER_REPORT_ADDRESS:-}" # force reported address; else auto-detect
 GRPC_PORT_HINT="${LADDER_GRPC_PORT:-}"
 TMPDIR_DL=""
+ENV_FILE="${CONF_DIR}/agent.env"
 
 cleanup() {
   if [[ -n "${TMPDIR_DL}" && -d "${TMPDIR_DL}" ]]; then
@@ -74,15 +97,10 @@ need_cmd systemctl
 need_cmd install
 need_cmd uname
 
-# --- token ---
-if [[ -z "${TOKEN}" ]]; then
-  if command -v openssl >/dev/null 2>&1; then
-    TOKEN="$(openssl rand -hex 16)"
-  else
-    TOKEN="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  fi
-  echo "==> 已生成 LADDER_TOKEN（请保存到 Panel）: ${TOKEN}"
-fi
+case "${ACTION}" in
+  install | upgrade | uninstall) ;;
+  *) die "未知动作: ${ACTION}（支持 install|upgrade|uninstall，或 LADDER_ACTION=...）" ;;
+esac
 
 # --- arch ---
 detect_arch() {
@@ -437,7 +455,7 @@ PY
     return 0
   fi
 
-  local resp code
+  local resp code body
   resp="$(curl -fsS -w '\n%{http_code}' -X POST "${panel}/api/v1/agent/enroll" \
     -H "Authorization: Bearer ${ACTIVE_TOKEN}" \
     -H "Content-Type: application/json" \
@@ -456,81 +474,44 @@ PY
   fi
 }
 
-echo "==> 创建用户/组 ${USER_NAME}"
-getent group "${GROUP_NAME}" >/dev/null || groupadd --system "${GROUP_NAME}"
-if ! id -u "${USER_NAME}" >/dev/null 2>&1; then
-  useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
-    --shell /usr/sbin/nologin --create-home "${USER_NAME}" 2>/dev/null \
-    || useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
-      --shell /bin/false "${USER_NAME}"
-fi
-
-echo "==> 准备目录"
-mkdir -p "${CONF_DIR}" "${DATA_DIR}"
-chown -R "${USER_NAME}:${GROUP_NAME}" "${DATA_DIR}"
-chmod 750 "${DATA_DIR}"
-chmod 755 "${CONF_DIR}"
-
-SRC="$(resolve_binary)"
-echo "==> 安装二进制 → ${INSTALL_BIN}"
-install -m 0755 "${SRC}" "${INSTALL_BIN}"
-
-TLS_CERT_PATH=""
-TLS_KEY_PATH=""
-case "${TLS_ENABLE}" in
-  1|true|TRUE|yes|YES|on|ON)
-    ensure_tls_material
-    TLS_CERT_PATH="${TLS_DIR}/server.crt"
-    TLS_KEY_PATH="${TLS_DIR}/server.key"
-    ;;
-  0|false|FALSE|no|NO|off|OFF)
-    echo "==> LADDER_TLS=${TLS_ENABLE}: 跳过 TLS（明文 gRPC lab 模式）"
-    ;;
-  *)
-    die "LADDER_TLS 取值无效: ${TLS_ENABLE}（用 1 或 0）"
-    ;;
-esac
-
-ENV_FILE="${CONF_DIR}/agent.env"
-echo "==> 配置 ${ENV_FILE}"
-if [[ -f "${ENV_FILE}" ]]; then
-  echo "    已存在，不覆盖（改 Token/TLS 请手动编辑后 restart）"
-  # If TLS newly enabled but env lacks cert paths, append once
-  if [[ -n "${TLS_CERT_PATH}" ]]; then
-    if ! grep -q '^LADDER_TLS_CERT=' "${ENV_FILE}" 2>/dev/null; then
-      {
-        echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
-        echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
-      } >>"${ENV_FILE}"
-      echo "    已追加 LADDER_TLS_CERT/KEY"
-    fi
+ensure_user_and_dirs() {
+  echo "==> 创建用户/组 ${USER_NAME}"
+  getent group "${GROUP_NAME}" >/dev/null || groupadd --system "${GROUP_NAME}"
+  if ! id -u "${USER_NAME}" >/dev/null 2>&1; then
+    useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
+      --shell /usr/sbin/nologin --create-home "${USER_NAME}" 2>/dev/null \
+      || useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
+        --shell /bin/false "${USER_NAME}"
   fi
-  grep -E '^LADDER_TOKEN=|^LADDER_TLS_' "${ENV_FILE}" || true
-else
-  {
-    echo "LADDER_LISTEN=${LISTEN}"
-    echo "LADDER_TOKEN=${TOKEN}"
-    echo "LADDER_DATA_DIR=${DATA_DIR}"
-    if [[ -n "${TLS_CERT_PATH}" ]]; then
-      echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
-      echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
-    fi
-  } >"${ENV_FILE}"
-  chmod 640 "${ENV_FILE}"
-  chown root:"${GROUP_NAME}" "${ENV_FILE}"
-fi
 
-GRPC_PORT="${LISTEN##*:}"
-ACTIVE_TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
+  echo "==> 准备目录"
+  mkdir -p "${CONF_DIR}" "${DATA_DIR}"
+  chown -R "${USER_NAME}:${GROUP_NAME}" "${DATA_DIR}"
+  chmod 750 "${DATA_DIR}"
+  chmod 755 "${CONF_DIR}"
+}
 
-# Build ExecStart TLS args only when certs configured
-TLS_EXEC_ARGS=""
-if [[ -n "${TLS_CERT_PATH}" ]]; then
-  TLS_EXEC_ARGS=" -tls-cert \${LADDER_TLS_CERT} -tls-key \${LADDER_TLS_KEY}"
-fi
+# Install binary; keep previous as .bak when upgrading.
+install_binary() {
+  local src="$1"
+  local backup="${INSTALL_BIN}.bak"
+  if [[ -x "${INSTALL_BIN}" ]]; then
+    echo "==> 备份旧二进制 → ${backup}"
+    cp -a "${INSTALL_BIN}" "${backup}" || true
+  fi
+  echo "==> 安装二进制 → ${INSTALL_BIN}"
+  install -m 0755 "${src}" "${INSTALL_BIN}"
+}
 
-echo "==> 写入 systemd: ${SERVICE_DST}"
-cat >"${SERVICE_DST}" <<EOF
+# TLS_CERT_PATH / TLS_KEY_PATH may be set by caller; empty = plaintext unit.
+write_unit() {
+  local tls_exec_args=""
+  if [[ -n "${TLS_CERT_PATH:-}" && -n "${TLS_KEY_PATH:-}" ]]; then
+    tls_exec_args=" -tls-cert \${LADDER_TLS_CERT} -tls-key \${LADDER_TLS_KEY}"
+  fi
+
+  echo "==> 写入 systemd: ${SERVICE_DST}"
+  cat >"${SERVICE_DST}" <<EOF
 [Unit]
 Description=LadderAirport Agent (sing-box control plane)
 After=network-online.target
@@ -542,7 +523,7 @@ User=${USER_NAME}
 Group=${GROUP_NAME}
 WorkingDirectory=${DATA_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${INSTALL_BIN} -listen \${LADDER_LISTEN} -token \${LADDER_TOKEN} -data-dir \${LADDER_DATA_DIR}${TLS_EXEC_ARGS}
+ExecStart=${INSTALL_BIN} -listen \${LADDER_LISTEN} -token \${LADDER_TOKEN} -data-dir \${LADDER_DATA_DIR}${tls_exec_args}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
@@ -556,44 +537,277 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
+}
 
-systemctl daemon-reload
-systemctl enable ladder-agent.service
-systemctl restart ladder-agent.service
-sleep 0.8
-systemctl --no-pager --full status ladder-agent.service || true
+enable_and_restart() {
+  systemctl daemon-reload
+  systemctl enable "${SERVICE_NAME}"
+  systemctl restart "${SERVICE_NAME}"
+  sleep 0.8
+  systemctl --no-pager --full status "${SERVICE_NAME}" || true
+}
 
-IMPORT_FILE=""
-if [[ -n "${TLS_CERT_PATH}" ]] || [[ -n "${PANEL_URL}" ]]; then
-  IMPORT_FILE="$(write_panel_import)"
-fi
-
-# Auto-report address + CA to Panel (no manual paste when LADDER_PANEL is set).
-enroll_to_panel
-
-echo
-echo "======== 安装完成 ========"
-echo "  二进制:  ${INSTALL_BIN}"
-echo "  配置:    ${ENV_FILE}"
-echo "  数据:    ${DATA_DIR}"
-echo "  服务:    ladder-agent.service (已 enable + start)"
-echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
-if [[ -n "${TLS_CERT_PATH}" ]]; then
-  echo "  TLS:     ON  cert=${TLS_CERT_PATH}"
-else
-  echo "  TLS:     OFF（明文 gRPC）"
-fi
-if [[ -n "${PANEL_URL}" ]]; then
-  echo "  Panel:   ${PANEL_URL}（已尝试自动 enroll）"
-  echo "  请在 Panel 刷新节点 → 探测"
-else
-  echo "  Panel:   未设置 LADDER_PANEL（无自动上报）"
-  echo "  Token  : ${ACTIVE_TOKEN}"
-  if [[ -n "${IMPORT_FILE}" ]]; then
-    echo "  登记提示: ${IMPORT_FILE}"
+# Load TLS cert paths from existing agent.env (upgrade path).
+load_tls_from_env() {
+  TLS_CERT_PATH=""
+  TLS_KEY_PATH=""
+  if [[ -f "${ENV_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    # Prefer grep over source to avoid executing unexpected content
+    local cert key
+    cert="$(grep -E '^LADDER_TLS_CERT=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    key="$(grep -E '^LADDER_TLS_KEY=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    if [[ -n "${cert}" && -n "${key}" && -f "${cert}" && -f "${key}" ]]; then
+      TLS_CERT_PATH="${cert}"
+      TLS_KEY_PATH="${key}"
+    fi
   fi
-fi
-echo
-echo "运维: systemctl status|restart ladder-agent ; journalctl -u ladder-agent -f"
-echo "升级: 重新执行本脚本（会覆盖二进制，保留 agent.env 与 TLS 证书）"
-echo "强制重签 TLS: 删除 ${TLS_DIR} 后 LADDER_TLS=1 再装（会再次 enroll）"
+}
+
+require_installed() {
+  if [[ ! -f "${INSTALL_BIN}" && ! -f "${SERVICE_DST}" && ! -f "${ENV_FILE}" ]]; then
+    die "未检测到已安装的 Agent（${INSTALL_BIN} / ${SERVICE_DST} / ${ENV_FILE}）。请先 install。"
+  fi
+}
+
+# ---------- install ----------
+do_install() {
+  # --- token (install only; never invent token during upgrade) ---
+  if [[ -z "${TOKEN}" ]]; then
+    if [[ -f "${ENV_FILE}" ]] && grep -q '^LADDER_TOKEN=' "${ENV_FILE}" 2>/dev/null; then
+      TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | head -1 | cut -d= -f2-)"
+      echo "==> 复用已有 agent.env 中的 LADDER_TOKEN"
+    else
+      if command -v openssl >/dev/null 2>&1; then
+        TOKEN="$(openssl rand -hex 16)"
+      else
+        TOKEN="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+      fi
+      echo "==> 已生成 LADDER_TOKEN（请保存到 Panel）: ${TOKEN}"
+    fi
+  fi
+
+  ensure_user_and_dirs
+
+  local src
+  src="$(resolve_binary)"
+  install_binary "${src}"
+
+  TLS_CERT_PATH=""
+  TLS_KEY_PATH=""
+  case "${TLS_ENABLE}" in
+    1|true|TRUE|yes|YES|on|ON)
+      ensure_tls_material
+      TLS_CERT_PATH="${TLS_DIR}/server.crt"
+      TLS_KEY_PATH="${TLS_DIR}/server.key"
+      ;;
+    0|false|FALSE|no|NO|off|OFF)
+      echo "==> LADDER_TLS=${TLS_ENABLE}: 跳过 TLS（明文 gRPC lab 模式）"
+      ;;
+    *)
+      die "LADDER_TLS 取值无效: ${TLS_ENABLE}（用 1 或 0）"
+      ;;
+  esac
+
+  echo "==> 配置 ${ENV_FILE}"
+  if [[ -f "${ENV_FILE}" ]]; then
+    echo "    已存在，不覆盖（改 Token/TLS 请手动编辑后 restart）"
+    # If TLS newly enabled but env lacks cert paths, append once
+    if [[ -n "${TLS_CERT_PATH}" ]]; then
+      if ! grep -q '^LADDER_TLS_CERT=' "${ENV_FILE}" 2>/dev/null; then
+        {
+          echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
+          echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
+        } >>"${ENV_FILE}"
+        echo "    已追加 LADDER_TLS_CERT/KEY"
+      fi
+    fi
+    grep -E '^LADDER_TOKEN=|^LADDER_TLS_' "${ENV_FILE}" || true
+  else
+    {
+      echo "LADDER_LISTEN=${LISTEN}"
+      echo "LADDER_TOKEN=${TOKEN}"
+      echo "LADDER_DATA_DIR=${DATA_DIR}"
+      if [[ -n "${TLS_CERT_PATH}" ]]; then
+        echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
+        echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
+      fi
+    } >"${ENV_FILE}"
+    chmod 640 "${ENV_FILE}"
+    chown root:"${GROUP_NAME}" "${ENV_FILE}"
+  fi
+
+  GRPC_PORT="${LISTEN##*:}"
+  ACTIVE_TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
+
+  # Prefer TLS paths actually present in env (may already exist)
+  load_tls_from_env
+  if [[ -z "${TLS_CERT_PATH}" && -f "${TLS_DIR}/server.crt" && -f "${TLS_DIR}/server.key" ]]; then
+    TLS_CERT_PATH="${TLS_DIR}/server.crt"
+    TLS_KEY_PATH="${TLS_DIR}/server.key"
+  fi
+
+  write_unit
+  enable_and_restart
+
+  IMPORT_FILE=""
+  if [[ -n "${TLS_CERT_PATH}" ]] || [[ -n "${PANEL_URL}" ]]; then
+    IMPORT_FILE="$(write_panel_import)"
+  fi
+
+  # Auto-report address + CA to Panel (no manual paste when LADDER_PANEL is set).
+  enroll_to_panel
+
+  echo
+  echo "======== 安装完成 ========"
+  echo "  动作:    install"
+  echo "  二进制:  ${INSTALL_BIN}"
+  echo "  配置:    ${ENV_FILE}"
+  echo "  数据:    ${DATA_DIR}"
+  echo "  服务:    ${SERVICE_NAME} (已 enable + start)"
+  echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
+  if [[ -n "${TLS_CERT_PATH}" ]]; then
+    echo "  TLS:     ON  cert=${TLS_CERT_PATH}"
+  else
+    echo "  TLS:     OFF（明文 gRPC）"
+  fi
+  if [[ -n "${PANEL_URL}" ]]; then
+    echo "  Panel:   ${PANEL_URL}（已尝试自动 enroll）"
+    echo "  请在 Panel 刷新节点 → 探测"
+  else
+    echo "  Panel:   未设置 LADDER_PANEL（无自动上报）"
+    echo "  Token  : ${ACTIVE_TOKEN}"
+    if [[ -n "${IMPORT_FILE}" ]]; then
+      echo "  登记提示: ${IMPORT_FILE}"
+    fi
+  fi
+  echo
+  echo "运维: systemctl status|restart ladder-agent ; journalctl -u ladder-agent -f"
+  echo "升级: curl -fsSL .../install-agent.sh | sudo env LADDER_ACTION=upgrade [LADDER_VERSION=vX.Y.Z] bash"
+  echo "卸载: curl -fsSL .../install-agent.sh | sudo env LADDER_ACTION=uninstall bash"
+  echo "强制重签 TLS: 删除 ${TLS_DIR} 后 LADDER_TLS=1 再 install（会再次 enroll）"
+}
+
+# ---------- upgrade ----------
+# Replace binary + refresh unit + restart. Never touch token/TLS/enroll.
+do_upgrade() {
+  require_installed
+  echo "==> 升级 ladder-agent（保留 ${ENV_FILE} 与 TLS）"
+
+  ensure_user_and_dirs
+
+  local src
+  src="$(resolve_binary)"
+  install_binary "${src}"
+
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    die "缺少 ${ENV_FILE}。无法安全升级（无 Token）。请改用 install 或手动恢复 env。"
+  fi
+
+  load_tls_from_env
+  if [[ -z "${TLS_CERT_PATH}" && -f "${TLS_DIR}/server.crt" && -f "${TLS_DIR}/server.key" ]]; then
+    # env may lack keys after old installs; unit can still use files if we append
+    if ! grep -q '^LADDER_TLS_CERT=' "${ENV_FILE}" 2>/dev/null; then
+      {
+        echo "LADDER_TLS_CERT=${TLS_DIR}/server.crt"
+        echo "LADDER_TLS_KEY=${TLS_DIR}/server.key"
+      } >>"${ENV_FILE}"
+      echo "==> 已向 agent.env 追加 LADDER_TLS_CERT/KEY（证书文件已存在）"
+    fi
+    TLS_CERT_PATH="${TLS_DIR}/server.crt"
+    TLS_KEY_PATH="${TLS_DIR}/server.key"
+  fi
+
+  write_unit
+  enable_and_restart
+
+  ACTIVE_TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
+
+  echo
+  echo "======== 升级完成 ========"
+  echo "  动作:    upgrade"
+  echo "  二进制:  ${INSTALL_BIN}"
+  if [[ -x "${INSTALL_BIN}.bak" ]]; then
+    echo "  备份:    ${INSTALL_BIN}.bak （回滚: sudo mv ${INSTALL_BIN}.bak ${INSTALL_BIN} && systemctl restart ladder-agent）"
+  fi
+  echo "  配置:    ${ENV_FILE}（未改 Token）"
+  echo "  服务:    ${SERVICE_NAME} (已 restart)"
+  echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
+  if [[ -n "${TLS_CERT_PATH}" ]]; then
+    echo "  TLS:     ON  cert=${TLS_CERT_PATH}"
+  else
+    echo "  TLS:     OFF 或未配置证书路径"
+  fi
+  echo
+  echo "运维: systemctl status ladder-agent ; journalctl -u ladder-agent -f"
+  echo "在 Panel 刷新/探测节点以确认 agent_version"
+}
+
+# ---------- uninstall ----------
+do_uninstall() {
+  echo "==> 卸载 ladder-agent"
+
+  if systemctl list-unit-files "${SERVICE_NAME}" &>/dev/null || [[ -f "${SERVICE_DST}" ]]; then
+    systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+    systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+  fi
+  if [[ -f "${SERVICE_DST}" ]]; then
+    rm -f "${SERVICE_DST}"
+    echo "  已删除 unit: ${SERVICE_DST}"
+  fi
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl reset-failed "${SERVICE_NAME}" 2>/dev/null || true
+
+  if [[ -f "${INSTALL_BIN}" ]]; then
+    rm -f "${INSTALL_BIN}"
+    echo "  已删除二进制: ${INSTALL_BIN}"
+  fi
+  if [[ -f "${INSTALL_BIN}.bak" ]]; then
+    rm -f "${INSTALL_BIN}.bak"
+    echo "  已删除备份: ${INSTALL_BIN}.bak"
+  fi
+
+  case "${PURGE}" in
+    1|true|TRUE|yes|YES|on|ON)
+      echo "==> LADDER_PURGE=1：删除配置与数据"
+      if [[ -d "${CONF_DIR}" ]]; then
+        rm -rf "${CONF_DIR}"
+        echo "  已删除: ${CONF_DIR}"
+      fi
+      if [[ -d "${DATA_DIR}" ]]; then
+        rm -rf "${DATA_DIR}"
+        echo "  已删除: ${DATA_DIR}"
+      fi
+      if id -u "${USER_NAME}" >/dev/null 2>&1; then
+        userdel "${USER_NAME}" 2>/dev/null || true
+        echo "  已尝试删除用户: ${USER_NAME}"
+      fi
+      if getent group "${GROUP_NAME}" >/dev/null 2>&1; then
+        groupdel "${GROUP_NAME}" 2>/dev/null || true
+        echo "  已尝试删除组: ${GROUP_NAME}"
+      fi
+      ;;
+    *)
+      echo "==> 已保留配置与数据（需要全清请加 LADDER_PURGE=1）:"
+      [[ -d "${CONF_DIR}" ]] && echo "  conf: ${CONF_DIR}"
+      [[ -d "${DATA_DIR}" ]] && echo "  data: ${DATA_DIR}"
+      ;;
+  esac
+
+  echo
+  echo "======== 卸载完成 ========"
+  echo "  动作: uninstall"
+  case "${PURGE}" in
+    1|true|TRUE|yes|YES|on|ON) echo "  模式: purge（配置/数据已删）" ;;
+    *) echo "  模式: 保留 conf/data；全清: LADDER_ACTION=uninstall LADDER_PURGE=1" ;;
+  esac
+  echo "  若节点仍在 Panel 登记，请在 Panel 中删除该节点记录"
+}
+
+# ---------- dispatch ----------
+echo "==> ladder-agent 脚本动作: ${ACTION}"
+case "${ACTION}" in
+  install) do_install ;;
+  upgrade) do_upgrade ;;
+  uninstall) do_uninstall ;;
+esac

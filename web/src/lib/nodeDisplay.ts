@@ -106,3 +106,118 @@ export function statusClass(s?: string): string {
   if (s === 'pending') return 'status status-pending'
   return 'status'
 }
+
+/** Parse a semver-ish string: "v0.3.1", "0.1.0-dev", "1.2". */
+export type SemVer = {
+  major: number
+  minor: number
+  patch: number
+  pre: string
+  valid: boolean
+  raw: string
+}
+
+function looksLikeVersion(s: string): boolean {
+  const t = s.replace(/^[vV]/, '')
+  if (!t || t[0] < '0' || t[0] > '9') return false
+  return /[.+-]/.test(t) || /^\d+$/.test(t)
+}
+
+export function parseSemVer(input?: string | null): SemVer {
+  const raw = String(input || '').trim()
+  if (!raw) return { major: 0, minor: 0, patch: 0, pre: '', valid: false, raw }
+  let candidate = raw
+  for (const part of raw.split(/\s+/)) {
+    const p = part.replace(/^[,;()[\]{}]+|[,;()[\]{}]+$/g, '')
+    if (looksLikeVersion(p)) {
+      candidate = p
+      break
+    }
+  }
+  candidate = candidate.replace(/^[vV]/, '')
+  const plus = candidate.indexOf('+')
+  if (plus >= 0) candidate = candidate.slice(0, plus)
+  let pre = ''
+  let core = candidate
+  const dash = candidate.indexOf('-')
+  if (dash >= 0) {
+    core = candidate.slice(0, dash)
+    pre = candidate.slice(dash + 1)
+  }
+  const segs = core.split('.')
+  const nums: number[] = []
+  for (const seg of segs) {
+    if (!/^\d+$/.test(seg)) return { major: 0, minor: 0, patch: 0, pre: '', valid: false, raw }
+    nums.push(parseInt(seg, 10))
+    if (nums.length === 3) break
+  }
+  if (nums.length === 0) return { major: 0, minor: 0, patch: 0, pre: '', valid: false, raw }
+  while (nums.length < 3) nums.push(0)
+  return { major: nums[0], minor: nums[1], patch: nums[2], pre, valid: true, raw }
+}
+
+function cmpInt(a: number, b: number): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+function comparePre(a: string, b: string): number {
+  const as = a.split('.')
+  const bs = b.split('.')
+  const n = Math.min(as.length, bs.length)
+  for (let i = 0; i < n; i++) {
+    const aNum = /^\d+$/.test(as[i])
+    const bNum = /^\d+$/.test(bs[i])
+    if (aNum && bNum) {
+      const c = cmpInt(parseInt(as[i], 10), parseInt(bs[i], 10))
+      if (c !== 0) return c
+    } else if (aNum && !bNum) return -1
+    else if (!aNum && bNum) return 1
+    else if (as[i] < bs[i]) return -1
+    else if (as[i] > bs[i]) return 1
+  }
+  return cmpInt(as.length, bs.length)
+}
+
+/** -1 if a<b, 0 if equal, 1 if a>b. Invalid < valid. */
+export function compareSemVer(a: SemVer, b: SemVer): number {
+  if (!a.valid && !b.valid) return 0
+  if (!a.valid) return -1
+  if (!b.valid) return 1
+  if (a.major !== b.major) return cmpInt(a.major, b.major)
+  if (a.minor !== b.minor) return cmpInt(a.minor, b.minor)
+  if (a.patch !== b.patch) return cmpInt(a.patch, b.patch)
+  if (!a.pre && !b.pre) return 0
+  if (!a.pre) return 1
+  if (!b.pre) return -1
+  return comparePre(a.pre, b.pre)
+}
+
+/** Normalize version for display/fallback equality (strip leading v, lower-case). */
+export function normalizeVersion(v?: string | null): string {
+  return String(v || '')
+    .trim()
+    .replace(/^[vV]/, '')
+    .toLowerCase()
+}
+
+/**
+ * True when current agent version should be upgraded to recommended.
+ * Uses semver ordering: 0.2.0 < 0.3.1; 0.3.1-rc.1 < 0.3.1; 0.4.0 is NOT outdated vs 0.3.1.
+ */
+export function isAgentOutdated(
+  current?: string | null,
+  recommended?: string | null,
+): boolean {
+  const recRaw = String(recommended || '').trim()
+  if (!recRaw) return false
+  const curRaw = String(current || '').trim()
+  if (!curRaw) return true
+  const low = curRaw.toLowerCase()
+  if (low === 'unknown' || low === 'dev') return true
+
+  const cur = parseSemVer(curRaw)
+  const rec = parseSemVer(recRaw)
+  if (cur.valid && rec.valid) return compareSemVer(cur, rec) < 0
+  if (rec.valid && !cur.valid) return true
+  return normalizeVersion(curRaw) !== normalizeVersion(recRaw)
+}

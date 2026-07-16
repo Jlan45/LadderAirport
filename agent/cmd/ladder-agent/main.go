@@ -10,13 +10,12 @@ import (
 	"syscall"
 
 	"github.com/ladderairport/agent/internal/control"
+	"github.com/ladderairport/agent/internal/version"
 	"github.com/ladderairport/pkg/auth"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
-
-const agentVersion = "0.1.0-dev"
 
 func main() {
 	listen := flag.String("listen", ":50051", "gRPC listen address")
@@ -24,7 +23,17 @@ func main() {
 	tlsCert := flag.String("tls-cert", "", "TLS certificate file (optional)")
 	tlsKey := flag.String("tls-key", "", "TLS private key file (optional)")
 	dataDir := flag.String("data-dir", "", "directory for cached config/state (optional)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("ladder-agent %s", version.Version)
+		if version.Commit != "" && version.Commit != "unknown" {
+			fmt.Printf(" (%s)", version.Commit)
+		}
+		fmt.Println()
+		return
+	}
 
 	if *token == "" {
 		log.Fatal("-token is required")
@@ -38,6 +47,7 @@ func main() {
 	rt := control.NewBoxRuntime(*dataDir)
 	logs := control.NewLogBuf(0)
 	singboxVer := control.SingboxVersion()
+	agentVersion := version.Version
 	log.Printf("runtime=box agent_version=%s singbox_version=%s data_dir=%q", agentVersion, singboxVer, *dataDir)
 
 	srv := control.NewServer(rt, agentVersion, singboxVer, logs)

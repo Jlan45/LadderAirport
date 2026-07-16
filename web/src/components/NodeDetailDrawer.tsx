@@ -35,7 +35,7 @@ import {
   type NodeInstallInfo,
   type Task,
 } from '../api/client'
-import { formatBytes, taskKindLabel, taskStatusLabel } from '../lib/nodeDisplay'
+import { formatBytes, isAgentOutdated, taskKindLabel, taskStatusLabel } from '../lib/nodeDisplay'
 
 type Props = {
   nodeId: string | null
@@ -69,6 +69,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [ifacesLoading, setIfacesLoading] = useState(false)
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
+  const [copiedUpgrade, setCopiedUpgrade] = useState(false)
 
   const loadInterfaces = useCallback(async () => {
     if (!id) return
@@ -313,6 +314,18 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     }
   }
 
+  async function copyUpgrade() {
+    if (!installInfo?.upgrade_command) return
+    try {
+      await navigator.clipboard.writeText(installInfo.upgrade_command)
+      setCopiedUpgrade(true)
+      MessagePlugin.success('已复制升级命令')
+      setTimeout(() => setCopiedUpgrade(false), 2000)
+    } catch {
+      MessagePlugin.error('复制失败，请手动选择命令')
+    }
+  }
+
   return (
     <Drawer
       visible={open}
@@ -328,6 +341,23 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
             {node.address || '（待填）'}:{node.grpc_port}
           </code>{' '}
           · {taskStatusLabel(node.status || 'unknown')}
+          {' '}
+          · Agent <code className="la-mono">{node.agent_version || '—'}</code>
+          {node.singbox_version ? (
+            <>
+              {' '}
+              · sing-box <code className="la-mono">{node.singbox_version}</code>
+            </>
+          ) : null}
+          {installInfo &&
+          isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
+            <span style={{ color: 'var(--td-warning-color, #e37318)', marginLeft: 8 }}>
+              可升级
+              {installInfo.recommended_agent_version
+                ? ` → ${installInfo.recommended_agent_version}`
+                : ''}
+            </span>
+          ) : null}
         </p>
       ) : (
         <p className="la-page-desc">加载中…</p>
@@ -412,6 +442,25 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
               </Button>
             </div>
             <pre className="la-pre">{installInfo.install_command}</pre>
+            {installInfo.upgrade_command ? (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <strong>
+                    升级
+                    {installInfo.recommended_agent_version
+                      ? ` → ${installInfo.recommended_agent_version}`
+                      : ''}
+                  </strong>
+                  <Button size="small" variant="outline" onClick={() => void copyUpgrade()}>
+                    {copiedUpgrade ? '已复制' : '复制'}
+                  </Button>
+                </div>
+                <p className="la-page-desc" style={{ marginTop: 0 }}>
+                  在节点上以 root 执行；保留 Token / TLS / 配置。
+                </p>
+                <pre className="la-pre">{installInfo.upgrade_command}</pre>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

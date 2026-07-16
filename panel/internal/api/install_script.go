@@ -73,6 +73,43 @@ func buildInstallCommand(opts installCommandOpts) string {
 	return b.String()
 }
 
+// buildUpgradeCommand produces a curl|bash one-liner that only replaces the binary
+// (LADDER_ACTION=upgrade). Token/TLS/env are left untouched on the node.
+func buildUpgradeCommand(opts installCommandOpts) string {
+	scriptURL := opts.ScriptURL
+	if scriptURL == "" {
+		scriptURL = defaultInstallScriptURL
+	}
+	var b strings.Builder
+	b.WriteString("curl -fsSL ")
+	b.WriteString(shellSingleQuote(scriptURL))
+	b.WriteString(" | sudo env LADDER_ACTION=upgrade")
+	if opts.AgentVersion != "" && opts.AgentVersion != "latest" {
+		b.WriteString(" LADDER_VERSION=")
+		b.WriteString(shellSingleQuote(opts.AgentVersion))
+	}
+	b.WriteString(" bash")
+	return b.String()
+}
+
+// buildUninstallCommand produces a curl|bash one-liner to stop the agent service
+// and remove unit/binary. Purge removes conf/data as well.
+func buildUninstallCommand(opts installCommandOpts, purge bool) string {
+	scriptURL := opts.ScriptURL
+	if scriptURL == "" {
+		scriptURL = defaultInstallScriptURL
+	}
+	var b strings.Builder
+	b.WriteString("curl -fsSL ")
+	b.WriteString(shellSingleQuote(scriptURL))
+	b.WriteString(" | sudo env LADDER_ACTION=uninstall")
+	if purge {
+		b.WriteString(" LADDER_PURGE=1")
+	}
+	b.WriteString(" bash")
+	return b.String()
+}
+
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

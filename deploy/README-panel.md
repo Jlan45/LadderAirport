@@ -69,9 +69,11 @@ sudo cat /etc/ladder-panel/panel.env   # 含 session secret，权限 640
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
+| `LADDER_ACTION` | `install` | `install` / `upgrade` / `uninstall`（也可用脚本首参） |
+| `LADDER_PURGE` | `0` | 仅卸载：`1` 时删除 conf/data/SQLite/用户 |
 | `LADDER_LISTEN` | `:8080` | HTTP 监听地址 |
 | `LADDER_DB` | `/var/lib/ladder-panel/panel.db` | SQLite 路径 |
-| `LADDER_SESSION_SECRET` | 随机生成 | JWT 会话 HMAC；固定后重启不掉登录 |
+| `LADDER_SESSION_SECRET` | 随机生成 | JWT 会话 HMAC；固定后重启不掉登录（**upgrade 不会改**） |
 | `LADDER_BOOTSTRAP` | `true` | 启动时全量下发 + Start |
 | `LADDER_BOOTSTRAP_TIMEOUT` | `3m` | 首次 bootstrap 超时 |
 | `LADDER_BOOTSTRAP_RETRY` | `true` | 定时重试未就绪节点 |
@@ -92,20 +94,47 @@ journalctl -u ladder-panel -f
 systemctl restart ladder-panel
 ```
 
-升级到最新 Release（保留 `panel.env` 与 SQLite）：
+### 升级
+
+只替换二进制、刷新 systemd unit 并 restart；**保留** `panel.env` 与 SQLite。旧二进制备份为 `/usr/local/bin/ladder-panel.bak`。
 
 ```bash
+# 升到最新
 curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
-  | sudo bash
+  | sudo env LADDER_ACTION=upgrade bash
+
+# 升到指定版本
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+  | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
 ```
 
-备份（升级/迁移前）：
+回滚：
+
+```bash
+sudo mv /usr/local/bin/ladder-panel.bak /usr/local/bin/ladder-panel
+sudo systemctl restart ladder-panel
+```
+
+### 卸载
+
+默认只停服务、删 unit 与二进制，**保留** conf 与 SQLite。
+
+```bash
+# 保留 conf/data（推荐）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+  | sudo env LADDER_ACTION=uninstall bash
+
+# 全清（会删除 panel.db，务必先备份）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+  | sudo env LADDER_ACTION=uninstall LADDER_PURGE=1 bash
+```
+
+备份（升级/迁移/purge 前）：
 
 ```bash
 sudo cp -a /var/lib/ladder-panel/panel.db /root/panel.db.bak
 sudo cp -a /etc/ladder-panel/panel.env /root/panel.env.bak
 ```
-
 ## 防火墙 / 反代
 
 ```bash

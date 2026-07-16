@@ -29,13 +29,19 @@ type nodeBootstrapRequest struct {
 
 // nodeInstallResponse is returned after bootstrap or when regenerating the install command.
 type nodeInstallResponse struct {
-	Node           store.Node `json:"node"`
-	Token          string     `json:"token"`
-	EnableTLS      bool       `json:"enable_tls"`
-	InstallCommand string     `json:"install_command"`
-	Steps          []string   `json:"steps"`
-	PanelBaseURL   string     `json:"panel_base_url,omitempty"`
-	EnrollEnabled  bool       `json:"enroll_enabled"`
+	Node             store.Node `json:"node"`
+	Token            string     `json:"token"`
+	EnableTLS        bool       `json:"enable_tls"`
+	InstallCommand   string     `json:"install_command"`
+	UpgradeCommand   string     `json:"upgrade_command,omitempty"`
+	UninstallCommand string     `json:"uninstall_command,omitempty"`
+	Steps            []string   `json:"steps"`
+	PanelBaseURL     string     `json:"panel_base_url,omitempty"`
+	EnrollEnabled    bool       `json:"enroll_enabled"`
+	// RecommendedAgentVersion is the latest known release tag (may be empty).
+	RecommendedAgentVersion string `json:"recommended_agent_version,omitempty"`
+	// Outdated is true when the node's reported agent_version looks behind recommended.
+	Outdated bool `json:"outdated,omitempty"`
 }
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
@@ -138,24 +144,34 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 	if st, err := s.Store.GetSettings(); err == nil {
 		panelBase = panelBaseFromSettings(st.PublicBaseURL)
 	}
+	agentVer := strings.TrimSpace(req.AgentVersion)
 	cmd := buildInstallCommand(installCommandOpts{
 		ScriptURL:    req.InstallScript,
 		Token:        token,
-		AgentVersion: strings.TrimSpace(req.AgentVersion),
+		AgentVersion: agentVer,
 		EnableTLS:    enableTLS,
 		PanelBaseURL: panelBase,
 		NodeID:       created.ID,
 		GRPCPort:     port,
 	})
+	rec, _, _ := resolveRecommendedAgentVersion()
+	upgradeVer := agentVer
+	if upgradeVer == "" || upgradeVer == "latest" {
+		upgradeVer = rec
+	}
 	enrollOK := panelBase != ""
 	writeJSON(w, http.StatusCreated, nodeInstallResponse{
-		Node:           *created,
-		Token:          token,
-		EnableTLS:      enableTLS,
-		InstallCommand: cmd,
-		Steps:          installSteps(enableTLS, addr, port, panelBase, enrollOK),
-		PanelBaseURL:   panelBase,
-		EnrollEnabled:  enrollOK,
+		Node:                    *created,
+		Token:                   token,
+		EnableTLS:               enableTLS,
+		InstallCommand:          cmd,
+		UpgradeCommand:          buildUpgradeCommand(installCommandOpts{ScriptURL: req.InstallScript, AgentVersion: upgradeVer}),
+		UninstallCommand:        buildUninstallCommand(installCommandOpts{ScriptURL: req.InstallScript}, false),
+		Steps:                   installSteps(enableTLS, addr, port, panelBase, enrollOK),
+		PanelBaseURL:            panelBase,
+		EnrollEnabled:           enrollOK,
+		RecommendedAgentVersion: rec,
+		Outdated:                isAgentVersionOutdated(created.AgentVersion, rec),
 	})
 }
 
@@ -202,8 +218,9 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 	if v := strings.TrimSpace(q.Get("panel")); v != "" {
 		panelBase = panelBaseFromSettings(v)
 	}
+	scriptURL := q.Get("script_url")
 	cmd := buildInstallCommand(installCommandOpts{
-		ScriptURL:    q.Get("script_url"),
+		ScriptURL:    scriptURL,
 		Token:        token,
 		AgentVersion: version,
 		EnableTLS:    enableTLS,
@@ -211,15 +228,24 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		NodeID:       n.ID,
 		GRPCPort:     n.GRPCPort,
 	})
+	rec, _, _ := resolveRecommendedAgentVersion()
+	upgradeVer := strings.TrimSpace(version)
+	if upgradeVer == "" || upgradeVer == "latest" {
+		upgradeVer = rec
+	}
 	enrollOK := panelBase != ""
 	writeJSON(w, http.StatusOK, nodeInstallResponse{
-		Node:           *n,
-		Token:          token,
-		EnableTLS:      enableTLS,
-		InstallCommand: cmd,
-		Steps:          installSteps(enableTLS, n.Address, n.GRPCPort, panelBase, enrollOK),
-		PanelBaseURL:   panelBase,
-		EnrollEnabled:  enrollOK,
+		Node:                    *n,
+		Token:                   token,
+		EnableTLS:               enableTLS,
+		InstallCommand:          cmd,
+		UpgradeCommand:          buildUpgradeCommand(installCommandOpts{ScriptURL: scriptURL, AgentVersion: upgradeVer}),
+		UninstallCommand:        buildUninstallCommand(installCommandOpts{ScriptURL: scriptURL}, false),
+		Steps:                   installSteps(enableTLS, n.Address, n.GRPCPort, panelBase, enrollOK),
+		PanelBaseURL:            panelBase,
+		EnrollEnabled:           enrollOK,
+		RecommendedAgentVersion: rec,
+		Outdated:                isAgentVersionOutdated(n.AgentVersion, rec),
 	})
 }
 

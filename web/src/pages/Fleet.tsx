@@ -23,11 +23,13 @@ import {
   deleteNode,
   fleetOverview,
   fleetRefresh,
+  getMeta,
   getNodeInstallCommand,
   probeNode,
   startNode,
   stopNode,
   type FleetOverview,
+  type MetaInfo,
   type Node,
   type NodeInstallInfo,
   type Task,
@@ -38,6 +40,7 @@ import StatsBar from '../components/StatsBar'
 import {
   formatBytes,
   formatTime,
+  isAgentOutdated,
   isOnlineStatus,
   runtimeLabel,
   runtimeTheme,
@@ -64,6 +67,12 @@ export default function Fleet() {
   const [actionId, setActionId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [installBanner, setInstallBanner] = useState<NodeInstallInfo | null>(null)
+  const [upgradeBanner, setUpgradeBanner] = useState<{
+    node: Node
+    command: string
+    recommended?: string
+  } | null>(null)
+  const [meta, setMeta] = useState<MetaInfo | null>(null)
   const [copied, setCopied] = useState(false)
 
   const loadCached = useCallback(async () => {
@@ -93,6 +102,14 @@ export default function Fleet() {
   useEffect(() => {
     void loadCached()
   }, [loadCached])
+
+  useEffect(() => {
+    void getMeta()
+      .then(setMeta)
+      .catch(() => {
+        /* offline / no release info is fine */
+      })
+  }, [])
 
   useEffect(() => {
     if (!auto) return
@@ -234,12 +251,39 @@ export default function Fleet() {
 
   async function showInstall(id: string) {
     setCopied(false)
+    setUpgradeBanner(null)
     try {
       const info = await getNodeInstallCommand(id)
       setInstallBanner(info)
       MessagePlugin.success(`已生成节点「${info.node.name}」的安装命令`)
     } catch (err) {
       MessagePlugin.error(err instanceof Error ? err.message : '获取安装命令失败')
+    }
+  }
+
+  async function showUpgrade(id: string) {
+    setCopied(false)
+    setInstallBanner(null)
+    try {
+      const info = await getNodeInstallCommand(id, {
+        version: meta?.recommended_agent_version || undefined,
+      })
+      const cmd =
+        info.upgrade_command ||
+        meta?.agent_upgrade_command ||
+        ''
+      if (!cmd) {
+        MessagePlugin.warning('暂无升级命令，请稍后重试或检查网络')
+        return
+      }
+      setUpgradeBanner({
+        node: info.node,
+        command: cmd,
+        recommended: info.recommended_agent_version || meta?.recommended_agent_version,
+      })
+      MessagePlugin.success(`已生成节点「${info.node.name}」的升级命令`)
+    } catch (err) {
+      MessagePlugin.error(err instanceof Error ? err.message : '获取升级命令失败')
     }
   }
 
@@ -254,6 +298,24 @@ export default function Fleet() {
       MessagePlugin.error('复制失败，请手动选择命令')
     }
   }
+
+  async function copyUpgradeBanner() {
+    if (!upgradeBanner?.command) return
+    try {
+      await navigator.clipboard.writeText(upgradeBanner.command)
+      setCopied(true)
+      MessagePlugin.success('已复制升级命令')
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      MessagePlugin.error('复制失败，请手动选择命令')
+    }
+  }
+
+  const recommended = meta?.recommended_agent_version || ''
+  const outdatedNodes = useMemo(() => {
+    if (!recommended) return [] as Node[]
+    return allNodes.filter((n) => isAgentOutdated(n.agent_version, recommended))
+  }, [allNodes, recommended])
 
   const visibleAllSelected = nodes.length > 0 && nodes.every((n) => selected.has(n.id))
 
@@ -354,6 +416,24 @@ export default function Fleet() {
       cell: ({ row }) => formatTime(row.last_seen_unix || row.metrics_at_unix),
     },
     {
+      colKey: 'agent_version',
+      title: 'Agent',
+      width: 120,
+      cell: ({ row }) => {
+        const outdated = isAgentOutdated(row.agent_version, recommended)
+        return (
+          <span>
+            <code className="la-mono">{row.agent_version || '—'}</code>
+            {outdated ? (
+              <Tag size="small" theme="warning" variant="light" style={{ marginLeft: 6 }}>
+                可升级
+              </Tag>
+            ) : null}
+          </span>
+        )
+      },
+    },
+    {
       colKey: 'ops',
       title: '操作',
       width: 220,
@@ -369,6 +449,11 @@ export default function Fleet() {
           <Button size="small" variant="text" onClick={() => void showInstall(row.id)}>
             安装
           </Button>
+          {isAgentOutdated(row.agent_version, recommended) ? (
+            <Button size="small" variant="text" theme="warning" onClick={() => void showUpgrade(row.id)}>
+              升级
+            </Button>
+          ) : null}
           <Button
             size="small"
             variant="text"
@@ -389,7 +474,31 @@ export default function Fleet() {
       <div className="la-page-header">
         <div>
           <h1 className="la-page-title">节点</h1>
-          <p className="la-page-desc">状态监控 · 批量运维 · 安装与配置</p>
+          <p className="la-page-desc">
+            状态监控 · 批量运维 · 安装与配置
+            {meta?.panel_version ? (
+              <>
+                {' '}
+                · Panel <code className="la-mono">{meta.panel_version}</code>
+              </>
+            ) : null}
+            {recommended ? (
+              <>
+                {' '}
+                · 推荐 Agent{' '}
+                <code className="la-mono">{recommended}</code>
+                {outdatedNodes.length > 0 ? (
+                  <span style={{ color: 'var(--td-warning-color, #e37318)', marginLeft: 8 }}>
+                    {outdatedNodes.length} 个节点可升级
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--td-success-color, #2ba471)', marginLeft: 8 }}>
+                    版本均已对齐
+                  </span>
+                )}
+              </>
+            ) : null}
+          </p>
         </div>
         <Space breakLine align="center">
           <Radio.Group
@@ -418,6 +527,62 @@ export default function Fleet() {
 
       <StatsBar ov={ov} />
 
+      {outdatedNodes.length > 0 && recommended ? (
+        <Card bordered className="la-section" title="版本提醒">
+          <p className="la-page-desc" style={{ marginTop: 0 }}>
+            推荐 Agent <code className="la-mono">{recommended}</code>
+            。以下节点版本落后或未知，请在节点上以 root 执行升级命令（保留 Token/TLS）：
+          </p>
+          <Space breakLine size={8} style={{ marginBottom: 12 }}>
+            {outdatedNodes.map((n) => (
+              <Tag
+                key={n.id}
+                theme="warning"
+                variant="light"
+                style={{ cursor: 'pointer' }}
+                onClick={() => void showUpgrade(n.id)}
+              >
+                {n.name} · {n.agent_version || '未知'}
+              </Tag>
+            ))}
+          </Space>
+          <p className="la-page-desc" style={{ margin: 0 }}>
+            点击节点标签生成专属升级命令；通用命令也可直接使用：
+          </p>
+          {meta?.agent_upgrade_command ? (
+            <pre className="la-pre" style={{ marginTop: 8 }}>
+              {meta.agent_upgrade_command}
+            </pre>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {upgradeBanner ? (
+        <Card
+          bordered
+          className="la-section"
+          title={`升级命令 · ${upgradeBanner.node.name}${
+            upgradeBanner.recommended ? ` → ${upgradeBanner.recommended}` : ''
+          }`}
+          actions={
+            <Space>
+              <Button size="small" variant="outline" onClick={() => void copyUpgradeBanner()}>
+                {copied ? '已复制' : '复制命令'}
+              </Button>
+              <Button size="small" variant="text" onClick={() => setUpgradeBanner(null)}>
+                关闭
+              </Button>
+            </Space>
+          }
+        >
+          <p className="la-page-desc" style={{ marginTop: 0 }}>
+            当前 Agent <code className="la-mono">{upgradeBanner.node.agent_version || '—'}</code>
+            。在目标服务器以 root 执行；不会改 Token / TLS / 配置。
+          </p>
+          <pre className="la-pre">{upgradeBanner.command}</pre>
+        </Card>
+      ) : null}
+
       {installBanner ? (
         <Card
           bordered
@@ -435,6 +600,12 @@ export default function Fleet() {
           }
         >
           <pre className="la-pre">{installBanner.install_command}</pre>
+          {installBanner.upgrade_command ? (
+            <>
+              <p className="la-page-desc">已装机后的升级命令：</p>
+              <pre className="la-pre">{installBanner.upgrade_command}</pre>
+            </>
+          ) : null}
         </Card>
       ) : null}
 
@@ -505,6 +676,7 @@ export default function Fleet() {
               <NodeCard
                 key={n.id}
                 node={n}
+                recommended={recommended}
                 checked={selected.has(n.id)}
                 busy={actionId === n.id || busy}
                 onToggle={() => toggle(n.id)}
@@ -514,6 +686,7 @@ export default function Fleet() {
                 onStop={() => void runOne(n.id, 'stop')}
                 onProbe={() => void onProbe(n.id)}
                 onInstall={() => void showInstall(n.id)}
+                onUpgrade={() => void showUpgrade(n.id)}
                 onDelete={() => onDelete(n.id, n.name)}
               />
             ))}
@@ -588,6 +761,7 @@ export default function Fleet() {
 
 function NodeCard({
   node: n,
+  recommended,
   checked,
   busy,
   onToggle,
@@ -597,9 +771,11 @@ function NodeCard({
   onStop,
   onProbe,
   onInstall,
+  onUpgrade,
   onDelete,
 }: {
   node: Node
+  recommended?: string
   checked: boolean
   busy: boolean
   onToggle: () => void
@@ -609,9 +785,11 @@ function NodeCard({
   onStop: () => void
   onProbe: () => void
   onInstall: () => void
+  onUpgrade: () => void
   onDelete: () => void
 }) {
   const online = isOnlineStatus(n.status)
+  const outdated = isAgentOutdated(n.agent_version, recommended)
   return (
     <article
       className={`la-node-card ${online ? 'is-online' : 'is-offline'} ${checked ? 'is-selected' : ''}`}
@@ -679,6 +857,11 @@ function NodeCard({
       <div className="la-node-meta">
         <div>
           Agent {n.agent_version || '—'} · sing-box {n.singbox_version || '—'}
+          {outdated ? (
+            <Tag size="small" theme="warning" variant="light" style={{ marginLeft: 6 }}>
+              可升级{recommended ? ` → ${recommended}` : ''}
+            </Tag>
+          ) : null}
         </div>
         <div>探测 {formatTime(n.last_seen_unix || n.metrics_at_unix)}</div>
         {n.config_hash ? <div>配置 {n.config_hash.slice(0, 12)}…</div> : null}
@@ -704,6 +887,11 @@ function NodeCard({
         <Button size="small" variant="outline" onClick={onInstall}>
           安装
         </Button>
+        {outdated ? (
+          <Button size="small" theme="warning" variant="outline" onClick={onUpgrade}>
+            升级
+          </Button>
+        ) : null}
         <Button size="small" theme="danger" variant="outline" onClick={onDelete}>
           删除
         </Button>

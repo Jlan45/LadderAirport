@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/ladderairport/panel/internal/api"
 	"github.com/ladderairport/panel/internal/batch"
 	"github.com/ladderairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/version"
 )
 
 func main() {
@@ -23,7 +25,17 @@ func main() {
 	bootstrapTimeout := flag.Duration("bootstrap-timeout", 3*time.Minute, "timeout for initial startup bootstrap")
 	bootstrapRetry := flag.Bool("bootstrap-retry", true, "periodically retry apply+start for nodes not yet online/running")
 	bootstrapRetryInterval := flag.Duration("bootstrap-retry-interval", 30*time.Second, "interval between bootstrap retries")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("ladder-panel %s", version.Version)
+		if version.Commit != "" && version.Commit != "unknown" {
+			fmt.Printf(" (%s)", version.Commit)
+		}
+		fmt.Println()
+		return
+	}
 
 	if dir := filepath.Dir(*dbPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -111,7 +123,7 @@ func main() {
 		log.Printf("bootstrap-retry: disabled (-bootstrap-retry=false)")
 	}
 
-	log.Printf("panel listening on %s (db=%s)", addr, *dbPath)
+	log.Printf("panel listening on %s (db=%s version=%s)", addr, *dbPath, version.Version)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
 		log.Fatalf("listen: %v", err)
 	}

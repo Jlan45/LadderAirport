@@ -201,9 +201,23 @@ export interface NodeInstallInfo {
   token: string
   enable_tls: boolean
   install_command: string
+  upgrade_command?: string
+  uninstall_command?: string
   steps: string[]
   panel_base_url?: string
   enroll_enabled?: boolean
+  recommended_agent_version?: string
+  outdated?: boolean
+}
+
+export interface MetaInfo {
+  panel_version?: string
+  panel_commit?: string
+  recommended_agent_version?: string
+  agent_upgrade_command: string
+  agent_uninstall_command: string
+  source: string
+  checked_at_unix?: number
 }
 
 export interface CreateInboundInput {
@@ -241,6 +255,11 @@ export function fleetOverview(): Promise<FleetOverview> {
 
 export function fleetRefresh(): Promise<FleetOverview> {
   return request('POST', '/fleet/refresh')
+}
+
+/** Recommended agent version + upgrade/uninstall one-liners. */
+export function getMeta(): Promise<MetaInfo> {
+  return request('GET', '/meta')
 }
 
 // --- Nodes ---

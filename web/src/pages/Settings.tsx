@@ -10,9 +10,11 @@ import {
   Row,
   Space,
 } from 'tdesign-react'
-import { getSettings, putSettings } from '../api/client'
+import { getMeta, getSettings, putSettings, type MetaInfo } from '../api/client'
 
 export default function Settings() {
+  const [meta, setMeta] = useState<MetaInfo | null>(null)
+
   const [token, setToken] = useState('')
   const [timeoutSec, setTimeoutSec] = useState(10)
   const [concurrency, setConcurrency] = useState(8)
@@ -26,7 +28,11 @@ export default function Settings() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const s = await getSettings()
+      const [s, m] = await Promise.all([
+        getSettings(),
+        getMeta().catch(() => null),
+      ])
+      if (m) setMeta(m)
       setToken(s.default_agent_token || '')
       setTimeoutSec(s.grpc_timeout_sec)
       setConcurrency(s.max_concurrency)
@@ -82,6 +88,17 @@ export default function Settings() {
         <div>
           <h1 className="la-page-title">系统设置</h1>
           <p className="la-page-desc">管理节点连接默认值、Panel 对外地址与管理员账号</p>
+          {meta?.panel_version ? (
+            <p className="la-page-desc" style={{ marginTop: 4 }}>
+              Panel <code className="la-mono">{meta.panel_version}</code>
+              {meta.panel_commit && meta.panel_commit !== 'unknown'
+                ? ` (${meta.panel_commit})`
+                : ''}
+              {meta.recommended_agent_version
+                ? ` · 推荐 Agent ${meta.recommended_agent_version}`
+                : ''}
+            </p>
+          ) : null}
         </div>
         <Space>
           <Button variant="outline" loading={loading} onClick={() => void load()}>

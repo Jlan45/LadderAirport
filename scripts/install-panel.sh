@@ -1,18 +1,28 @@
 #!/usr/bin/env bash
-# 一键安装 LadderAirport Panel 为 systemd 服务（默认从 GitHub Release 拉最新二进制）。
+# 一键安装 / 升级 / 卸载 LadderAirport Panel（systemd）。
+# 默认从 GitHub Release 拉最新二进制。
 #
-# 无需克隆仓库（推荐）:
-#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh | sudo bash
+# 安装（推荐）:
+#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+#     | sudo bash
 #
 # 生产推荐（固定 session secret + 监听）:
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
-#     | sudo LADDER_SESSION_SECRET='长随机串' LADDER_LISTEN=':8080' bash
+#     | sudo env LADDER_SESSION_SECRET='长随机串' LADDER_LISTEN=':8080' bash
 #
-# 指定版本 / 本地文件 / 源码编译:
+# 升级（只换二进制 + 刷新 unit + restart；保留 panel.env 与 SQLite）:
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
-#     | sudo LADDER_VERSION=v0.3.1 LADDER_SESSION_SECRET='长随机串' bash
-#   sudo LADDER_SESSION_SECRET='长随机串' ./scripts/install-panel.sh /path/to/panel
-#   sudo LADDER_FROM=local LADDER_SESSION_SECRET='长随机串' ./scripts/install-panel.sh
+#     | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
+#
+# 卸载（默认保留 conf/data；LADDER_PURGE=1 全清，会删 panel.db）:
+#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+#     | sudo env LADDER_ACTION=uninstall bash
+#
+# 其它:
+#   sudo LADDER_SESSION_SECRET='...' ./scripts/install-panel.sh /path/to/panel
+#   sudo LADDER_FROM=local LADDER_SESSION_SECRET='...' ./scripts/install-panel.sh
+#   sudo ./scripts/install-panel.sh upgrade
+#   sudo ./scripts/install-panel.sh uninstall
 #
 set -euo pipefail
 
@@ -27,11 +37,27 @@ if [[ -n "${SCRIPT_DIR}" && -f "${SCRIPT_DIR}/../Makefile" ]]; then
   ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 fi
 
-BIN_SRC="${1:-}"
+# --- action: LADDER_ACTION 或首个参数 install|upgrade|uninstall ---
+ACTION="${LADDER_ACTION:-}"
+BIN_SRC=""
+case "${1:-}" in
+  install | upgrade | uninstall)
+    ACTION="$1"
+    shift || true
+    BIN_SRC="${1:-}"
+    ;;
+  *)
+    BIN_SRC="${1:-}"
+    ;;
+esac
+ACTION="${ACTION:-install}"
+PURGE="${LADDER_PURGE:-0}"
+
 INSTALL_BIN="${INSTALL_BIN:-/usr/local/bin/ladder-panel}"
 CONF_DIR="${CONF_DIR:-/etc/ladder-panel}"
 DATA_DIR="${DATA_DIR:-/var/lib/ladder-panel}"
 SERVICE_DST="${SERVICE_DST:-/etc/systemd/system/ladder-panel.service}"
+SERVICE_NAME="ladder-panel.service"
 USER_NAME="${LADDER_USER:-ladder-panel}"
 GROUP_NAME="${LADDER_GROUP:-ladder-panel}"
 LISTEN="${LADDER_LISTEN:-:8080}"
@@ -45,6 +71,7 @@ BOOTSTRAP_RETRY_INTERVAL="${LADDER_BOOTSTRAP_RETRY_INTERVAL:-30s}"
 FROM="${LADDER_FROM:-release}"
 VERSION="${LADDER_VERSION:-latest}" # latest 或 v0.3.1
 TMPDIR_DL=""
+ENV_FILE="${CONF_DIR}/panel.env"
 
 cleanup() {
   if [[ -n "${TMPDIR_DL}" && -d "${TMPDIR_DL}" ]]; then
@@ -66,6 +93,11 @@ fi
 need_cmd systemctl
 need_cmd install
 need_cmd uname
+
+case "${ACTION}" in
+  install | upgrade | uninstall) ;;
+  *) die "未知动作: ${ACTION}（支持 install|upgrade|uninstall，或 LADDER_ACTION=...）" ;;
+esac
 
 # --- session secret helpers ---
 gen_secret() {
@@ -189,76 +221,38 @@ resolve_binary() {
   download_release_binary
 }
 
-echo "==> 创建用户/组 ${USER_NAME}"
-getent group "${GROUP_NAME}" >/dev/null || groupadd --system "${GROUP_NAME}"
-if ! id -u "${USER_NAME}" >/dev/null 2>&1; then
-  useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
-    --shell /usr/sbin/nologin --create-home "${USER_NAME}" 2>/dev/null \
-    || useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
-      --shell /bin/false "${USER_NAME}"
-fi
-
-echo "==> 准备目录"
-mkdir -p "${CONF_DIR}" "${DATA_DIR}"
-chown -R "${USER_NAME}:${GROUP_NAME}" "${DATA_DIR}"
-chmod 750 "${DATA_DIR}"
-chmod 755 "${CONF_DIR}"
-
-SRC="$(resolve_binary)"
-echo "==> 安装二进制 → ${INSTALL_BIN}"
-install -m 0755 "${SRC}" "${INSTALL_BIN}"
-
-ENV_FILE="${CONF_DIR}/panel.env"
-echo "==> 配置 ${ENV_FILE}"
-if [[ -f "${ENV_FILE}" ]]; then
-  echo "    已存在，不覆盖（改 listen/secret/db 请手动编辑后 restart）"
-  # Backfill missing keys only (never overwrite existing secret)
-  ensure_env_key() {
-    local key="$1" val="$2"
-    if ! grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
-      echo "${key}=${val}" >>"${ENV_FILE}"
-      echo "    已追加 ${key}"
-    fi
-  }
-  ensure_env_key "LADDER_LISTEN" "${LISTEN}"
-  ensure_env_key "LADDER_DB" "${DB_PATH}"
-  if ! grep -q '^LADDER_SESSION_SECRET=' "${ENV_FILE}" 2>/dev/null; then
-    ensure_session_secret
-    ensure_env_key "LADDER_SESSION_SECRET" "${SESSION_SECRET}"
+ensure_user_and_dirs() {
+  echo "==> 创建用户/组 ${USER_NAME}"
+  getent group "${GROUP_NAME}" >/dev/null || groupadd --system "${GROUP_NAME}"
+  if ! id -u "${USER_NAME}" >/dev/null 2>&1; then
+    useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
+      --shell /usr/sbin/nologin --create-home "${USER_NAME}" 2>/dev/null \
+      || useradd --system --gid "${GROUP_NAME}" --home-dir "${DATA_DIR}" \
+        --shell /bin/false "${USER_NAME}"
   fi
-  ensure_env_key "LADDER_BOOTSTRAP" "${BOOTSTRAP}"
-  ensure_env_key "LADDER_BOOTSTRAP_TIMEOUT" "${BOOTSTRAP_TIMEOUT}"
-  ensure_env_key "LADDER_BOOTSTRAP_RETRY" "${BOOTSTRAP_RETRY}"
-  ensure_env_key "LADDER_BOOTSTRAP_RETRY_INTERVAL" "${BOOTSTRAP_RETRY_INTERVAL}"
-  # Show non-secret keys for operator feedback
-  grep -E '^LADDER_LISTEN=|^LADDER_DB=|^LADDER_BOOTSTRAP' "${ENV_FILE}" || true
-  if grep -q '^LADDER_SESSION_SECRET=' "${ENV_FILE}" 2>/dev/null; then
-    echo "    LADDER_SESSION_SECRET=(已配置，未显示)"
+
+  echo "==> 准备目录"
+  mkdir -p "${CONF_DIR}" "${DATA_DIR}"
+  chown -R "${USER_NAME}:${GROUP_NAME}" "${DATA_DIR}"
+  chmod 750 "${DATA_DIR}"
+  chmod 755 "${CONF_DIR}"
+}
+
+install_binary() {
+  local src="$1"
+  local backup="${INSTALL_BIN}.bak"
+  if [[ -x "${INSTALL_BIN}" ]]; then
+    echo "==> 备份旧二进制 → ${backup}"
+    cp -a "${INSTALL_BIN}" "${backup}" || true
   fi
-else
-  ensure_session_secret
-  {
-    echo "# /etc/ladder-panel/panel.env"
-    echo "LADDER_LISTEN=${LISTEN}"
-    echo "LADDER_DB=${DB_PATH}"
-    echo "LADDER_SESSION_SECRET=${SESSION_SECRET}"
-    echo "LADDER_BOOTSTRAP=${BOOTSTRAP}"
-    echo "LADDER_BOOTSTRAP_TIMEOUT=${BOOTSTRAP_TIMEOUT}"
-    echo "LADDER_BOOTSTRAP_RETRY=${BOOTSTRAP_RETRY}"
-    echo "LADDER_BOOTSTRAP_RETRY_INTERVAL=${BOOTSTRAP_RETRY_INTERVAL}"
-  } >"${ENV_FILE}"
-  chmod 640 "${ENV_FILE}"
-  chown root:"${GROUP_NAME}" "${ENV_FILE}"
-fi
+  echo "==> 安装二进制 → ${INSTALL_BIN}"
+  install -m 0755 "${src}" "${INSTALL_BIN}"
+}
 
-ACTIVE_LISTEN="$(grep -E '^LADDER_LISTEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
-ACTIVE_DB="$(grep -E '^LADDER_DB=' "${ENV_FILE}" | cut -d= -f2- || true)"
-[[ -n "${ACTIVE_LISTEN}" ]] || ACTIVE_LISTEN="${LISTEN}"
-[[ -n "${ACTIVE_DB}" ]] || ACTIVE_DB="${DB_PATH}"
-
-echo "==> 写入 systemd: ${SERVICE_DST}"
-# Single-line ExecStart matches install-agent.sh; systemd expands ${LADDER_*} from EnvironmentFile.
-cat >"${SERVICE_DST}" <<EOF
+write_unit() {
+  echo "==> 写入 systemd: ${SERVICE_DST}"
+  # Single-line ExecStart; systemd expands ${LADDER_*} from EnvironmentFile.
+  cat >"${SERVICE_DST}" <<EOF
 [Unit]
 Description=LadderAirport Panel (control plane)
 After=network-online.target
@@ -284,45 +278,263 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 EOF
+}
 
-systemctl daemon-reload
-systemctl enable ladder-panel.service
-systemctl restart ladder-panel.service
-sleep 0.8
-systemctl --no-pager --full status ladder-panel.service || true
+enable_and_restart() {
+  systemctl daemon-reload
+  systemctl enable "${SERVICE_NAME}"
+  systemctl restart "${SERVICE_NAME}"
+  sleep 0.8
+  systemctl --no-pager --full status "${SERVICE_NAME}" || true
+}
 
-# Best-effort local bind address for operator tips
-HTTP_HINT="http://127.0.0.1:8080"
-case "${ACTIVE_LISTEN}" in
-  :*) HTTP_HINT="http://127.0.0.1${ACTIVE_LISTEN}" ;;
-  0.0.0.0:*) HTTP_HINT="http://127.0.0.1:${ACTIVE_LISTEN##*:}" ;;
-  \[::\]:*) HTTP_HINT="http://127.0.0.1:${ACTIVE_LISTEN##*:}" ;;
-  *)
-    if [[ "${ACTIVE_LISTEN}" == *:* ]]; then
-      HTTP_HINT="http://${ACTIVE_LISTEN}"
+require_installed() {
+  if [[ ! -f "${INSTALL_BIN}" && ! -f "${SERVICE_DST}" && ! -f "${ENV_FILE}" ]]; then
+    die "未检测到已安装的 Panel（${INSTALL_BIN} / ${SERVICE_DST} / ${ENV_FILE}）。请先 install。"
+  fi
+}
+
+read_active_env() {
+  ACTIVE_LISTEN=""
+  ACTIVE_DB=""
+  if [[ -f "${ENV_FILE}" ]]; then
+    ACTIVE_LISTEN="$(grep -E '^LADDER_LISTEN=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    ACTIVE_DB="$(grep -E '^LADDER_DB=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+  fi
+  [[ -n "${ACTIVE_LISTEN}" ]] || ACTIVE_LISTEN="${LISTEN}"
+  [[ -n "${ACTIVE_DB}" ]] || ACTIVE_DB="${DB_PATH}"
+}
+
+http_hint_from_listen() {
+  local listen="$1"
+  local hint="http://127.0.0.1:8080"
+  case "${listen}" in
+    :*) hint="http://127.0.0.1${listen}" ;;
+    0.0.0.0:*) hint="http://127.0.0.1:${listen##*:}" ;;
+    \[::\]:*) hint="http://127.0.0.1:${listen##*:}" ;;
+    *)
+      if [[ "${listen}" == *:* ]]; then
+        hint="http://${listen}"
+      fi
+      ;;
+  esac
+  echo "${hint}"
+}
+
+# ---------- install ----------
+do_install() {
+  ensure_user_and_dirs
+
+  local src
+  src="$(resolve_binary)"
+  install_binary "${src}"
+
+  echo "==> 配置 ${ENV_FILE}"
+  if [[ -f "${ENV_FILE}" ]]; then
+    echo "    已存在，不覆盖（改 listen/secret/db 请手动编辑后 restart）"
+    # Backfill missing keys only (never overwrite existing secret)
+    ensure_env_key() {
+      local key="$1" val="$2"
+      if ! grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
+        echo "${key}=${val}" >>"${ENV_FILE}"
+        echo "    已追加 ${key}"
+      fi
+    }
+    ensure_env_key "LADDER_LISTEN" "${LISTEN}"
+    ensure_env_key "LADDER_DB" "${DB_PATH}"
+    if ! grep -q '^LADDER_SESSION_SECRET=' "${ENV_FILE}" 2>/dev/null; then
+      ensure_session_secret
+      ensure_env_key "LADDER_SESSION_SECRET" "${SESSION_SECRET}"
     fi
-    ;;
-esac
+    ensure_env_key "LADDER_BOOTSTRAP" "${BOOTSTRAP}"
+    ensure_env_key "LADDER_BOOTSTRAP_TIMEOUT" "${BOOTSTRAP_TIMEOUT}"
+    ensure_env_key "LADDER_BOOTSTRAP_RETRY" "${BOOTSTRAP_RETRY}"
+    ensure_env_key "LADDER_BOOTSTRAP_RETRY_INTERVAL" "${BOOTSTRAP_RETRY_INTERVAL}"
+    # Show non-secret keys for operator feedback
+    grep -E '^LADDER_LISTEN=|^LADDER_DB=|^LADDER_BOOTSTRAP' "${ENV_FILE}" || true
+    if grep -q '^LADDER_SESSION_SECRET=' "${ENV_FILE}" 2>/dev/null; then
+      echo "    LADDER_SESSION_SECRET=(已配置，未显示)"
+    fi
+  else
+    ensure_session_secret
+    {
+      echo "# /etc/ladder-panel/panel.env"
+      echo "LADDER_LISTEN=${LISTEN}"
+      echo "LADDER_DB=${DB_PATH}"
+      echo "LADDER_SESSION_SECRET=${SESSION_SECRET}"
+      echo "LADDER_BOOTSTRAP=${BOOTSTRAP}"
+      echo "LADDER_BOOTSTRAP_TIMEOUT=${BOOTSTRAP_TIMEOUT}"
+      echo "LADDER_BOOTSTRAP_RETRY=${BOOTSTRAP_RETRY}"
+      echo "LADDER_BOOTSTRAP_RETRY_INTERVAL=${BOOTSTRAP_RETRY_INTERVAL}"
+    } >"${ENV_FILE}"
+    chmod 640 "${ENV_FILE}"
+    chown root:"${GROUP_NAME}" "${ENV_FILE}"
+  fi
 
-echo
-echo "======== Panel 安装完成 ========"
-echo "  二进制:  ${INSTALL_BIN}"
-echo "  配置:    ${ENV_FILE}"
-echo "  数据:    ${DATA_DIR}"
-echo "  数据库:  ${ACTIVE_DB}"
-echo "  监听:    ${ACTIVE_LISTEN}"
-echo "  服务:    ladder-panel.service (已 enable + start)"
-echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
-echo
-echo "  浏览器:  ${HTTP_HINT}"
-echo "  默认管理员密码: admin  （登录后立刻在「设置」中修改）"
-echo
-echo "建议下一步:"
-echo "  1. 在「设置」填写 Public Base URL（用于订阅链接与节点一键安装命令）"
-echo "  2. 修改管理员密码与 session secret 备份"
-echo "  3. 按需用 Nginx/Caddy 反代 HTTPS 到 ${ACTIVE_LISTEN}"
-echo "  4. 安装节点: 见 deploy/README-agent.md 或 Panel「添加节点并生成安装命令」"
-echo
-echo "运维: systemctl status|restart ladder-panel ; journalctl -u ladder-panel -f"
-echo "升级: 重新执行本脚本（覆盖二进制，保留 panel.env 与 SQLite）"
-echo "备份: 复制 ${ACTIVE_DB} 与 ${ENV_FILE}"
+  read_active_env
+  write_unit
+  enable_and_restart
+
+  local http_hint
+  http_hint="$(http_hint_from_listen "${ACTIVE_LISTEN}")"
+
+  echo
+  echo "======== Panel 安装完成 ========"
+  echo "  动作:    install"
+  echo "  二进制:  ${INSTALL_BIN}"
+  echo "  配置:    ${ENV_FILE}"
+  echo "  数据:    ${DATA_DIR}"
+  echo "  数据库:  ${ACTIVE_DB}"
+  echo "  监听:    ${ACTIVE_LISTEN}"
+  echo "  服务:    ${SERVICE_NAME} (已 enable + start)"
+  echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
+  echo
+  echo "  浏览器:  ${http_hint}"
+  echo "  默认管理员密码: admin  （登录后立刻在「设置」中修改）"
+  echo
+  echo "建议下一步:"
+  echo "  1. 在「设置」填写 Public Base URL（用于订阅链接与节点一键安装命令）"
+  echo "  2. 修改管理员密码与 session secret 备份"
+  echo "  3. 按需用 Nginx/Caddy 反代 HTTPS 到 ${ACTIVE_LISTEN}"
+  echo "  4. 安装节点: 见 deploy/README-agent.md 或 Panel「添加节点并生成安装命令」"
+  echo
+  echo "运维: systemctl status|restart ladder-panel ; journalctl -u ladder-panel -f"
+  echo "升级: curl -fsSL .../install-panel.sh | sudo env LADDER_ACTION=upgrade [LADDER_VERSION=vX.Y.Z] bash"
+  echo "卸载: curl -fsSL .../install-panel.sh | sudo env LADDER_ACTION=uninstall bash"
+  echo "备份: 复制 ${ACTIVE_DB} 与 ${ENV_FILE}"
+}
+
+# ---------- upgrade ----------
+do_upgrade() {
+  require_installed
+  echo "==> 升级 ladder-panel（保留 ${ENV_FILE} 与 SQLite）"
+
+  ensure_user_and_dirs
+
+  local src
+  src="$(resolve_binary)"
+  install_binary "${src}"
+
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    die "缺少 ${ENV_FILE}。无法安全升级（无 session secret）。请改用 install 或手动恢复 env。"
+  fi
+
+  # Backfill missing keys only — never overwrite secret
+  ensure_env_key() {
+    local key="$1" val="$2"
+    if ! grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
+      echo "${key}=${val}" >>"${ENV_FILE}"
+      echo "    已追加 ${key}"
+    fi
+  }
+  ensure_env_key "LADDER_LISTEN" "${LISTEN}"
+  ensure_env_key "LADDER_DB" "${DB_PATH}"
+  ensure_env_key "LADDER_BOOTSTRAP" "${BOOTSTRAP}"
+  ensure_env_key "LADDER_BOOTSTRAP_TIMEOUT" "${BOOTSTRAP_TIMEOUT}"
+  ensure_env_key "LADDER_BOOTSTRAP_RETRY" "${BOOTSTRAP_RETRY}"
+  ensure_env_key "LADDER_BOOTSTRAP_RETRY_INTERVAL" "${BOOTSTRAP_RETRY_INTERVAL}"
+  if ! grep -q '^LADDER_SESSION_SECRET=' "${ENV_FILE}" 2>/dev/null; then
+    ensure_session_secret
+    ensure_env_key "LADDER_SESSION_SECRET" "${SESSION_SECRET}"
+  fi
+
+  read_active_env
+  write_unit
+  enable_and_restart
+
+  local http_hint
+  http_hint="$(http_hint_from_listen "${ACTIVE_LISTEN}")"
+
+  echo
+  echo "======== Panel 升级完成 ========"
+  echo "  动作:    upgrade"
+  echo "  二进制:  ${INSTALL_BIN}"
+  if [[ -x "${INSTALL_BIN}.bak" ]]; then
+    echo "  备份:    ${INSTALL_BIN}.bak （回滚: sudo mv ${INSTALL_BIN}.bak ${INSTALL_BIN} && systemctl restart ladder-panel）"
+  fi
+  echo "  配置:    ${ENV_FILE}（未改 session secret）"
+  echo "  数据库:  ${ACTIVE_DB}"
+  echo "  监听:    ${ACTIVE_LISTEN}"
+  echo "  服务:    ${SERVICE_NAME} (已 restart)"
+  echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
+  echo "  浏览器:  ${http_hint}"
+  echo
+  echo "运维: systemctl status ladder-panel ; journalctl -u ladder-panel -f"
+}
+
+# ---------- uninstall ----------
+do_uninstall() {
+  echo "==> 卸载 ladder-panel"
+
+  read_active_env
+
+  if systemctl list-unit-files "${SERVICE_NAME}" &>/dev/null || [[ -f "${SERVICE_DST}" ]]; then
+    systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
+    systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
+  fi
+  if [[ -f "${SERVICE_DST}" ]]; then
+    rm -f "${SERVICE_DST}"
+    echo "  已删除 unit: ${SERVICE_DST}"
+  fi
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl reset-failed "${SERVICE_NAME}" 2>/dev/null || true
+
+  if [[ -f "${INSTALL_BIN}" ]]; then
+    rm -f "${INSTALL_BIN}"
+    echo "  已删除二进制: ${INSTALL_BIN}"
+  fi
+  if [[ -f "${INSTALL_BIN}.bak" ]]; then
+    rm -f "${INSTALL_BIN}.bak"
+    echo "  已删除备份: ${INSTALL_BIN}.bak"
+  fi
+
+  case "${PURGE}" in
+    1|true|TRUE|yes|YES|on|ON)
+      echo "==> LADDER_PURGE=1：删除配置与数据（含 SQLite）"
+      if [[ -d "${CONF_DIR}" ]]; then
+        rm -rf "${CONF_DIR}"
+        echo "  已删除: ${CONF_DIR}"
+      fi
+      if [[ -d "${DATA_DIR}" ]]; then
+        rm -rf "${DATA_DIR}"
+        echo "  已删除: ${DATA_DIR}"
+      fi
+      # Also remove DB if it lived outside DATA_DIR
+      if [[ -n "${ACTIVE_DB}" && -f "${ACTIVE_DB}" ]]; then
+        rm -f "${ACTIVE_DB}"
+        echo "  已删除数据库: ${ACTIVE_DB}"
+      fi
+      if id -u "${USER_NAME}" >/dev/null 2>&1; then
+        userdel "${USER_NAME}" 2>/dev/null || true
+        echo "  已尝试删除用户: ${USER_NAME}"
+      fi
+      if getent group "${GROUP_NAME}" >/dev/null 2>&1; then
+        groupdel "${GROUP_NAME}" 2>/dev/null || true
+        echo "  已尝试删除组: ${GROUP_NAME}"
+      fi
+      ;;
+    *)
+      echo "==> 已保留配置与数据（需要全清请加 LADDER_PURGE=1；purge 会删除 panel.db）:"
+      [[ -d "${CONF_DIR}" ]] && echo "  conf: ${CONF_DIR}"
+      [[ -d "${DATA_DIR}" ]] && echo "  data: ${DATA_DIR}"
+      [[ -n "${ACTIVE_DB}" && -f "${ACTIVE_DB}" ]] && echo "  db:   ${ACTIVE_DB}"
+      echo "  备份建议: sudo cp -a ${ACTIVE_DB:-${DATA_DIR}/panel.db} /root/panel.db.bak"
+      ;;
+  esac
+
+  echo
+  echo "======== 卸载完成 ========"
+  echo "  动作: uninstall"
+  case "${PURGE}" in
+    1|true|TRUE|yes|YES|on|ON) echo "  模式: purge（配置/数据/数据库已删）" ;;
+    *) echo "  模式: 保留 conf/data；全清: LADDER_ACTION=uninstall LADDER_PURGE=1" ;;
+  esac
+}
+
+# ---------- dispatch ----------
+echo "==> ladder-panel 脚本动作: ${ACTION}"
+case "${ACTION}" in
+  install) do_install ;;
+  upgrade) do_upgrade ;;
+  uninstall) do_uninstall ;;
+esac
