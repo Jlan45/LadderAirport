@@ -89,6 +89,7 @@ func NormalizePortMappings(in []PortMapping) []PortMapping {
 
 // MapPublicPort returns the client-facing port for an agent listen port.
 // Falls back to listenPort when no mapping is configured.
+// Deprecated for new UI: prefer per-inbound PublicPort on NodeInboundAttachment.
 func MapPublicPort(mappings []PortMapping, listenPort int) int {
 	for _, m := range mappings {
 		if m.ListenPort == listenPort && m.PublicPort >= 1 && m.PublicPort <= 65535 {
@@ -96,6 +97,25 @@ func MapPublicPort(mappings []PortMapping, listenPort int) int {
 		}
 	}
 	return listenPort
+}
+
+// NodeInboundAttachment is an inbound linked to a node, with optional client-facing NAT overrides.
+// Agent still listens on inbound params.port; PublicAddress/PublicPort only affect subscriptions.
+type NodeInboundAttachment struct {
+	InboundConfig
+	// PublicAddress overrides node.public_address / address for this inbound in subscriptions.
+	// Empty falls back to node-level client host.
+	PublicAddress string `json:"public_address"`
+	// PublicPort is the external NAT-mapped port clients dial.
+	// 0 means use inbound listen port (params.port), then node port_mappings if any.
+	PublicPort int `json:"public_port"`
+}
+
+// NodeInboundBinding is the write payload for attaching an inbound with NAT overrides.
+type NodeInboundBinding struct {
+	InboundID     string `json:"inbound_id"`
+	PublicAddress string `json:"public_address"`
+	PublicPort    int    `json:"public_port"`
 }
 
 type InboundConfig struct {

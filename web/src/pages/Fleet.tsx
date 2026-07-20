@@ -382,7 +382,7 @@ export default function Fleet() {
           ) : null}
           {row.port_mappings && row.port_mappings.length > 0 ? (
             <div className="la-page-desc" style={{ margin: '2px 0 0' }}>
-              端口映射 {row.port_mappings.length} 条
+              遗留端口映射 {row.port_mappings.length}
             </div>
           ) : null}
         </div>
@@ -867,7 +867,7 @@ function NodeCard({
         ) : null}
         {n.port_mappings && n.port_mappings.length > 0 ? (
           <div className="la-page-desc" style={{ margin: '2px 0 0' }}>
-            端口映射 {n.port_mappings.length} 条
+            遗留端口映射 {n.port_mappings.length}
           </div>
         ) : null}
       </div>

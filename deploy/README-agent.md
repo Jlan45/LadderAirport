@@ -93,17 +93,18 @@ Panel 开启 bootstrap 时会自动下发配置并启动 sing-box。
 |--------|--------|
 | 控制面地址 `address` | **Panel 能拨到的** host（公网 IP、DDNS、VPN IP） |
 | 控制面端口 `grpc_port` | **外部映射端口**（若 `15051→50051` 则填 `15051`） |
-| 公网地址 `public_address` | 订阅客户端用的 NAT IP/域名；与控制面相同时可留空（回退 `address`） |
-| 端口映射 `port_mappings` | 订阅用：`listen_port`（Agent 入站本机口）→ `public_port`（NAT 外口）；无端口改写可留空 |
+| 默认公网地址 `public_address` | 订阅默认 `server` host；与控制面相同时可留空（回退 `address`） |
+| 入站 NAT（关联时填写） | **每个已选入站**可单独设 `public_address` / `public_port`（仅订阅）；空则回退节点默认入口与监听口 |
 
-入站模板里的 `port` **始终是 Agent 本机监听口**，会下发给 sing-box。客户端连的端口由节点 `port_mappings` 决定（无映射则等于监听口）。
+入站模板里的 `port` **始终是 Agent 本机监听口**，会下发给 sing-box。客户端连的 host/port 优先用该入站在节点上的 NAT 覆盖。
 
-示例：Agent 监听 `8443`，路由器 `公网:443 → 内网:8443`：
+示例：Agent 监听 `8443`，FRP/路由器 `edge.example.com:443 → 内网:8443`：
 
 - 入站 `port = 8443`
-- 节点 `public_address = 公网IP或DDNS`
-- 节点 `port_mappings = [{ "listen_port": 8443, "public_port": 443 }]`
-- 订阅结果：`server=公网, server_port=443`；Agent 配置仍 `listen_port=8443`
+- 节点详情「入站」勾选该入站，填：
+  - 公网 IP/域名 = `edge.example.com`
+  - 公网端口 = `443`
+- 订阅结果：`server=edge.example.com, server_port=443`；Agent 配置仍 `listen_port=8443`
 
 建议流程：
 

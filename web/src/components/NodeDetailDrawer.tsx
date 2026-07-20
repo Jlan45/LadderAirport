@@ -23,7 +23,7 @@ import {
   listNodeInterfaces,
   listNodes,
   previewNodeConfig,
-  setNodeInbounds,
+  setNodeInboundBindings,
   startNode,
   stopNode,
   streamNodeLogs,
@@ -33,6 +33,7 @@ import {
   type Metrics,
   type NetworkInterface,
   type Node,
+  type NodeInboundBinding,
   type NodeInstallInfo,
   type Task,
 } from '../api/client'
@@ -53,7 +54,7 @@ type Props = {
   onChanged: () => void
 }
 
-type MappingRow = { listen_port: number; public_port: number }
+type InboundNATEdit = { public_address: string; public_port: number }
 
 export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) {
   const open = !!nodeId
@@ -61,7 +62,8 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
 
   const [node, setNode] = useState<Node | null>(null)
   const [allInbounds, setAllInbounds] = useState<InboundConfig[]>([])
-  const [attachedIds, setAttachedIds] = useState<Set<string>>(new Set())
+  /** inbound_id → NAT overrides for selected attachments */
+  const [inboundNAT, setInboundNAT] = useState<Record<string, InboundNATEdit>>({})
   const [preview, setPreview] = useState('')
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [task, setTask] = useState<Task | null>(null)
@@ -75,7 +77,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [editAddress, setEditAddress] = useState('')
   const [editPort, setEditPort] = useState(50051)
   const [editPublic, setEditPublic] = useState('')
-  const [editMappings, setEditMappings] = useState<MappingRow[]>([])
   const [editCA, setEditCA] = useState('')
   const [editTLSSkip, setEditTLSSkip] = useState(false)
   const [editEgress, setEditEgress] = useState('')
@@ -115,18 +116,19 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         setEditAddress(n.address || '')
         setEditPort(n.grpc_port || 50051)
         setEditPublic(n.public_address || '')
-        setEditMappings(
-          (n.port_mappings ?? []).map((m) => ({
-            listen_port: Number(m.listen_port) || 0,
-            public_port: Number(m.public_port) || 0,
-          })),
-        )
         setEditCA(n.ca_cert_pem || '')
         setEditTLSSkip(!!n.tls_skip_verify)
         setEditEgress(n.egress_interface || '')
       }
       setAllInbounds(all ?? [])
-      setAttachedIds(new Set((attached ?? []).map((a) => a.id)))
+      const nat: Record<string, InboundNATEdit> = {}
+      for (const a of attached ?? []) {
+        nat[a.id] = {
+          public_address: a.public_address || '',
+          public_port: Number(a.public_port) || 0,
+        }
+      }
+      setInboundNAT(nat)
     } catch (err) {
       MessagePlugin.error(err instanceof Error ? err.message : '加载失败')
     }
@@ -145,7 +147,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       setIfaces([])
       setIfacesError('')
       setEditEgress('')
-      setEditMappings([])
+      setInboundNAT({})
       setActiveTab('connection')
       return
     }
@@ -164,11 +166,21 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   }, [logs])
 
   function toggleInbound(inbId: string) {
-    setAttachedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(inbId)) next.delete(inbId)
-      else next.add(inbId)
+    setInboundNAT((prev) => {
+      const next = { ...prev }
+      if (next[inbId]) {
+        delete next[inbId]
+      } else {
+        next[inbId] = { public_address: '', public_port: 0 }
+      }
       return next
+    })
+  }
+
+  function updateInboundNAT(inbId: string, patch: Partial<InboundNATEdit>) {
+    setInboundNAT((prev) => {
+      if (!prev[inbId]) return prev
+      return { ...prev, [inbId]: { ...prev[inbId], ...patch } }
     })
   }
 
@@ -177,7 +189,12 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setBusy(true)
     setTask(null)
     try {
-      const res = await setNodeInbounds(id, Array.from(attachedIds))
+      const bindings: NodeInboundBinding[] = Object.entries(inboundNAT).map(([inbound_id, nat]) => ({
+        inbound_id,
+        public_address: (nat.public_address || '').trim() || undefined,
+        public_port: nat.public_port > 0 ? nat.public_port : undefined,
+      }))
+      const res = await setNodeInboundBindings(id, bindings)
       const base = res.deploy_message || (res.deployed ? '已关联并下发配置' : '关联已保存')
       if (res.apply_task) setTask(res.apply_task)
       else if (res.start_task) setTask(res.start_task)
@@ -268,24 +285,11 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     if (!id || !node) return
     setBusy(true)
     try {
-      const mappings = editMappings
-        .map((m) => ({
-          listen_port: Number(m.listen_port) || 0,
-          public_port: Number(m.public_port) || 0,
-        }))
-        .filter(
-          (m) =>
-            m.listen_port >= 1 &&
-            m.listen_port <= 65535 &&
-            m.public_port >= 1 &&
-            m.public_port <= 65535,
-        )
       const updated = await updateNode(id, {
         ...node,
         address: editAddress.trim(),
         grpc_port: editPort,
         public_address: editPublic.trim(),
-        port_mappings: mappings,
         ca_cert_pem: editCA,
         tls_skip_verify: editTLSSkip,
         egress_interface: editEgress.trim(),
@@ -390,13 +394,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     }
   }
 
-  function updateMapping(idx: number, patch: Partial<MappingRow>) {
-    setEditMappings((prev) => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)))
-  }
 
-  const attachedCount = attachedIds.size
-  const mappingCount = editMappings.filter(
-    (m) => m.listen_port >= 1 && m.public_port >= 1 && m.listen_port !== m.public_port,
+  const attachedCount = Object.keys(inboundNAT).length
+  const mappingCount = Object.values(inboundNAT).filter(
+    (m) => (m.public_address && m.public_address.trim()) || (m.public_port && m.public_port > 0),
   ).length
 
   return (
@@ -455,7 +456,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                 <span className="label">订阅入口</span>
                 <code className="la-mono value">
                   {node.public_address || node.address || '—'}
-                  {mappingCount > 0 ? ` · ${mappingCount} 条端口映射` : ''}
+                  {mappingCount > 0 ? ` · ${mappingCount} 条入站 NAT` : ''}
                 </code>
               </div>
               <div className="la-summary-item">
@@ -510,75 +511,20 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
 
                 <section className="la-panel-card">
                   <div className="la-panel-card-head">
-                    <h3>订阅入口 / NAT</h3>
+                    <h3>订阅默认入口</h3>
                     <p>
-                      只影响订阅里的 <code>server</code> / 端口。入站 <code>port</code> 仍是 Agent
-                      本机监听口。
+                      节点级默认 <code>server</code> host。各入站可在「入站」Tab 单独覆盖公网 IP/端口。
+                      Agent 监听口仍是入站模板的 <code>port</code>。
                     </p>
                   </div>
                   <Form labelAlign="top" className="la-drawer-form">
-                    <Form.FormItem label="公网地址 / NAT IP">
+                    <Form.FormItem label="默认公网地址 / NAT IP">
                       <Input
                         value={editPublic}
                         onChange={(v) => setEditPublic(String(v))}
-                        placeholder="客户端入口；空则回退控制面地址"
+                        placeholder="客户端默认入口；空则回退控制面地址"
                         clearable
                       />
-                    </Form.FormItem>
-
-                    <Form.FormItem label="端口映射（监听口 → 公网口）">
-                      <div className="la-map-table">
-                        <div className="la-map-head">
-                          <span>Agent 监听</span>
-                          <span />
-                          <span>NAT 外端口</span>
-                          <span />
-                        </div>
-                        {editMappings.length === 0 ? (
-                          <div className="la-map-empty">无改写时留空；同端口映射无需填写。</div>
-                        ) : (
-                          editMappings.map((row, idx) => (
-                            <div className="la-map-row" key={idx}>
-                              <InputNumber
-                                theme="normal"
-                                min={1}
-                                max={65535}
-                                value={row.listen_port || undefined}
-                                placeholder="8443"
-                                onChange={(v) => updateMapping(idx, { listen_port: Number(v) || 0 })}
-                              />
-                              <span className="la-map-arrow">→</span>
-                              <InputNumber
-                                theme="normal"
-                                min={1}
-                                max={65535}
-                                value={row.public_port || undefined}
-                                placeholder="443"
-                                onChange={(v) => updateMapping(idx, { public_port: Number(v) || 0 })}
-                              />
-                              <Button
-                                size="small"
-                                variant="text"
-                                theme="danger"
-                                onClick={() =>
-                                  setEditMappings(editMappings.filter((_, i) => i !== idx))
-                                }
-                              >
-                                删除
-                              </Button>
-                            </div>
-                          ))
-                        )}
-                        <Button
-                          size="small"
-                          variant="outline"
-                          onClick={() =>
-                            setEditMappings([...editMappings, { listen_port: 0, public_port: 0 }])
-                          }
-                        >
-                          添加映射
-                        </Button>
-                      </div>
                     </Form.FormItem>
                   </Form>
                 </section>
@@ -681,9 +627,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
               <div className="la-drawer-panel">
                 <section className="la-panel-card">
                   <div className="la-panel-card-head">
-                    <h3>关联入站</h3>
+                    <h3>关联入站 + NAT 映射</h3>
                     <p>
-                      勾选后保存会<strong>自动下发并启动核心</strong>。
+                      勾选入站后可填写该入站的<strong>公网 IP / 外端口</strong>（仅订阅用）。
+                      保存会<strong>自动下发并启动核心</strong>。
                     </p>
                   </div>
                   {allInbounds.length === 0 ? (
@@ -698,39 +645,89 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                   ) : (
                     <div className="la-inbound-list">
                       {allInbounds.map((inb) => {
-                        const port = Number(inb.params?.port) || 0
-                        const checked = attachedIds.has(inb.id)
+                        const listenPort = Number(inb.params?.port) || 0
+                        const checked = !!inboundNAT[inb.id]
+                        const nat = inboundNAT[inb.id]
                         return (
-                          <label
+                          <div
                             key={inb.id}
                             className={`la-inbound-item${checked ? ' is-checked' : ''}${
                               !inb.enabled ? ' is-disabled' : ''
                             }`}
                           >
-                            <Checkbox
-                              checked={checked}
-                              onChange={() => toggleInbound(inb.id)}
-                            />
-                            <div className="la-inbound-meta">
-                              <div className="name">
-                                {inb.name}
-                                {!inb.enabled ? (
-                                  <Tag size="small" variant="light" style={{ marginLeft: 8 }}>
-                                    已禁用
-                                  </Tag>
-                                ) : null}
+                            <label className="la-inbound-check">
+                              <Checkbox
+                                checked={checked}
+                                onChange={() => toggleInbound(inb.id)}
+                              />
+                              <div className="la-inbound-meta">
+                                <div className="name">
+                                  {inb.name}
+                                  {!inb.enabled ? (
+                                    <Tag size="small" variant="light" style={{ marginLeft: 8 }}>
+                                      已禁用
+                                    </Tag>
+                                  ) : null}
+                                </div>
+                                <div className="sub">
+                                  <code className="la-mono">{inb.protocol}</code>
+                                  {listenPort ? (
+                                    <>
+                                      {' '}
+                                      · 监听 <code className="la-mono">{listenPort}</code>
+                                    </>
+                                  ) : null}
+                                </div>
                               </div>
-                              <div className="sub">
-                                <code className="la-mono">{inb.protocol}</code>
-                                {port ? (
-                                  <>
-                                    {' '}
-                                    · 监听 <code className="la-mono">{port}</code>
-                                  </>
-                                ) : null}
+                            </label>
+                            {checked ? (
+                              <div className="la-inbound-nat">
+                                <div className="la-inbound-nat-row">
+                                  <span className="label">公网 IP / 域名</span>
+                                  <Input
+                                    size="small"
+                                    value={nat?.public_address || ''}
+                                    placeholder="空=节点默认入口"
+                                    clearable
+                                    onChange={(v) =>
+                                      updateInboundNAT(inb.id, { public_address: String(v) })
+                                    }
+                                  />
+                                </div>
+                                <div className="la-inbound-nat-row">
+                                  <span className="label">公网端口</span>
+                                  <InputNumber
+                                    size="small"
+                                    theme="normal"
+                                    min={0}
+                                    max={65535}
+                                    value={nat?.public_port || undefined}
+                                    placeholder={listenPort ? String(listenPort) : '同监听口'}
+                                    onChange={(v) =>
+                                      updateInboundNAT(inb.id, {
+                                        public_port: Number(v) || 0,
+                                      })
+                                    }
+                                  />
+                                </div>
+                                <div className="la-inbound-nat-hint">
+                                  订阅：
+                                  <code className="la-mono">
+                                    {(nat?.public_address ||
+                                      editPublic ||
+                                      node?.address ||
+                                      '—') +
+                                      ':' +
+                                      String(
+                                        nat?.public_port && nat.public_port > 0
+                                          ? nat.public_port
+                                          : listenPort || '—',
+                                      )}
+                                  </code>
+                                </div>
                               </div>
-                            </div>
-                          </label>
+                            ) : null}
+                          </div>
                         )
                       })}
                     </div>

@@ -120,6 +120,20 @@ export interface InboundConfig {
   updated_at_unix: number
 }
 
+/** Inbound attached to a node, with optional subscription NAT overrides. */
+export interface NodeInboundAttachment extends InboundConfig {
+  /** Client-facing host for this inbound; empty falls back to node public_address/address. */
+  public_address?: string
+  /** Client-facing NAT port; 0/empty uses inbound listen port (and legacy node port_mappings). */
+  public_port?: number
+}
+
+export interface NodeInboundBinding {
+  inbound_id: string
+  public_address?: string
+  public_port?: number
+}
+
 export interface Field {
   name: string
   label: string
@@ -335,19 +349,20 @@ export function upgradeNode(
   return request('POST', `/nodes/${id}/upgrade`, body ?? {})
 }
 
-export function listNodeInbounds(id: string): Promise<InboundConfig[]> {
+export function listNodeInbounds(id: string): Promise<NodeInboundAttachment[]> {
   return request('GET', `/nodes/${id}/inbounds`)
 }
 
 export interface SetNodeInboundsResult {
   inbounds: InboundConfig[]
+  attachments?: NodeInboundAttachment[]
   deployed: boolean
   deploy_message?: string
   apply_task?: Task
   start_task?: Task
 }
 
-/** Attach inbounds and auto-apply+start on the agent (deploy is implicit). */
+/** Attach inbounds (legacy IDs only) and auto-apply+start on the agent. */
 export function setNodeInbounds(
   id: string,
   inbound_ids: string[],
@@ -355,6 +370,18 @@ export function setNodeInbounds(
 ): Promise<SetNodeInboundsResult> {
   return request('PUT', `/nodes/${id}/inbounds`, {
     inbound_ids,
+    skip_deploy: opts?.skip_deploy ?? false,
+  })
+}
+
+/** Attach inbounds with per-inbound public host/port overrides. */
+export function setNodeInboundBindings(
+  id: string,
+  bindings: NodeInboundBinding[],
+  opts?: { skip_deploy?: boolean },
+): Promise<SetNodeInboundsResult> {
+  return request('PUT', `/nodes/${id}/inbounds`, {
+    bindings,
     skip_deploy: opts?.skip_deploy ?? false,
   })
 }

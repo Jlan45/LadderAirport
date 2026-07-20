@@ -181,3 +181,53 @@ func TestRenderNewProtocols(t *testing.T) {
 		}
 	}
 }
+
+
+func TestCollectEndpointsPerInboundNAT(t *testing.T) {
+	nodes := []store.Node{{
+		ID: "n1", Name: "nat",
+		Address: "10.0.0.8", PublicAddress: "node-default.example.com",
+		PortMappings: []store.PortMapping{{ListenPort: 9000, PublicPort: 19000}},
+	}}
+	atts := map[string][]store.NodeInboundAttachment{
+		"n1": {
+			{
+				InboundConfig: store.InboundConfig{
+					ID: "i1", Name: "hy2", Protocol: "hysteria2", Enabled: true,
+					Params: map[string]any{"port": float64(8443), "password": "p"},
+				},
+				PublicAddress: "edge.example.com",
+				PublicPort:    443,
+			},
+			{
+				InboundConfig: store.InboundConfig{
+					ID: "i2", Name: "ss", Protocol: "shadowsocks", Enabled: true,
+					Params: map[string]any{"port": float64(9000), "method": "aes-128-gcm", "password": "p"},
+				},
+				// no attachment override → node port_mappings + node public_address
+			},
+			{
+				InboundConfig: store.InboundConfig{
+					ID: "i3", Name: "ss2", Protocol: "shadowsocks", Enabled: true,
+					Params: map[string]any{"port": float64(10086), "method": "aes-128-gcm", "password": "p"},
+				},
+				PublicPort: 10086, // same as listen, still fine
+			},
+		},
+	}
+	eps, err := CollectEndpointsFromAttachments(nodes, atts, nil)
+	if err != nil || len(eps) != 3 {
+		t.Fatalf("eps=%v err=%v", eps, err)
+	}
+	wantHost := map[string]string{"hy2": "edge.example.com", "ss": "node-default.example.com", "ss2": "node-default.example.com"}
+	wantPort := map[string]int{"hy2": 443, "ss": 19000, "ss2": 10086}
+	for _, ep := range eps {
+		key := ep.Inbound.Name
+		if ep.Server != wantHost[key] {
+			t.Fatalf("%s server=%q want %q", key, ep.Server, wantHost[key])
+		}
+		if ep.Port != wantPort[key] {
+			t.Fatalf("%s port=%d want %d", key, ep.Port, wantPort[key])
+		}
+	}
+}

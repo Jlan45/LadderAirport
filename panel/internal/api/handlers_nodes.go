@@ -327,7 +327,7 @@ func (s *Server) handleListNodeInbounds(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	list, err := s.Store.ListInboundsForNode(id)
+	list, err := s.Store.ListNodeInboundAttachments(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -336,18 +336,25 @@ func (s *Server) handleListNodeInbounds(w http.ResponseWriter, r *http.Request) 
 }
 
 type setNodeInboundsBody struct {
+	// InboundIDs is the legacy field (no per-inbound NAT). Prefer Bindings.
 	InboundIDs []string `json:"inbound_ids"`
+	// Bindings attaches inbounds with optional public_address / public_port overrides.
+	// When non-nil, takes precedence over InboundIDs.
+	Bindings []store.NodeInboundBinding `json:"bindings"`
 	// SkipDeploy when true only updates association (tests / advanced). Default: auto apply+start.
 	SkipDeploy bool `json:"skip_deploy"`
 }
 
 // setNodeInboundsResponse is returned after attaching inbounds; deploy is implicit.
 type setNodeInboundsResponse struct {
-	Inbounds      []store.InboundConfig `json:"inbounds"`
-	Deployed      bool                  `json:"deployed"`
-	DeployMessage string                `json:"deploy_message,omitempty"`
-	ApplyTask     *store.Task           `json:"apply_task,omitempty"`
-	StartTask     *store.Task           `json:"start_task,omitempty"`
+	// Inbounds keeps legacy shape for older clients (without NAT fields).
+	Inbounds []store.InboundConfig `json:"inbounds"`
+	// Attachments includes per-inbound public_address / public_port.
+	Attachments   []store.NodeInboundAttachment `json:"attachments"`
+	Deployed      bool                          `json:"deployed"`
+	DeployMessage string                        `json:"deploy_message,omitempty"`
+	ApplyTask     *store.Task                   `json:"apply_task,omitempty"`
+	StartTask     *store.Task                   `json:"start_task,omitempty"`
 }
 
 func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
@@ -357,10 +364,18 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.InboundIDs == nil {
-		body.InboundIDs = []string{}
+	bindings := body.Bindings
+	if bindings == nil {
+		// legacy: inbound_ids only
+		if body.InboundIDs == nil {
+			body.InboundIDs = []string{}
+		}
+		bindings = make([]store.NodeInboundBinding, 0, len(body.InboundIDs))
+		for _, iid := range body.InboundIDs {
+			bindings = append(bindings, store.NodeInboundBinding{InboundID: iid})
+		}
 	}
-	if err := s.Store.SetNodeInbounds(id, body.InboundIDs); err != nil {
+	if err := s.Store.SetNodeInboundBindings(id, bindings); err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
@@ -368,14 +383,19 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	list, err := s.Store.ListInboundsForNode(id)
+	atts, err := s.Store.ListNodeInboundAttachments(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	list := make([]store.InboundConfig, 0, len(atts))
+	for _, a := range atts {
+		list = append(list, a.InboundConfig)
+	}
 
 	out := setNodeInboundsResponse{
-		Inbounds: list,
+		Inbounds:    list,
+		Attachments: atts,
 	}
 	if body.SkipDeploy {
 		out.DeployMessage = "关联已保存（未下发）"
@@ -394,7 +414,7 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	if len(body.InboundIDs) == 0 {
+	if len(bindings) == 0 {
 		out.DeployMessage = "关联已清空；未向节点下发（无入站配置）"
 		writeJSON(w, http.StatusOK, out)
 		return

@@ -137,6 +137,8 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN egress_interface TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN port_mappings_json TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alters {
@@ -584,7 +586,20 @@ func (s *Store) ListInbounds() ([]InboundConfig, error) {
 
 // --- Attachments ---
 
+// SetNodeInbounds attaches inbound IDs without NAT overrides (compat helper).
 func (s *Store) SetNodeInbounds(nodeID string, inboundIDs []string) error {
+	bindings := make([]NodeInboundBinding, 0, len(inboundIDs))
+	for _, id := range inboundIDs {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		bindings = append(bindings, NodeInboundBinding{InboundID: id})
+	}
+	return s.SetNodeInboundBindings(nodeID, bindings)
+}
+
+// SetNodeInboundBindings replaces attachments for a node, including optional per-inbound NAT fields.
+func (s *Store) SetNodeInboundBindings(nodeID string, bindings []NodeInboundBinding) error {
 	// Ensure node exists.
 	if _, err := s.GetNode(nodeID); err != nil {
 		return err
@@ -598,8 +613,13 @@ func (s *Store) SetNodeInbounds(nodeID string, inboundIDs []string) error {
 	if _, err := tx.Exec(`DELETE FROM node_inbounds WHERE node_id = ?`, nodeID); err != nil {
 		return fmt.Errorf("clear node_inbounds: %w", err)
 	}
-	for _, iid := range inboundIDs {
-		// Verify inbound exists
+	seen := map[string]bool{}
+	for _, b := range bindings {
+		iid := strings.TrimSpace(b.InboundID)
+		if iid == "" || seen[iid] {
+			continue
+		}
+		seen[iid] = true
 		var exists int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM inbounds WHERE id = ?`, iid).Scan(&exists); err != nil {
 			return err
@@ -607,38 +627,73 @@ func (s *Store) SetNodeInbounds(nodeID string, inboundIDs []string) error {
 		if exists == 0 {
 			return fmt.Errorf("inbound not found: %s", iid)
 		}
-		if _, err := tx.Exec(`INSERT INTO node_inbounds (node_id, inbound_id) VALUES (?, ?)`, nodeID, iid); err != nil {
+		pubAddr := strings.TrimSpace(b.PublicAddress)
+		pubPort := b.PublicPort
+		if pubPort < 0 || pubPort > 65535 {
+			return fmt.Errorf("public_port out of range for inbound %s: %d", iid, pubPort)
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO node_inbounds (node_id, inbound_id, public_address, public_port) VALUES (?, ?, ?, ?)`,
+			nodeID, iid, pubAddr, pubPort,
+		); err != nil {
 			return fmt.Errorf("attach inbound: %w", err)
 		}
 	}
 	return tx.Commit()
 }
 
+// ListInboundsForNode returns attached inbound configs (without NAT overrides).
+// Prefer ListNodeInboundAttachments when subscription NAT fields are needed.
 func (s *Store) ListInboundsForNode(nodeID string) ([]InboundConfig, error) {
+	atts, err := s.ListNodeInboundAttachments(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]InboundConfig, 0, len(atts))
+	for _, a := range atts {
+		out = append(out, a.InboundConfig)
+	}
+	return out, nil
+}
+
+// ListNodeInboundAttachments returns attached inbounds with per-inbound public host/port overrides.
+func (s *Store) ListNodeInboundAttachments(nodeID string) ([]NodeInboundAttachment, error) {
 	rows, err := s.db.Query(`
-		SELECT i.id, i.name, i.protocol, i.params_json, i.enabled, i.created_at_unix, i.updated_at_unix
+		SELECT i.id, i.name, i.protocol, i.params_json, i.enabled, i.created_at_unix, i.updated_at_unix,
+			COALESCE(ni.public_address, ''), COALESCE(ni.public_port, 0)
 		FROM inbounds i
 		INNER JOIN node_inbounds ni ON ni.inbound_id = i.id
 		WHERE ni.node_id = ?
 		ORDER BY i.created_at_unix ASC`, nodeID)
 	if err != nil {
-		return nil, fmt.Errorf("list inbounds for node: %w", err)
+		return nil, fmt.Errorf("list node inbound attachments: %w", err)
 	}
 	defer rows.Close()
 
-	var out []InboundConfig
+	var out []NodeInboundAttachment
 	for rows.Next() {
-		in, err := scanInbound(rows)
+		var a NodeInboundAttachment
+		var paramsJSON string
+		var enabled int
+		err := rows.Scan(
+			&a.ID, &a.Name, &a.Protocol, &paramsJSON, &enabled, &a.CreatedAtUnix, &a.UpdatedAtUnix,
+			&a.PublicAddress, &a.PublicPort,
+		)
 		if err != nil {
-			return nil, fmt.Errorf("list inbounds for node scan: %w", err)
+			return nil, fmt.Errorf("list node inbound attachments scan: %w", err)
 		}
-		out = append(out, *in)
+		a.Enabled = enabled != 0
+		a.Params = map[string]any{}
+		if err := unmarshalJSON(paramsJSON, &a.Params); err != nil {
+			return nil, fmt.Errorf("unmarshal inbound params: %w", err)
+		}
+		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	if out == nil {
-		out = []InboundConfig{}
+		out = []NodeInboundAttachment{}
 	}
 	return out, nil
 }

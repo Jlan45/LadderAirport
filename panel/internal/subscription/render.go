@@ -27,6 +27,14 @@ type ProxyEndpoint struct {
 // clientServerHost returns the host clients should dial.
 // Prefer PublicAddress when set; otherwise fall back to control Address.
 func clientServerHost(n store.Node) string {
+	return clientServerHostForInbound(n, "")
+}
+
+// clientServerHostForInbound prefers per-inbound public host, then node public_address, then address.
+func clientServerHostForInbound(n store.Node, inboundPublic string) string {
+	if s := strings.TrimSpace(inboundPublic); s != "" {
+		return s
+	}
 	if s := strings.TrimSpace(n.PublicAddress); s != "" {
 		return s
 	}
@@ -35,7 +43,24 @@ func clientServerHost(n store.Node) string {
 
 // CollectEndpoints walks nodes and their attached inbounds.
 // inboundFilter empty = all enabled inbounds; otherwise only listed IDs.
+//
+// Compatibility wrapper: treats inbounds as attachments without per-inbound NAT overrides.
 func CollectEndpoints(nodes []store.Node, nodeInbounds map[string][]store.InboundConfig, inboundFilter []string) ([]ProxyEndpoint, error) {
+	atts := map[string][]store.NodeInboundAttachment{}
+	for nodeID, ins := range nodeInbounds {
+		list := make([]store.NodeInboundAttachment, 0, len(ins))
+		for _, in := range ins {
+			list = append(list, store.NodeInboundAttachment{InboundConfig: in})
+		}
+		atts[nodeID] = list
+	}
+	return CollectEndpointsFromAttachments(nodes, atts, inboundFilter)
+}
+
+// CollectEndpointsFromAttachments builds subscription endpoints using per-inbound NAT overrides.
+// Public host priority: attachment.public_address → node.public_address → node.address
+// Public port priority: attachment.public_port → node.port_mappings[listen] → listen port
+func CollectEndpointsFromAttachments(nodes []store.Node, nodeAttachments map[string][]store.NodeInboundAttachment, inboundFilter []string) ([]ProxyEndpoint, error) {
 	filter := map[string]bool{}
 	for _, id := range inboundFilter {
 		if id != "" {
@@ -46,8 +71,9 @@ func CollectEndpoints(nodes []store.Node, nodeInbounds map[string][]store.Inboun
 
 	var out []ProxyEndpoint
 	for _, n := range nodes {
-		ins := nodeInbounds[n.ID]
-		for _, in := range ins {
+		atts := nodeAttachments[n.ID]
+		for _, att := range atts {
+			in := att.InboundConfig
 			if !in.Enabled {
 				continue
 			}
@@ -58,9 +84,13 @@ func CollectEndpoints(nodes []store.Node, nodeInbounds map[string][]store.Inboun
 			if err != nil || listenPort < 1 {
 				continue
 			}
-			// Node-level NAT port map: agent listen → external public port for clients.
-			port := store.MapPublicPort(n.PortMappings, listenPort)
-			server := clientServerHost(n)
+			port := listenPort
+			if att.PublicPort >= 1 && att.PublicPort <= 65535 {
+				port = att.PublicPort
+			} else {
+				port = store.MapPublicPort(n.PortMappings, listenPort)
+			}
+			server := clientServerHostForInbound(n, att.PublicAddress)
 			if server == "" || server == "0.0.0.0" || server == "::" {
 				continue
 			}

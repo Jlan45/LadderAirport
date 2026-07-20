@@ -397,3 +397,48 @@ func TestNormalizePortMappings(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 }
+
+
+func TestNodeInboundNATBindings(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "nat", Address: "10.0.0.8", GRPCPort: 50051, PublicAddress: "node.example.com"}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	in1 := &InboundConfig{Name: "ss1", Protocol: "shadowsocks", Enabled: true, Params: map[string]any{"port": float64(8443), "method": "aes-128-gcm", "password": "p"}}
+	in2 := &InboundConfig{Name: "ss2", Protocol: "shadowsocks", Enabled: true, Params: map[string]any{"port": float64(9000), "method": "aes-128-gcm", "password": "p"}}
+	if err := s.CreateInbound(in1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateInbound(in2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetNodeInboundBindings(n.ID, []NodeInboundBinding{
+		{InboundID: in1.ID, PublicAddress: "edge.example.com", PublicPort: 443},
+		{InboundID: in2.ID, PublicAddress: "", PublicPort: 0},
+	}); err != nil {
+		t.Fatalf("SetNodeInboundBindings: %v", err)
+	}
+	atts, err := s.ListNodeInboundAttachments(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(atts) != 2 {
+		t.Fatalf("len=%d", len(atts))
+	}
+	byID := map[string]NodeInboundAttachment{}
+	for _, a := range atts {
+		byID[a.ID] = a
+	}
+	if byID[in1.ID].PublicAddress != "edge.example.com" || byID[in1.ID].PublicPort != 443 {
+		t.Fatalf("in1 = %+v", byID[in1.ID])
+	}
+	if byID[in2.ID].PublicAddress != "" || byID[in2.ID].PublicPort != 0 {
+		t.Fatalf("in2 = %+v", byID[in2.ID])
+	}
+	// compat list still works
+	ins, err := s.ListInboundsForNode(n.ID)
+	if err != nil || len(ins) != 2 {
+		t.Fatalf("ListInboundsForNode: %v %#v", err, ins)
+	}
+}

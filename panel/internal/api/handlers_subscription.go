@@ -191,15 +191,15 @@ func (s *Server) renderSubscription(sub *store.Subscription) ([]byte, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	nodeInbounds := map[string][]store.InboundConfig{}
+	nodeAttachments := map[string][]store.NodeInboundAttachment{}
 	for _, n := range nodes {
-		ins, err := s.Store.ListInboundsForNode(n.ID)
+		atts, err := s.Store.ListNodeInboundAttachments(n.ID)
 		if err != nil {
 			return nil, "", err
 		}
-		nodeInbounds[n.ID] = ins
+		nodeAttachments[n.ID] = atts
 	}
-	eps, err := subscription.CollectEndpoints(nodes, nodeInbounds, sub.InboundIDs)
+	eps, err := subscription.CollectEndpointsFromAttachments(nodes, nodeAttachments, sub.InboundIDs)
 	if err != nil {
 		return nil, "", err
 	}
