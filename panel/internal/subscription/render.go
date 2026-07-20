@@ -54,10 +54,12 @@ func CollectEndpoints(nodes []store.Node, nodeInbounds map[string][]store.Inboun
 			if useFilter && !filter[in.ID] {
 				continue
 			}
-			port, err := paramInt(in.Params, "port")
-			if err != nil || port < 1 {
+			listenPort, err := paramInt(in.Params, "port")
+			if err != nil || listenPort < 1 {
 				continue
 			}
+			// Node-level NAT port map: agent listen → external public port for clients.
+			port := store.MapPublicPort(n.PortMappings, listenPort)
 			server := clientServerHost(n)
 			if server == "" || server == "0.0.0.0" || server == "::" {
 				continue

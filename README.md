@@ -108,7 +108,8 @@ cd panel && go build -o ../bin/panel ./cmd/panel
 |------|------|
 | Address（控制面） | Panel 拨号 host（对 Panel 可达；跨机勿填 `127.0.0.1`；NAT 填映射后的公网/VPN 地址） |
 | gRPC 端口 | 控制面端口（默认 `50051`；端口转发填**外部映射端口**） |
-| 公网地址 | 可选；订阅客户端 `server` host，空则回退 Address |
+| 公网地址 | 可选；订阅客户端 `server` host / NAT IP，空则回退 Address |
+| NAT 端口映射 | 可选；节点详情维护 `listen_port→public_port`，仅改订阅端口，不改 Agent 监听 |
 | Token | 与 Agent 的 `-token` 一致 |
 
 创建入站 → 节点详情里关联 → 下发配置。  

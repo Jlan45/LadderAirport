@@ -347,6 +347,11 @@ export default function Fleet() {
               订阅 <code className="la-mono">{row.public_address}</code>
             </div>
           ) : null}
+          {row.port_mappings && row.port_mappings.length > 0 ? (
+            <div className="la-page-desc" style={{ margin: '2px 0 0' }}>
+              端口映射 {row.port_mappings.length} 条
+            </div>
+          ) : null}
         </div>
       ),
     },
@@ -825,6 +830,11 @@ function NodeCard({
         {n.public_address && n.public_address !== n.address ? (
           <div className="la-page-desc" style={{ margin: '2px 0 0' }}>
             订阅 <code className="la-mono">{n.public_address}</code>
+          </div>
+        ) : null}
+        {n.port_mappings && n.port_mappings.length > 0 ? (
+          <div className="la-page-desc" style={{ margin: '2px 0 0' }}>
+            端口映射 {n.port_mappings.length} 条
           </div>
         ) : null}
       </div>

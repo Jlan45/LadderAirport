@@ -50,6 +50,12 @@ async function request<T>(
 
 // --- Types ---
 
+/** Node-level NAT rewrite: agent listen port → external public port for subscriptions. */
+export interface PortMapping {
+  listen_port: number
+  public_port: number
+}
+
 export interface Node {
   id: string
   name: string
@@ -57,6 +63,11 @@ export interface Node {
   grpc_port: number
   /** Client-facing host for subscriptions; empty falls back to address. */
   public_address?: string
+  /**
+   * NAT port map for subscription clients.
+   * Agent still listens on inbound params.port; only subscription server_port is rewritten.
+   */
+  port_mappings?: PortMapping[]
   token?: string
   labels: string[]
   tls_skip_verify: boolean

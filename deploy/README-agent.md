@@ -93,7 +93,17 @@ Panel 开启 bootstrap 时会自动下发配置并启动 sing-box。
 |--------|--------|
 | 控制面地址 `address` | **Panel 能拨到的** host（公网 IP、DDNS、VPN IP） |
 | 控制面端口 `grpc_port` | **外部映射端口**（若 `15051→50051` 则填 `15051`） |
-| 公网地址 `public_address` | 订阅客户端用的 host；与控制面相同时可留空（回退 `address`） |
+| 公网地址 `public_address` | 订阅客户端用的 NAT IP/域名；与控制面相同时可留空（回退 `address`） |
+| 端口映射 `port_mappings` | 订阅用：`listen_port`（Agent 入站本机口）→ `public_port`（NAT 外口）；无端口改写可留空 |
+
+入站模板里的 `port` **始终是 Agent 本机监听口**，会下发给 sing-box。客户端连的端口由节点 `port_mappings` 决定（无映射则等于监听口）。
+
+示例：Agent 监听 `8443`，路由器 `公网:443 → 内网:8443`：
+
+- 入站 `port = 8443`
+- 节点 `public_address = 公网IP或DDNS`
+- 节点 `port_mappings = [{ "listen_port": 8443, "public_port": 443 }]`
+- 订阅结果：`server=公网, server_port=443`；Agent 配置仍 `listen_port=8443`
 
 建议流程：
 
@@ -101,8 +111,9 @@ Panel 开启 bootstrap 时会自动下发配置并启动 sing-box。
 2. 路由器/云安全组做 DNAT：外网 gRPC 端口 → 本机 50051；各入站端口按需映射。  
 3. TLS：若 Panel 拨的是公网 IP/域名，安装时加 `LADDER_TLS_EXTRA_SANS=IP:x.x.x.x,DNS:name`。  
 4. 在 Panel 节点详情填写控制面地址/映射端口；客户端入口不同再填公网地址。  
-5. 首次装机可用 `LADDER_REPORT_ADDRESS` 填空地址；**之后重装 enroll 不会覆盖已有控制面地址/端口**（仍会更新 CA）。  
-6. 点「探测」确认 online，再预览订阅确认 `server` 为客户端可达 host。
+5. 若 NAT **改写了业务端口**，在节点详情「NAT 端口映射」填 监听口→外端口（可多条）。  
+6. 首次装机可用 `LADDER_REPORT_ADDRESS` 填空地址；**之后重装 enroll 不会覆盖已有控制面地址/端口**（仍会更新 CA）。  
+7. 点「探测」确认 online，再预览订阅确认 `server` / `server_port` 为客户端可达值。
 
 相关变量：`LADDER_REPORT_ADDRESS`、`LADDER_GRPC_PORT`、`LADDER_TLS_EXTRA_SANS`（见上文表格）。
 

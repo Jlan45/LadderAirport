@@ -4,14 +4,14 @@ import {
   Alert,
   Button,
   Checkbox,
-  Divider,
   Drawer,
   Form,
   Input,
   InputNumber,
   MessagePlugin,
   Select,
-  Space,
+  Tabs,
+  Tag,
   Textarea,
 } from 'tdesign-react'
 import {
@@ -35,13 +35,24 @@ import {
   type NodeInstallInfo,
   type Task,
 } from '../api/client'
-import { formatBytes, isAgentOutdated, taskKindLabel, taskStatusLabel } from '../lib/nodeDisplay'
+import {
+  formatBytes,
+  isAgentOutdated,
+  runtimeLabel,
+  runtimeTheme,
+  statusLabel,
+  statusTheme,
+  taskKindLabel,
+  taskStatusLabel,
+} from '../lib/nodeDisplay'
 
 type Props = {
   nodeId: string | null
   onClose: () => void
   onChanged: () => void
 }
+
+type MappingRow = { listen_port: number; public_port: number }
 
 export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) {
   const open = !!nodeId
@@ -56,12 +67,14 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [logs, setLogs] = useState<string[]>([])
   const [streaming, setStreaming] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [activeTab, setActiveTab] = useState<string | number>('connection')
   const abortRef = useRef<AbortController | null>(null)
   const logEndRef = useRef<HTMLDivElement | null>(null)
 
   const [editAddress, setEditAddress] = useState('')
   const [editPort, setEditPort] = useState(50051)
   const [editPublic, setEditPublic] = useState('')
+  const [editMappings, setEditMappings] = useState<MappingRow[]>([])
   const [editCA, setEditCA] = useState('')
   const [editTLSSkip, setEditTLSSkip] = useState(false)
   const [editEgress, setEditEgress] = useState('')
@@ -101,6 +114,12 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         setEditAddress(n.address || '')
         setEditPort(n.grpc_port || 50051)
         setEditPublic(n.public_address || '')
+        setEditMappings(
+          (n.port_mappings ?? []).map((m) => ({
+            listen_port: Number(m.listen_port) || 0,
+            public_port: Number(m.public_port) || 0,
+          })),
+        )
         setEditCA(n.ca_cert_pem || '')
         setEditTLSSkip(!!n.tls_skip_verify)
         setEditEgress(n.egress_interface || '')
@@ -125,6 +144,8 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       setIfaces([])
       setIfacesError('')
       setEditEgress('')
+      setEditMappings([])
+      setActiveTab('connection')
       return
     }
     void load()
@@ -246,15 +267,32 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     if (!id || !node) return
     setBusy(true)
     try {
+      const mappings = editMappings
+        .map((m) => ({
+          listen_port: Number(m.listen_port) || 0,
+          public_port: Number(m.public_port) || 0,
+        }))
+        .filter(
+          (m) =>
+            m.listen_port >= 1 &&
+            m.listen_port <= 65535 &&
+            m.public_port >= 1 &&
+            m.public_port <= 65535,
+        )
       const updated = await updateNode(id, {
         ...node,
         address: editAddress.trim(),
         grpc_port: editPort,
         public_address: editPublic.trim(),
+        port_mappings: mappings,
         ca_cert_pem: editCA,
         tls_skip_verify: editTLSSkip,
         egress_interface: editEgress.trim(),
-        status: editAddress.trim() ? (node.status === 'pending' ? 'unknown' : node.status) : 'pending',
+        status: editAddress.trim()
+          ? node.status === 'pending'
+            ? 'unknown'
+            : node.status
+          : 'pending',
       })
       setNode(updated)
       MessagePlugin.success('连接设置已保存（出口网卡需下发配置后生效）')
@@ -287,7 +325,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       seen.add(iface.name)
       opts.push({ label: ifaceLabel(iface), value: iface.name })
     }
-    // Keep a saved value that is no longer in the live list.
     if (editEgress && !seen.has(editEgress)) {
       opts.push({ label: `${editEgress}（已保存，当前列表中不存在）`, value: editEgress })
     }
@@ -329,309 +366,508 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     }
   }
 
+  function updateMapping(idx: number, patch: Partial<MappingRow>) {
+    setEditMappings((prev) => prev.map((row, i) => (i === idx ? { ...row, ...patch } : row)))
+  }
+
+  const attachedCount = attachedIds.size
+  const mappingCount = editMappings.filter(
+    (m) => m.listen_port >= 1 && m.public_port >= 1 && m.listen_port !== m.public_port,
+  ).length
+
   return (
     <Drawer
       visible={open}
-      size="560px"
-      header={node ? node.name : '节点详情'}
-      onClose={onClose}
+      size="720px"
+      placement="right"
+      header={null}
       footer={null}
+      onClose={onClose}
       destroyOnClose
+      closeOnOverlayClick
+      className="la-node-drawer"
     >
-      {node ? (
-        <p className="la-page-desc" style={{ marginTop: -4 }}>
-          <code className="la-mono">
-            {node.address || '（待填）'}:{node.grpc_port}
-          </code>
-          {node.public_address ? (
-            <>
-              {' '}
-              · 订阅 <code className="la-mono">{node.public_address}</code>
-            </>
-          ) : null}{' '}
-          · {taskStatusLabel(node.status || 'unknown')}
-          {' '}
-          · Agent <code className="la-mono">{node.agent_version || '—'}</code>
-          {node.singbox_version ? (
-            <>
-              {' '}
-              · sing-box <code className="la-mono">{node.singbox_version}</code>
-            </>
-          ) : null}
-          {installInfo &&
-          isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
-            <span style={{ color: 'var(--td-warning-color, #e37318)', marginLeft: 8 }}>
-              可升级
-              {installInfo.recommended_agent_version
-                ? ` → ${installInfo.recommended_agent_version}`
-                : ''}
-            </span>
-          ) : null}
-        </p>
+      {!node ? (
+        <div className="la-drawer-loading">加载中…</div>
       ) : (
-        <p className="la-page-desc">加载中…</p>
-      )}
-
-      <div className="la-drawer-section">
-        <h3>连接与 TLS</h3>
-        <p className="la-page-desc" style={{ marginTop: 0 }}>
-          装机后填写控制面地址（Panel 拨号）。NAT 时填映射后的公网/VPN 地址与外部端口；订阅入口不同再填公网地址。TLS 模式请粘贴节点 <code>ca.crt</code>。
-        </p>
-        <Form labelAlign="top">
-          <Form.FormItem label="控制面地址（Panel 拨号）">
-            <Input
-              value={editAddress}
-              onChange={(v) => setEditAddress(String(v))}
-              placeholder="Panel 可达的 IP / 域名 / VPN 地址"
-              clearable
-            />
-          </Form.FormItem>
-          <Form.FormItem label="控制面 gRPC 端口（Panel 拨号）">
-            <InputNumber
-              theme="normal"
-              style={{ width: '100%' }}
-              value={editPort}
-              onChange={(v) => setEditPort(Number(v) || 50051)}
-            />
-            <p className="la-page-desc" style={{ margin: '6px 0 0' }}>
-              端口转发时填<strong>外部映射端口</strong>，不一定是 Agent 本机 50051。
-            </p>
-          </Form.FormItem>
-          <Form.FormItem label="公网地址（订阅客户端用，可空）">
-            <Input
-              value={editPublic}
-              onChange={(v) => setEditPublic(String(v))}
-              placeholder="客户端入口域名/公网 IP；空则回退控制面地址"
-              clearable
-            />
-            <p className="la-page-desc" style={{ margin: '6px 0 0' }}>
-              仅影响订阅里的 server；不影响 Panel 拨号。NAT 且客户端入口与控制面不同时填写。
-            </p>
-          </Form.FormItem>
-          <Form.FormItem label="CA 证书 (ca_cert_pem)">
-            <Textarea
-              value={editCA}
-              onChange={(v) => setEditCA(String(v))}
-              placeholder="-----BEGIN CERTIFICATE----- ..."
-              autosize={{ minRows: 4, maxRows: 10 }}
-              style={{ fontFamily: 'var(--la-mono)', fontSize: 12 }}
-            />
-          </Form.FormItem>
-          <Form.FormItem>
-            <Checkbox checked={editTLSSkip} onChange={(c) => setEditTLSSkip(Boolean(c))}>
-              跳过 TLS 证书验证（仅 lab）
-            </Checkbox>
-          </Form.FormItem>
-          <Form.FormItem label="出口网卡">
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Select
-                value={editEgress}
-                onChange={(v) => setEditEgress(String(v ?? ''))}
-                options={egressOptions()}
-                placeholder="系统默认"
-                clearable
-                filterable
-                style={{ width: '100%' }}
-                empty={ifacesLoading ? '加载网卡中…' : '暂无网卡数据'}
-              />
-              <Space>
-                <Button size="small" variant="outline" loading={ifacesLoading} onClick={() => void loadInterfaces()}>
-                  刷新网卡
-                </Button>
-              </Space>
-              <p className="la-page-desc" style={{ margin: 0 }}>
-                留空使用系统默认路由。修改后需「下发配置」才写入节点。Linux 绑定网卡通常需要 root / CAP_NET_RAW。
-              </p>
-              {ifacesError ? (
-                <Alert theme="warning" message={`无法从 Agent 拉取网卡：${ifacesError}`} />
-              ) : null}
-            </Space>
-          </Form.FormItem>
-          <Space>
-            <Button theme="primary" loading={busy} onClick={() => void onSaveConnection()}>
-              保存连接设置
-            </Button>
-            <Button variant="outline" onClick={() => void onShowInstall()}>
-              显示安装命令
-            </Button>
-          </Space>
-        </Form>
-        {installInfo ? (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-              <strong>一键安装</strong>
-              <Button size="small" variant="outline" onClick={() => void copyInstall()}>
-                {copied ? '已复制' : '复制'}
+        <div className="la-drawer-body">
+          <header className="la-drawer-hero">
+            <div className="la-drawer-hero-top">
+              <div className="la-drawer-hero-title">
+                <h2>{node.name}</h2>
+                <div className="la-drawer-tags">
+                  <Tag theme={statusTheme(node.status)} variant="light" size="small">
+                    {statusLabel(node.status)}
+                  </Tag>
+                  {node.runtime_state ? (
+                    <Tag theme={runtimeTheme(node.runtime_state)} variant="light" size="small">
+                      {runtimeLabel(node.runtime_state)}
+                    </Tag>
+                  ) : null}
+                  {installInfo &&
+                  isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
+                    <Tag theme="warning" variant="light" size="small">
+                      可升级
+                      {installInfo.recommended_agent_version
+                        ? ` → ${installInfo.recommended_agent_version}`
+                        : ''}
+                    </Tag>
+                  ) : null}
+                </div>
+              </div>
+              <Button variant="text" shape="square" onClick={onClose} aria-label="关闭">
+                ✕
               </Button>
             </div>
-            <pre className="la-pre">{installInfo.install_command}</pre>
-            {installInfo.upgrade_command ? (
-              <div style={{ marginTop: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <strong>
-                    升级
-                    {installInfo.recommended_agent_version
-                      ? ` → ${installInfo.recommended_agent_version}`
-                      : ''}
-                  </strong>
-                  <Button size="small" variant="outline" onClick={() => void copyUpgrade()}>
-                    {copiedUpgrade ? '已复制' : '复制'}
+
+            <div className="la-drawer-summary">
+              <div className="la-summary-item">
+                <span className="label">控制面</span>
+                <code className="la-mono value">
+                  {node.address || '（待填）'}:{node.grpc_port}
+                </code>
+              </div>
+              <div className="la-summary-item">
+                <span className="label">订阅入口</span>
+                <code className="la-mono value">
+                  {node.public_address || node.address || '—'}
+                  {mappingCount > 0 ? ` · ${mappingCount} 条端口映射` : ''}
+                </code>
+              </div>
+              <div className="la-summary-item">
+                <span className="label">版本</span>
+                <span className="value">
+                  Agent <code className="la-mono">{node.agent_version || '—'}</code>
+                  {node.singbox_version ? (
+                    <>
+                      {' '}
+                      · sing-box <code className="la-mono">{node.singbox_version}</code>
+                    </>
+                  ) : null}
+                </span>
+              </div>
+            </div>
+          </header>
+
+          <Tabs
+            value={activeTab}
+            onChange={setActiveTab}
+            className="la-drawer-tabs"
+            size="medium"
+          >
+            <Tabs.TabPanel value="connection" label="连接 / NAT">
+              <div className="la-drawer-panel">
+                <section className="la-panel-card">
+                  <div className="la-panel-card-head">
+                    <h3>Panel 控制面</h3>
+                    <p>Panel 拨号用。NAT 时填映射后的公网/VPN 地址与<strong>外部</strong> gRPC 端口。</p>
+                  </div>
+                  <Form labelAlign="top" className="la-drawer-form">
+                    <div className="la-form-row-2">
+                      <Form.FormItem label="控制面地址">
+                        <Input
+                          value={editAddress}
+                          onChange={(v) => setEditAddress(String(v))}
+                          placeholder="公网 IP / DDNS / VPN 地址"
+                          clearable
+                        />
+                      </Form.FormItem>
+                      <Form.FormItem label="gRPC 端口（外部映射口）">
+                        <InputNumber
+                          theme="normal"
+                          style={{ width: '100%' }}
+                          value={editPort}
+                          onChange={(v) => setEditPort(Number(v) || 50051)}
+                        />
+                      </Form.FormItem>
+                    </div>
+                  </Form>
+                </section>
+
+                <section className="la-panel-card">
+                  <div className="la-panel-card-head">
+                    <h3>订阅入口 / NAT</h3>
+                    <p>
+                      只影响订阅里的 <code>server</code> / 端口。入站 <code>port</code> 仍是 Agent
+                      本机监听口。
+                    </p>
+                  </div>
+                  <Form labelAlign="top" className="la-drawer-form">
+                    <Form.FormItem label="公网地址 / NAT IP">
+                      <Input
+                        value={editPublic}
+                        onChange={(v) => setEditPublic(String(v))}
+                        placeholder="客户端入口；空则回退控制面地址"
+                        clearable
+                      />
+                    </Form.FormItem>
+
+                    <Form.FormItem label="端口映射（监听口 → 公网口）">
+                      <div className="la-map-table">
+                        <div className="la-map-head">
+                          <span>Agent 监听</span>
+                          <span />
+                          <span>NAT 外端口</span>
+                          <span />
+                        </div>
+                        {editMappings.length === 0 ? (
+                          <div className="la-map-empty">无改写时留空；同端口映射无需填写。</div>
+                        ) : (
+                          editMappings.map((row, idx) => (
+                            <div className="la-map-row" key={idx}>
+                              <InputNumber
+                                theme="normal"
+                                min={1}
+                                max={65535}
+                                value={row.listen_port || undefined}
+                                placeholder="8443"
+                                onChange={(v) => updateMapping(idx, { listen_port: Number(v) || 0 })}
+                              />
+                              <span className="la-map-arrow">→</span>
+                              <InputNumber
+                                theme="normal"
+                                min={1}
+                                max={65535}
+                                value={row.public_port || undefined}
+                                placeholder="443"
+                                onChange={(v) => updateMapping(idx, { public_port: Number(v) || 0 })}
+                              />
+                              <Button
+                                size="small"
+                                variant="text"
+                                theme="danger"
+                                onClick={() =>
+                                  setEditMappings(editMappings.filter((_, i) => i !== idx))
+                                }
+                              >
+                                删除
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                        <Button
+                          size="small"
+                          variant="outline"
+                          onClick={() =>
+                            setEditMappings([...editMappings, { listen_port: 0, public_port: 0 }])
+                          }
+                        >
+                          添加映射
+                        </Button>
+                      </div>
+                    </Form.FormItem>
+                  </Form>
+                </section>
+
+                <section className="la-panel-card">
+                  <div className="la-panel-card-head">
+                    <h3>TLS 与出口</h3>
+                    <p>粘贴节点 <code>ca.crt</code>；出口网卡修改后需下发配置生效。</p>
+                  </div>
+                  <Form labelAlign="top" className="la-drawer-form">
+                    <Form.FormItem label="CA 证书">
+                      <Textarea
+                        value={editCA}
+                        onChange={(v) => setEditCA(String(v))}
+                        placeholder="-----BEGIN CERTIFICATE----- ..."
+                        autosize={{ minRows: 3, maxRows: 8 }}
+                        style={{ fontFamily: 'var(--la-mono)', fontSize: 12 }}
+                      />
+                    </Form.FormItem>
+                    <Form.FormItem>
+                      <Checkbox checked={editTLSSkip} onChange={(c) => setEditTLSSkip(Boolean(c))}>
+                        跳过 TLS 证书验证（仅 lab）
+                      </Checkbox>
+                    </Form.FormItem>
+                    <Form.FormItem label="出口网卡">
+                      <div className="la-egress-row">
+                        <Select
+                          value={editEgress}
+                          onChange={(v) => setEditEgress(String(v ?? ''))}
+                          options={egressOptions()}
+                          placeholder="系统默认"
+                          clearable
+                          filterable
+                          style={{ width: '100%' }}
+                          empty={ifacesLoading ? '加载网卡中…' : '暂无网卡数据'}
+                        />
+                        <Button
+                          size="small"
+                          variant="outline"
+                          loading={ifacesLoading}
+                          onClick={() => void loadInterfaces()}
+                        >
+                          刷新
+                        </Button>
+                      </div>
+                      {ifacesError ? (
+                        <Alert
+                          theme="warning"
+                          message={`无法从 Agent 拉取网卡：${ifacesError}`}
+                          style={{ marginTop: 8 }}
+                        />
+                      ) : null}
+                    </Form.FormItem>
+                  </Form>
+                </section>
+
+                <div className="la-drawer-actions">
+                  <Button theme="primary" loading={busy} onClick={() => void onSaveConnection()}>
+                    保存连接设置
+                  </Button>
+                  <Button variant="outline" onClick={() => void onShowInstall()}>
+                    {installInfo ? '刷新安装命令' : '显示安装命令'}
                   </Button>
                 </div>
-                <p className="la-page-desc" style={{ marginTop: 0 }}>
-                  在节点上以 root 执行；保留 Token / TLS / 配置。
-                </p>
-                <pre className="la-pre">{installInfo.upgrade_command}</pre>
+
+                {installInfo ? (
+                  <section className="la-panel-card la-panel-card-soft">
+                    <div className="la-panel-card-head row">
+                      <h3>一键安装</h3>
+                      <Button size="small" variant="outline" onClick={() => void copyInstall()}>
+                        {copied ? '已复制' : '复制'}
+                      </Button>
+                    </div>
+                    <pre className="la-pre">{installInfo.install_command}</pre>
+                    {installInfo.upgrade_command ? (
+                      <>
+                        <div className="la-panel-card-head row" style={{ marginTop: 16 }}>
+                          <h3>
+                            升级
+                            {installInfo.recommended_agent_version
+                              ? ` → ${installInfo.recommended_agent_version}`
+                              : ''}
+                          </h3>
+                          <Button size="small" variant="outline" onClick={() => void copyUpgrade()}>
+                            {copiedUpgrade ? '已复制' : '复制'}
+                          </Button>
+                        </div>
+                        <p className="la-page-desc" style={{ marginTop: 0 }}>
+                          节点上以 root 执行；保留 Token / TLS / 配置。
+                        </p>
+                        <pre className="la-pre">{installInfo.upgrade_command}</pre>
+                      </>
+                    ) : null}
+                  </section>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+            </Tabs.TabPanel>
 
-      <Divider />
+            <Tabs.TabPanel value="inbounds" label={`入站${attachedCount ? ` (${attachedCount})` : ''}`}>
+              <div className="la-drawer-panel">
+                <section className="la-panel-card">
+                  <div className="la-panel-card-head">
+                    <h3>关联入站</h3>
+                    <p>
+                      勾选后保存会<strong>自动下发并启动核心</strong>。
+                    </p>
+                  </div>
+                  {allInbounds.length === 0 ? (
+                    <Alert
+                      theme="info"
+                      message={
+                        <>
+                          无入站配置。请先在 <Link to="/inbounds">入站</Link> 创建。
+                        </>
+                      }
+                    />
+                  ) : (
+                    <div className="la-inbound-list">
+                      {allInbounds.map((inb) => {
+                        const port = Number(inb.params?.port) || 0
+                        const checked = attachedIds.has(inb.id)
+                        return (
+                          <label
+                            key={inb.id}
+                            className={`la-inbound-item${checked ? ' is-checked' : ''}${
+                              !inb.enabled ? ' is-disabled' : ''
+                            }`}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onChange={() => toggleInbound(inb.id)}
+                            />
+                            <div className="la-inbound-meta">
+                              <div className="name">
+                                {inb.name}
+                                {!inb.enabled ? (
+                                  <Tag size="small" variant="light" style={{ marginLeft: 8 }}>
+                                    已禁用
+                                  </Tag>
+                                ) : null}
+                              </div>
+                              <div className="sub">
+                                <code className="la-mono">{inb.protocol}</code>
+                                {port ? (
+                                  <>
+                                    {' '}
+                                    · 监听 <code className="la-mono">{port}</code>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <div className="la-drawer-actions" style={{ marginTop: 16 }}>
+                    <Button theme="primary" loading={busy} onClick={() => void onSaveInbounds()}>
+                      保存并下发
+                    </Button>
+                  </div>
+                </section>
 
-      <div className="la-drawer-section">
-        <h3>入站配置</h3>
-        <p className="la-page-desc" style={{ marginTop: 0 }}>
-          勾选后保存会<strong>自动下发到节点并启动核心</strong>。
-        </p>
-        {allInbounds.length === 0 ? (
-          <Alert
-            theme="info"
-            message={
-              <>
-                无入站配置。请先在 <Link to="/inbounds">入站</Link> 创建。
-              </>
-            }
-          />
-        ) : (
-          <div className="la-check-list">
-            {allInbounds.map((inb) => (
-              <Checkbox
-                key={inb.id}
-                checked={attachedIds.has(inb.id)}
-                onChange={() => toggleInbound(inb.id)}
-              >
-                {inb.name} <code className="la-mono">{inb.protocol}</code>
-                {!inb.enabled ? ' (已禁用)' : ''}
-              </Checkbox>
-            ))}
-          </div>
-        )}
-        <div style={{ marginTop: 12 }}>
-          <Button theme="primary" loading={busy} onClick={() => void onSaveInbounds()}>
-            保存并下发
-          </Button>
-        </div>
-      </div>
-
-      <Divider />
-
-      <div className="la-drawer-section">
-        <h3>管理操作</h3>
-        <Space breakLine>
-          <Button variant="outline" loading={busy} onClick={() => void onPreview()}>
-            预览配置
-          </Button>
-          <Button theme="primary" loading={busy} onClick={() => void runAction('start')}>
-            启动服务
-          </Button>
-          <Button theme="danger" variant="outline" loading={busy} onClick={() => void runAction('stop')}>
-            停止服务
-          </Button>
-          <Button variant="outline" loading={busy} onClick={() => void onMetrics()}>
-            刷新监控指标
-          </Button>
-        </Space>
-        {task ? (
-          <div className="la-task-box">
-            <strong>
-              任务 {task.id.slice(0, 8)}… — {taskKindLabel(task.type)} — {taskStatusLabel(task.status)}
-            </strong>
-            <ul>
-              {(task.results || []).map((r) => (
-                <li key={r.node_id}>
-                  {r.ok ? '✓' : '✗'} {r.message}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-      </div>
-
-      {metrics ? (
-        <>
-          <Divider />
-          <div className="la-drawer-section">
-            <h3>监控指标</h3>
-            <table className="la-kv">
-              <tbody>
-                <tr>
-                  <th>当前连接数</th>
-                  <td>{metrics.connections}</td>
-                </tr>
-                <tr>
-                  <th>上行流量</th>
-                  <td>{formatBytes(metrics.uplink_bytes)}</td>
-                </tr>
-                <tr>
-                  <th>下行流量</th>
-                  <td>{formatBytes(metrics.downlink_bytes)}</td>
-                </tr>
-                <tr>
-                  <th>CPU</th>
-                  <td>{metrics.cpu_percent?.toFixed?.(1) ?? metrics.cpu_percent}%</td>
-                </tr>
-                <tr>
-                  <th>内存 (RSS)</th>
-                  <td>{formatBytes(metrics.memory_rss_bytes)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </>
-      ) : null}
-
-      {preview ? (
-        <>
-          <Divider />
-          <div className="la-drawer-section">
-            <h3>配置文件预览</h3>
-            <pre className="la-pre">{preview}</pre>
-          </div>
-        </>
-      ) : null}
-
-      <Divider />
-
-      <div className="la-drawer-section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0 }}>节点日志</h3>
-          {!streaming ? (
-            <Button size="small" theme="primary" onClick={() => void startLogs()}>
-              开启实时日志
-            </Button>
-          ) : (
-            <Button size="small" variant="outline" onClick={stopLogs}>
-              停止实时日志
-            </Button>
-          )}
-        </div>
-        <div className="la-log-viewer">
-          {logs.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', opacity: 0.7 }}>
-              {streaming ? '正在等待日志输出…' : '未开启实时日志'}
-            </div>
-          ) : (
-            logs.map((line, i) => (
-              <div key={i} className="la-log-line">
-                {line}
+                {task ? (
+                  <section className="la-panel-card">
+                    <div className="la-panel-card-head">
+                      <h3>最近任务</h3>
+                    </div>
+                    <div className="la-task-box">
+                      <strong>
+                        {task.id.slice(0, 8)}… — {taskKindLabel(task.type)} —{' '}
+                        {taskStatusLabel(task.status)}
+                      </strong>
+                      <ul>
+                        {(task.results || []).map((r) => (
+                          <li key={r.node_id}>
+                            {r.ok ? '✓' : '✗'} {r.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </section>
+                ) : null}
               </div>
-            ))
-          )}
-          <div ref={logEndRef} />
+            </Tabs.TabPanel>
+
+            <Tabs.TabPanel value="ops" label="运维">
+              <div className="la-drawer-panel">
+                <section className="la-panel-card">
+                  <div className="la-panel-card-head">
+                    <h3>生命周期</h3>
+                    <p>启停核心、预览下发配置、刷新监控。</p>
+                  </div>
+                  <div className="la-ops-grid">
+                    <Button theme="primary" loading={busy} onClick={() => void runAction('start')}>
+                      启动服务
+                    </Button>
+                    <Button
+                      theme="danger"
+                      variant="outline"
+                      loading={busy}
+                      onClick={() => void runAction('stop')}
+                    >
+                      停止服务
+                    </Button>
+                    <Button variant="outline" loading={busy} onClick={() => void onPreview()}>
+                      预览配置
+                    </Button>
+                    <Button variant="outline" loading={busy} onClick={() => void onMetrics()}>
+                      刷新监控
+                    </Button>
+                    <Button
+                      variant="outline"
+                      loading={busy}
+                      onClick={() => void runAction('apply')}
+                    >
+                      重新下发
+                    </Button>
+                  </div>
+                  {task ? (
+                    <div className="la-task-box" style={{ marginTop: 12 }}>
+                      <strong>
+                        {task.id.slice(0, 8)}… — {taskKindLabel(task.type)} —{' '}
+                        {taskStatusLabel(task.status)}
+                      </strong>
+                      <ul>
+                        {(task.results || []).map((r) => (
+                          <li key={r.node_id}>
+                            {r.ok ? '✓' : '✗'} {r.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </section>
+
+                {metrics ? (
+                  <section className="la-panel-card">
+                    <div className="la-panel-card-head">
+                      <h3>监控指标</h3>
+                    </div>
+                    <div className="la-metrics-grid">
+                      <div className="item">
+                        <span className="label">连接</span>
+                        <span className="value">{metrics.connections}</span>
+                      </div>
+                      <div className="item">
+                        <span className="label">上行</span>
+                        <span className="value">{formatBytes(metrics.uplink_bytes)}</span>
+                      </div>
+                      <div className="item">
+                        <span className="label">下行</span>
+                        <span className="value">{formatBytes(metrics.downlink_bytes)}</span>
+                      </div>
+                      <div className="item">
+                        <span className="label">CPU</span>
+                        <span className="value">
+                          {metrics.cpu_percent?.toFixed?.(1) ?? metrics.cpu_percent}%
+                        </span>
+                      </div>
+                      <div className="item">
+                        <span className="label">内存</span>
+                        <span className="value">{formatBytes(metrics.memory_rss_bytes)}</span>
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
+
+                {preview ? (
+                  <section className="la-panel-card">
+                    <div className="la-panel-card-head">
+                      <h3>配置预览</h3>
+                    </div>
+                    <pre className="la-pre">{preview}</pre>
+                  </section>
+                ) : null}
+
+                <section className="la-panel-card">
+                  <div className="la-panel-card-head row">
+                    <div>
+                      <h3>节点日志</h3>
+                      <p style={{ margin: '4px 0 0' }}>实时流式拉取 Agent 日志。</p>
+                    </div>
+                    {!streaming ? (
+                      <Button size="small" theme="primary" onClick={() => void startLogs()}>
+                        开启
+                      </Button>
+                    ) : (
+                      <Button size="small" variant="outline" onClick={stopLogs}>
+                        停止
+                      </Button>
+                    )}
+                  </div>
+                  <div className="la-log-viewer">
+                    {logs.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '24px 0', opacity: 0.7 }}>
+                        {streaming ? '正在等待日志输出…' : '未开启实时日志'}
+                      </div>
+                    ) : (
+                      logs.map((line, i) => (
+                        <div key={i} className="la-log-line">
+                          {line}
+                        </div>
+                      ))
+                    )}
+                    <div ref={logEndRef} />
+                  </div>
+                </section>
+              </div>
+            </Tabs.TabPanel>
+          </Tabs>
         </div>
-      </div>
+      )}
     </Drawer>
   )
 }

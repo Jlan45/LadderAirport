@@ -87,6 +87,49 @@ func TestCollectEndpointsPrefersPublicAddress(t *testing.T) {
 	}
 }
 
+func TestCollectEndpointsAppliesPortMappings(t *testing.T) {
+	nodes := []store.Node{{
+		ID: "n1", Name: "nat",
+		Address: "10.0.0.8", PublicAddress: "203.0.113.9",
+		PortMappings: []store.PortMapping{
+			{ListenPort: 8443, PublicPort: 443},
+			{ListenPort: 9000, PublicPort: 19000},
+		},
+	}}
+	ins := map[string][]store.InboundConfig{
+		"n1": {
+			{
+				ID: "i1", Name: "hy2", Protocol: "hysteria2", Enabled: true,
+				Params: map[string]any{"port": float64(8443), "password": "p"},
+			},
+			{
+				ID: "i2", Name: "ss", Protocol: "shadowsocks", Enabled: true,
+				Params: map[string]any{"port": float64(9000), "method": "aes-128-gcm", "password": "p"},
+			},
+			{
+				ID: "i3", Name: "ss2", Protocol: "shadowsocks", Enabled: true,
+				// No mapping → keep listen port.
+				Params: map[string]any{"port": float64(10086), "method": "aes-128-gcm", "password": "p"},
+			},
+		},
+	}
+	eps, err := CollectEndpoints(nodes, ins, nil)
+	if err != nil || len(eps) != 3 {
+		t.Fatalf("eps=%v err=%v", eps, err)
+	}
+	want := map[string]int{"hy2": 443, "ss": 19000, "ss2": 10086}
+	for _, ep := range eps {
+		// Name is sanitized "nat-<inbound>"
+		key := ep.Inbound.Name
+		if ep.Port != want[key] {
+			t.Fatalf("%s port = %d, want %d (server=%s)", key, ep.Port, want[key], ep.Server)
+		}
+		if ep.Server != "203.0.113.9" {
+			t.Fatalf("%s server = %q", key, ep.Server)
+		}
+	}
+}
+
 func TestClientServerHost(t *testing.T) {
 	if got := clientServerHost(store.Node{Address: "10.0.0.1"}); got != "10.0.0.1" {
 		t.Fatalf("fallback = %q", got)

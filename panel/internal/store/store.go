@@ -136,6 +136,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN egress_interface TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN port_mappings_json TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alters {
@@ -210,9 +211,14 @@ func (s *Store) CreateNode(n *Node) error {
 	if n.Labels == nil {
 		n.Labels = []string{}
 	}
+	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	labelsJSON, err := marshalJSON(n.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
+	}
+	mappingsJSON, err := marshalJSON(n.PortMappings)
+	if err != nil {
+		return fmt.Errorf("marshal port_mappings: %w", err)
 	}
 	_, err = s.db.Exec(`
 		INSERT INTO nodes (
@@ -220,14 +226,14 @@ func (s *Store) CreateNode(n *Node) error {
 			status, last_seen_unix, config_hash,
 			runtime_state, agent_version, singbox_version,
 			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
-			metrics_at_unix, last_error, egress_interface, public_address,
+			metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json,
 			created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, boolToInt(n.TLSSkipVerify), n.CACertPEM,
 		n.Status, n.LastSeenUnix, n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
-		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress,
+		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress, mappingsJSON,
 		n.CreatedAtUnix, n.UpdatedAtUnix,
 	)
 	if err != nil {
@@ -244,9 +250,14 @@ func (s *Store) UpdateNode(n *Node) error {
 	if n.Labels == nil {
 		n.Labels = []string{}
 	}
+	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	labelsJSON, err := marshalJSON(n.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
+	}
+	mappingsJSON, err := marshalJSON(n.PortMappings)
+	if err != nil {
+		return fmt.Errorf("marshal port_mappings: %w", err)
 	}
 	res, err := s.db.Exec(`
 		UPDATE nodes SET
@@ -256,6 +267,7 @@ func (s *Store) UpdateNode(n *Node) error {
 			runtime_state = ?, agent_version = ?, singbox_version = ?,
 			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
 			metrics_at_unix = ?, last_error = ?, egress_interface = ?, public_address = ?,
+			port_mappings_json = ?,
 			updated_at_unix = ?
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
@@ -264,6 +276,7 @@ func (s *Store) UpdateNode(n *Node) error {
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
 		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress,
+		mappingsJSON,
 		n.UpdatedAtUnix, n.ID,
 	)
 	if err != nil {
@@ -302,13 +315,14 @@ func scanNode(row interface {
 }) (*Node, error) {
 	var n Node
 	var labelsJSON string
+	var mappingsJSON string
 	var tlsSkip int
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Address, &n.GRPCPort, &n.Token, &labelsJSON, &tlsSkip, &n.CACertPEM,
 		&n.Status, &n.LastSeenUnix, &n.ConfigHash,
 		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
 		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
-		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface, &n.PublicAddress,
+		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface, &n.PublicAddress, &mappingsJSON,
 		&n.CreatedAtUnix, &n.UpdatedAtUnix,
 	)
 	if err != nil {
@@ -319,6 +333,11 @@ func scanNode(row interface {
 	if err := unmarshalJSON(labelsJSON, &n.Labels); err != nil {
 		return nil, fmt.Errorf("unmarshal labels: %w", err)
 	}
+	n.PortMappings = []PortMapping{}
+	if err := unmarshalJSON(mappingsJSON, &n.PortMappings); err != nil {
+		return nil, fmt.Errorf("unmarshal port_mappings: %w", err)
+	}
+	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	return &n, nil
 }
 
@@ -326,7 +345,7 @@ const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, tls_sk
 	status, last_seen_unix, config_hash,
 	runtime_state, agent_version, singbox_version,
 	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
-	metrics_at_unix, last_error, egress_interface, public_address,
+	metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json,
 	created_at_unix, updated_at_unix`
 
 func (s *Store) GetNode(id string) (*Node, error) {

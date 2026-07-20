@@ -1,5 +1,15 @@
 package store
 
+// PortMapping rewrites an agent listen port to the client-facing NAT/public port.
+// Used only when rendering subscriptions; agent configs still use the inbound listen port.
+type PortMapping struct {
+	// ListenPort is the port the agent/inbound actually binds (params.port).
+	ListenPort int `json:"listen_port"`
+	// PublicPort is the external NAT-mapped port clients dial.
+	// 0 or equal to ListenPort means no rewrite.
+	PublicPort int `json:"public_port"`
+}
+
 type Node struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
@@ -10,8 +20,12 @@ type Node struct {
 	TLSSkipVerify bool     `json:"tls_skip_verify"`
 	CACertPEM     string   `json:"ca_cert_pem,omitempty"`
 	// PublicAddress is the client-facing host for subscriptions (Clash/sing-box server).
-	// Empty means fall back to Address. Host only — client ports come from inbound params.
+	// Empty means fall back to Address. Host only — client ports come from inbound params
+	// or PortMappings when listen/public ports differ.
 	PublicAddress string `json:"public_address"`
+	// PortMappings maps agent listen ports → external NAT ports for subscription clients.
+	// Empty means subscribe with the inbound listen port as-is.
+	PortMappings []PortMapping `json:"port_mappings"`
 	// EgressInterface is the host NIC name for sing-box direct bind_interface.
 	// Empty means OS default routing.
 	EgressInterface string `json:"egress_interface"`
@@ -32,6 +46,56 @@ type Node struct {
 	InboundCount   int     `json:"inbound_count,omitempty"` // filled by overview, not persisted
 	CreatedAtUnix  int64   `json:"created_at_unix"`
 	UpdatedAtUnix  int64   `json:"updated_at_unix"`
+}
+
+// NormalizePortMappings drops invalid/identity rows and keeps the last mapping per listen_port.
+func NormalizePortMappings(in []PortMapping) []PortMapping {
+	if len(in) == 0 {
+		return []PortMapping{}
+	}
+	// Preserve first-seen order; later rows with the same listen_port overwrite.
+	order := make([]int, 0, len(in))
+	byListen := map[int]PortMapping{}
+	for _, m := range in {
+		if m.ListenPort < 1 || m.ListenPort > 65535 {
+			continue
+		}
+		if m.PublicPort < 1 || m.PublicPort > 65535 || m.PublicPort == m.ListenPort {
+			// Invalid or identity: drop any previous mapping for this listen port.
+			if _, exists := byListen[m.ListenPort]; exists {
+				delete(byListen, m.ListenPort)
+				for i, p := range order {
+					if p == m.ListenPort {
+						order = append(order[:i], order[i+1:]...)
+						break
+					}
+				}
+			}
+			continue
+		}
+		if _, exists := byListen[m.ListenPort]; !exists {
+			order = append(order, m.ListenPort)
+		}
+		byListen[m.ListenPort] = PortMapping{ListenPort: m.ListenPort, PublicPort: m.PublicPort}
+	}
+	out := make([]PortMapping, 0, len(order))
+	for _, p := range order {
+		if m, ok := byListen[p]; ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// MapPublicPort returns the client-facing port for an agent listen port.
+// Falls back to listenPort when no mapping is configured.
+func MapPublicPort(mappings []PortMapping, listenPort int) int {
+	for _, m := range mappings {
+		if m.ListenPort == listenPort && m.PublicPort >= 1 && m.PublicPort <= 65535 {
+			return m.PublicPort
+		}
+	}
+	return listenPort
 }
 
 type InboundConfig struct {

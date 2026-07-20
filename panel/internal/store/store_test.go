@@ -333,3 +333,67 @@ func TestNodePublicAddress(t *testing.T) {
 		t.Fatalf("expected empty PublicAddress, got %q", got.PublicAddress)
 	}
 }
+
+func TestNodePortMappings(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{
+		Name:     "nat-map",
+		Address:  "10.0.0.8",
+		GRPCPort: 50051,
+		PublicAddress: "203.0.113.9",
+		PortMappings: []PortMapping{
+			{ListenPort: 8443, PublicPort: 443},
+			{ListenPort: 9000, PublicPort: 9000}, // identity dropped
+			{ListenPort: -1, PublicPort: 1},      // invalid dropped
+			{ListenPort: 1000, PublicPort: 2000},
+			{ListenPort: 1000, PublicPort: 3000}, // last wins
+		},
+	}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	got, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if len(got.PortMappings) != 2 {
+		t.Fatalf("PortMappings = %+v, want 2 entries", got.PortMappings)
+	}
+	if got.PortMappings[0] != (PortMapping{ListenPort: 8443, PublicPort: 443}) {
+		t.Fatalf("first = %+v", got.PortMappings[0])
+	}
+	if got.PortMappings[1] != (PortMapping{ListenPort: 1000, PublicPort: 3000}) {
+		t.Fatalf("second = %+v", got.PortMappings[1])
+	}
+	if MapPublicPort(got.PortMappings, 8443) != 443 {
+		t.Fatalf("map 8443")
+	}
+	if MapPublicPort(got.PortMappings, 5555) != 5555 {
+		t.Fatalf("fallback")
+	}
+
+	// Clear mappings
+	n.PortMappings = nil
+	if err := s.UpdateNode(n); err != nil {
+		t.Fatalf("UpdateNode clear: %v", err)
+	}
+	got, err = s.GetNode(n.ID)
+	if err != nil {
+		t.Fatalf("GetNode clear: %v", err)
+	}
+	if len(got.PortMappings) != 0 {
+		t.Fatalf("expected empty mappings, got %+v", got.PortMappings)
+	}
+}
+
+func TestNormalizePortMappings(t *testing.T) {
+	in := []PortMapping{
+		{ListenPort: 1, PublicPort: 2},
+		{ListenPort: 3, PublicPort: 3},
+		{ListenPort: 0, PublicPort: 9},
+	}
+	out := NormalizePortMappings(in)
+	if len(out) != 1 || out[0].ListenPort != 1 || out[0].PublicPort != 2 {
+		t.Fatalf("%+v", out)
+	}
+}

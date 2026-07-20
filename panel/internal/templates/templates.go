@@ -28,7 +28,7 @@ var builtins = []Template{
 		Name:     "Shadowsocks",
 		Fields: []Field{
 			{Name: "listen", Label: "Listen", Type: "string", Required: false, Default: "0.0.0.0", Description: "Listen address"},
-			{Name: "port", Label: "Port", Type: "int", Required: true, Description: "Listen port"},
+			{Name: "port", Label: "Port", Type: "int", Required: true, Description: "Agent listen port (NAT 外端口在节点「端口映射」配置)"},
 			{
 				Name:     "method",
 				Label:    "Method",
