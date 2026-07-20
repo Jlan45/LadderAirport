@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
@@ -181,7 +183,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Profile-Update-Interval", "24")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, subFilename(sub)))
+	w.Header().Set("Content-Disposition", contentDisposition(subFilename(sub)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 }
@@ -253,10 +255,93 @@ func (s *Server) subURL(r *http.Request, token string) string {
 }
 
 func subFilename(sub *store.Subscription) string {
-	if sub.Format == "clash" {
-		return "clash.yaml"
+	base := sanitizeFilename(sub.Name)
+	if base == "" {
+		base = "subscription"
 	}
-	return "singbox.json"
+	switch sub.Format {
+	case "clash":
+		return base + ".yaml"
+	case "singbox":
+		return base + ".json"
+	default:
+		return base + ".txt"
+	}
+}
+
+// contentDisposition builds a Content-Disposition value with ASCII fallback + UTF-8 filename*.
+func contentDisposition(filename string) string {
+	ascii := asciiFilenameFallback(filename)
+	// RFC 5987 filename*
+	encoded := url.PathEscape(filename)
+	// PathEscape uses %20 for space; RFC 5987 prefers %20 which is fine.
+	return fmt.Sprintf(`attachment; filename="%s"; filename*=UTF-8''%s`, ascii, encoded)
+}
+
+func asciiFilenameFallback(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if r > unicode.MaxASCII || r < 32 || r == '"' || r == '\\' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	out := strings.Trim(b.String(), ".-_ ")
+	if out == "" {
+		// Keep extension if present.
+		if i := strings.LastIndex(name, "."); i >= 0 && i < len(name)-1 {
+			ext := name[i:]
+			safeExt := ""
+			for _, r := range ext {
+				if r > unicode.MaxASCII || r < 32 {
+					continue
+				}
+				safeExt += string(r)
+			}
+			if safeExt != "" && safeExt != "." {
+				return "subscription" + safeExt
+			}
+		}
+		return "subscription.bin"
+	}
+	return out
+}
+
+// sanitizeFilename keeps a safe basename for Content-Disposition.
+// Strips path separators and control chars; collapses whitespace to '-'.
+func sanitizeFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(name))
+	prevDash := false
+	for _, r := range name {
+		switch {
+		case r < 32 || r == 127:
+			continue
+		case r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' ||
+			r == '"' || r == '<' || r == '>' || r == '|' || r == '\'' || r == ';':
+			continue
+		case r == ' ' || r == '\t':
+			if !prevDash && b.Len() > 0 {
+				b.WriteByte('-')
+				prevDash = true
+			}
+		default:
+			b.WriteRune(r)
+			prevDash = false
+		}
+	}
+	out := strings.Trim(b.String(), ".-_")
+	// Avoid overly long filenames (clients / FS limits).
+	runes := []rune(out)
+	if len(runes) > 80 {
+		out = string(runes[:80])
+		out = strings.TrimRight(out, ".-_")
+	}
+	return out
 }
 
 func randomToken(nBytes int) (string, error) {
