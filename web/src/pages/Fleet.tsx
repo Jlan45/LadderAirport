@@ -85,18 +85,25 @@ export default function Fleet() {
     }
   }, [])
 
-  const refreshLive = useCallback(async () => {
-    setBusy(true)
+  // silent=true: background auto-refresh — no global busy spinner, no success toast
+  const refreshLive = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true
+    if (!silent) setBusy(true)
     try {
       const data = await fleetRefresh()
       setOv(data)
-      MessagePlugin.success(
-        `已刷新 ${data.total_nodes} 个节点 · ${formatTime(data.refreshed_at)}`,
-      )
+      if (!silent) {
+        MessagePlugin.success(
+          `已刷新 ${data.total_nodes} 个节点 · ${formatTime(data.refreshed_at)}`,
+        )
+      }
     } catch (err) {
-      MessagePlugin.error(err instanceof Error ? err.message : '刷新失败')
+      // Auto-refresh failures stay quiet to avoid spamming toasts every 15s
+      if (!silent) {
+        MessagePlugin.error(err instanceof Error ? err.message : '刷新失败')
+      }
     } finally {
-      setBusy(false)
+      if (!silent) setBusy(false)
     }
   }, [])
 
@@ -115,7 +122,7 @@ export default function Fleet() {
   useEffect(() => {
     if (!auto) return
     const t = window.setInterval(() => {
-      void refreshLive()
+      void refreshLive({ silent: true })
     }, 15000)
     return () => window.clearInterval(t)
   }, [auto, refreshLive])
@@ -723,7 +730,7 @@ export default function Fleet() {
                 node={n}
                 recommended={recommended}
                 checked={selected.has(n.id)}
-                busy={actionId === n.id || busy}
+                busy={actionId === n.id}
                 onToggle={() => toggle(n.id)}
                 onDetail={() => openDetail(n.id)}
                 onApply={() => void runOne(n.id, 'apply')}
