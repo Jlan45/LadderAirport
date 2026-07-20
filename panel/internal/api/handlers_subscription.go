@@ -230,7 +230,7 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		// EndpointsForSources soft-fails individual sources.
 		external, _ = s.Aggregator.EndpointsForSources(ctx, sources)
 	}
-	eps := subscription.MergeEndpoints(local, external)
+	eps := subscription.MergeEndpointsContext(ctx, local, external)
 	if len(eps) == 0 {
 		return nil, "", fmt.Errorf("no proxy endpoints (check node address, inbound attachments, and external sources)")
 	}
