@@ -13,15 +13,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ProxyEndpoint is one client outbound derived from a node-bound inbound.
+// ProxyEndpoint is one client outbound derived from a node-bound inbound
+// or normalized from an external subscription source.
 type ProxyEndpoint struct {
 	Name     string
-	Node     store.Node
-	Inbound  store.InboundConfig
+	Node     store.Node          // zero for external sources
+	Inbound  store.InboundConfig // zero for external sources
 	Server   string
 	Port     int
 	Protocol string
 	Params   map[string]any
+	SourceID string // "" = local inventory; external source id when merged
 }
 
 // clientServerHost returns the host clients should dial.
@@ -107,7 +109,7 @@ func CollectEndpointsFromAttachments(nodes []store.Node, nodeAttachments map[str
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no proxy endpoints (check node address and inbound attachments)")
+		return []ProxyEndpoint{}, nil
 	}
 	return out, nil
 }
@@ -296,8 +298,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 				sn = "www.microsoft.com"
 			}
 			p["servername"] = sn
-			priv, _ := paramString(ep.Params, "private_key")
-			pub, err := realityPublicKey(priv)
+			pub, err := resolveRealityPublicKey(ep.Params)
 			if err != nil {
 				return nil, err
 			}
@@ -446,8 +447,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 				"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 			}
 		case "reality":
-			priv, _ := paramString(ep.Params, "private_key")
-			pub, err := realityPublicKey(priv)
+			pub, err := resolveRealityPublicKey(ep.Params)
 			if err != nil {
 				return nil, err
 			}
@@ -578,6 +578,17 @@ func realityPublicKey(privateKeyB64 string) (string, error) {
 		return "", fmt.Errorf("reality private key: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()), nil
+}
+
+
+// resolveRealityPublicKey prefers an already-known public_key (external sources)
+// and falls back to deriving from private_key (local inventory).
+func resolveRealityPublicKey(params map[string]any) (string, error) {
+	if pub, ok := paramString(params, "public_key"); ok {
+		return pub, nil
+	}
+	priv, _ := paramString(params, "private_key")
+	return realityPublicKey(priv)
 }
 
 func sanitizeName(s string) string {

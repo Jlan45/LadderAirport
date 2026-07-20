@@ -116,6 +116,32 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_config_snapshots_node_created
 			ON config_snapshots(node_id, created_at_unix DESC)`,
+		`CREATE TABLE IF NOT EXISTS external_sources (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			url TEXT NOT NULL,
+			headers_json TEXT NOT NULL DEFAULT '{}',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			refresh_interval_sec INTEGER NOT NULL DEFAULT 0,
+			last_fetch_unix INTEGER NOT NULL DEFAULT 0,
+			last_success_unix INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			content_type TEXT NOT NULL DEFAULT '',
+			cached_body TEXT NOT NULL DEFAULT '',
+			cached_proxy_count INTEGER NOT NULL DEFAULT 0,
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS subscription_external_sources (
+			subscription_id TEXT NOT NULL,
+			external_source_id TEXT NOT NULL,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (subscription_id, external_source_id),
+			FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+			FOREIGN KEY (external_source_id) REFERENCES external_sources(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sub_ext_src_sub
+			ON subscription_external_sources(subscription_id, sort_order)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -1020,6 +1046,285 @@ func scanSubscription(row interface {
 		return nil, fmt.Errorf("unmarshal inbound_ids: %w", err)
 	}
 	return &sub, nil
+}
+
+
+// --- External sources ---
+
+func (s *Store) CreateExternalSource(src *ExternalSource) error {
+	if src == nil {
+		return fmt.Errorf("external source is nil")
+	}
+	if strings.TrimSpace(src.Name) == "" {
+		return fmt.Errorf("name required")
+	}
+	if strings.TrimSpace(src.URL) == "" {
+		return fmt.Errorf("url required")
+	}
+	if src.ID == "" {
+		src.ID = newID()
+	}
+	now := nowUnix()
+	if src.CreatedAtUnix == 0 {
+		src.CreatedAtUnix = now
+	}
+	src.UpdatedAtUnix = now
+	if src.Headers == nil {
+		src.Headers = map[string]string{}
+	}
+	headersJSON, err := marshalJSON(src.Headers)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+		INSERT INTO external_sources (
+			id, name, url, headers_json, enabled, refresh_interval_sec,
+			last_fetch_unix, last_success_unix, last_error, content_type,
+			cached_body, cached_proxy_count, created_at_unix, updated_at_unix
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		src.ID, src.Name, src.URL, headersJSON, boolToInt(src.Enabled), src.RefreshIntervalSec,
+		src.LastFetchUnix, src.LastSuccessUnix, src.LastError, src.ContentType,
+		src.CachedBody, src.CachedProxyCount, src.CreatedAtUnix, src.UpdatedAtUnix,
+	)
+	if err != nil {
+		return fmt.Errorf("create external source: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateExternalSource(src *ExternalSource) error {
+	if src == nil || src.ID == "" {
+		return fmt.Errorf("external source id required")
+	}
+	existing, err := s.GetExternalSource(src.ID)
+	if err != nil {
+		return err
+	}
+	urlChanged := strings.TrimSpace(existing.URL) != strings.TrimSpace(src.URL)
+	src.UpdatedAtUnix = nowUnix()
+	if src.Headers == nil {
+		src.Headers = map[string]string{}
+	}
+	headersJSON, err := marshalJSON(src.Headers)
+	if err != nil {
+		return err
+	}
+	if urlChanged {
+		src.CachedBody = ""
+		src.CachedProxyCount = 0
+		src.ContentType = ""
+		src.LastSuccessUnix = 0
+		src.LastError = ""
+		src.LastFetchUnix = 0
+	} else {
+		src.CachedBody = existing.CachedBody
+		src.CachedProxyCount = existing.CachedProxyCount
+		src.ContentType = existing.ContentType
+		src.LastSuccessUnix = existing.LastSuccessUnix
+		src.LastError = existing.LastError
+		src.LastFetchUnix = existing.LastFetchUnix
+	}
+	res, err := s.db.Exec(`
+		UPDATE external_sources SET
+			name=?, url=?, headers_json=?, enabled=?, refresh_interval_sec=?,
+			last_fetch_unix=?, last_success_unix=?, last_error=?, content_type=?,
+			cached_body=?, cached_proxy_count=?, updated_at_unix=?
+		WHERE id=?`,
+		src.Name, src.URL, headersJSON, boolToInt(src.Enabled), src.RefreshIntervalSec,
+		src.LastFetchUnix, src.LastSuccessUnix, src.LastError, src.ContentType,
+		src.CachedBody, src.CachedProxyCount, src.UpdatedAtUnix, src.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update external source: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("external source not found: %s", src.ID)
+	}
+	return nil
+}
+
+func (s *Store) DeleteExternalSource(id string) error {
+	_, _ = s.db.Exec(`DELETE FROM subscription_external_sources WHERE external_source_id = ?`, id)
+	res, err := s.db.Exec(`DELETE FROM external_sources WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete external source: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("external source not found: %s", id)
+	}
+	return nil
+}
+
+func (s *Store) GetExternalSource(id string) (*ExternalSource, error) {
+	row := s.db.QueryRow(`
+		SELECT id, name, url, headers_json, enabled, refresh_interval_sec,
+			last_fetch_unix, last_success_unix, last_error, content_type,
+			cached_body, cached_proxy_count, created_at_unix, updated_at_unix
+		FROM external_sources WHERE id = ?`, id)
+	return scanExternalSource(row)
+}
+
+// ListExternalSources returns sources without cached body (lighter list payloads).
+func (s *Store) ListExternalSources() ([]ExternalSource, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, url, headers_json, enabled, refresh_interval_sec,
+			last_fetch_unix, last_success_unix, last_error, content_type,
+			'' AS cached_body, cached_proxy_count, created_at_unix, updated_at_unix
+		FROM external_sources ORDER BY created_at_unix ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list external sources: %w", err)
+	}
+	defer rows.Close()
+	var out []ExternalSource
+	for rows.Next() {
+		src, err := scanExternalSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *src)
+	}
+	if out == nil {
+		out = []ExternalSource{}
+	}
+	return out, rows.Err()
+}
+
+// SaveExternalSourceCache writes fetch outcome + optional successful body.
+func (s *Store) SaveExternalSourceCache(id, body, contentType string, proxyCount int, fetchUnix, successUnix int64, lastErr string) error {
+	if id == "" {
+		return fmt.Errorf("external source id required")
+	}
+	res, err := s.db.Exec(`
+		UPDATE external_sources SET
+			last_fetch_unix=?, last_success_unix=?, last_error=?,
+			content_type=?, cached_body=?, cached_proxy_count=?, updated_at_unix=?
+		WHERE id=?`,
+		fetchUnix, successUnix, lastErr, contentType, body, proxyCount, nowUnix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("save external source cache: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("external source not found: %s", id)
+	}
+	return nil
+}
+
+// SetSubscriptionExternalSources replaces attached external sources (order = index).
+func (s *Store) SetSubscriptionExternalSources(subID string, sourceIDs []string) error {
+	if subID == "" {
+		return fmt.Errorf("subscription id required")
+	}
+	if _, err := s.GetSubscription(subID); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM subscription_external_sources WHERE subscription_id = ?`, subID); err != nil {
+		return fmt.Errorf("clear subscription external sources: %w", err)
+	}
+	seen := map[string]bool{}
+	for i, sid := range sourceIDs {
+		sid = strings.TrimSpace(sid)
+		if sid == "" || seen[sid] {
+			continue
+		}
+		seen[sid] = true
+		var one int
+		if err := tx.QueryRow(`SELECT 1 FROM external_sources WHERE id = ?`, sid).Scan(&one); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("external source not found: %s", sid)
+			}
+			return err
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO subscription_external_sources (subscription_id, external_source_id, sort_order)
+			VALUES (?, ?, ?)`, subID, sid, i); err != nil {
+			return fmt.Errorf("attach external source: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListExternalSourceIDsForSubscription(subID string) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT external_source_id FROM subscription_external_sources
+		WHERE subscription_id = ? ORDER BY sort_order ASC, external_source_id ASC`, subID)
+	if err != nil {
+		return nil, fmt.Errorf("list subscription external source ids: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	if out == nil {
+		out = []string{}
+	}
+	return out, rows.Err()
+}
+
+// ListExternalSourcesForSubscription returns attached sources (with cache body) in join order.
+func (s *Store) ListExternalSourcesForSubscription(subID string) ([]ExternalSource, error) {
+	rows, err := s.db.Query(`
+		SELECT e.id, e.name, e.url, e.headers_json, e.enabled, e.refresh_interval_sec,
+			e.last_fetch_unix, e.last_success_unix, e.last_error, e.content_type,
+			e.cached_body, e.cached_proxy_count, e.created_at_unix, e.updated_at_unix
+		FROM subscription_external_sources j
+		JOIN external_sources e ON e.id = j.external_source_id
+		WHERE j.subscription_id = ?
+		ORDER BY j.sort_order ASC, e.id ASC`, subID)
+	if err != nil {
+		return nil, fmt.Errorf("list subscription external sources: %w", err)
+	}
+	defer rows.Close()
+	var out []ExternalSource
+	for rows.Next() {
+		src, err := scanExternalSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *src)
+	}
+	if out == nil {
+		out = []ExternalSource{}
+	}
+	return out, rows.Err()
+}
+
+func scanExternalSource(row interface {
+	Scan(dest ...any) error
+}) (*ExternalSource, error) {
+	var src ExternalSource
+	var headersJSON string
+	var enabled int
+	err := row.Scan(
+		&src.ID, &src.Name, &src.URL, &headersJSON, &enabled, &src.RefreshIntervalSec,
+		&src.LastFetchUnix, &src.LastSuccessUnix, &src.LastError, &src.ContentType,
+		&src.CachedBody, &src.CachedProxyCount, &src.CreatedAtUnix, &src.UpdatedAtUnix,
+	)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("external source not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	src.Enabled = enabled != 0
+	src.Headers = map[string]string{}
+	if err := unmarshalJSON(headersJSON, &src.Headers); err != nil {
+		return nil, fmt.Errorf("unmarshal headers: %w", err)
+	}
+	return &src, nil
 }
 
 // --- Snapshots ---

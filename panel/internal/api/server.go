@@ -15,6 +15,7 @@ import (
 	"github.com/ladderairport/panel/internal/batch"
 	"github.com/ladderairport/panel/internal/nodeclient"
 	"github.com/ladderairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/subscription"
 	"github.com/ladderairport/panel/web"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
@@ -40,6 +41,10 @@ type Server struct {
 	Store  *store.Store
 	Runner *batch.Runner
 	Secret []byte // JWT HMAC secret
+
+	// Aggregator merges external subscription sources into /sub output.
+	// Optional; when nil, subscriptions only include local endpoints.
+	Aggregator *subscription.Aggregator
 
 	// Dial is used for probe/metrics/logs. When nil, defaults to nodeclient.Dial.
 	Dial LiveDialFunc
@@ -180,6 +185,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/subscriptions/{id}", s.handleUpdateSubscription)
 	mux.HandleFunc("DELETE /api/v1/subscriptions/{id}", s.handleDeleteSubscription)
 	mux.HandleFunc("GET /api/v1/subscriptions/{id}/preview", s.handlePreviewSubscription)
+
+	mux.HandleFunc("GET /api/v1/external-sources", s.handleListExternalSources)
+	mux.HandleFunc("POST /api/v1/external-sources", s.handleCreateExternalSource)
+	mux.HandleFunc("PUT /api/v1/external-sources/{id}", s.handleUpdateExternalSource)
+	mux.HandleFunc("DELETE /api/v1/external-sources/{id}", s.handleDeleteExternalSource)
+	mux.HandleFunc("POST /api/v1/external-sources/{id}/refresh", s.handleRefreshExternalSource)
+	mux.HandleFunc("GET /api/v1/external-sources/{id}/preview", s.handlePreviewExternalSource)
 }
 
 func (s *Server) liveDial(ctx context.Context, n store.Node, token string) (NodeLive, error) {

@@ -14,6 +14,7 @@ import (
 	"github.com/ladderairport/panel/internal/api"
 	"github.com/ladderairport/panel/internal/batch"
 	"github.com/ladderairport/panel/internal/store"
+	"github.com/ladderairport/panel/internal/subscription"
 	"github.com/ladderairport/panel/internal/version"
 )
 
@@ -81,10 +82,12 @@ func main() {
 		runner.MaxConcurrency = settings.MaxConcurrency
 	}
 
+	agg := subscription.NewAggregator(st)
 	srv := &api.Server{
-		Store:  st,
-		Runner: runner,
-		Secret: secret,
+		Store:      st,
+		Runner:     runner,
+		Secret:     secret,
+		Aggregator: agg,
 	}
 
 	addr := *listen
@@ -122,6 +125,12 @@ func main() {
 	} else if *bootstrap {
 		log.Printf("bootstrap-retry: disabled (-bootstrap-retry=false)")
 	}
+
+	// Background refresh of external subscription sources.
+	go func() {
+		log.Printf("external-sources: background refresh enabled (interval=%s)", subscription.BackgroundTick)
+		agg.RunBackground(context.Background(), subscription.BackgroundTick)
+	}()
 
 	log.Printf("panel listening on %s (db=%s version=%s)", addr, *dbPath, version.Version)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {

@@ -166,6 +166,25 @@ type Subscription struct {
 	UpdatedAtUnix int64    `json:"updated_at_unix"`
 }
 
+// ExternalSource is a remote subscription URL that can be attached to panel subscriptions.
+// CachedBody holds the last successful raw fetch (not exported in list JSON).
+type ExternalSource struct {
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	URL                string            `json:"url"`
+	Headers            map[string]string `json:"headers,omitempty"`
+	Enabled            bool              `json:"enabled"`
+	RefreshIntervalSec int               `json:"refresh_interval_sec"` // 0 = default (24h)
+	LastFetchUnix      int64             `json:"last_fetch_unix"`
+	LastSuccessUnix    int64             `json:"last_success_unix"`
+	LastError          string            `json:"last_error,omitempty"`
+	ContentType        string            `json:"content_type,omitempty"` // clash_yaml | share_links | singbox_json
+	CachedProxyCount   int               `json:"cached_proxy_count"`
+	CachedBody         string            `json:"-"`
+	CreatedAtUnix      int64             `json:"created_at_unix"`
+	UpdatedAtUnix      int64             `json:"updated_at_unix"`
+}
+
 type ConfigSnapshot struct {
 	ID            string `json:"id"`
 	NodeID        string `json:"node_id"`

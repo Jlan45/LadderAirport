@@ -181,8 +181,25 @@ export interface Subscription {
   format: 'clash' | 'singbox' | string
   token: string
   inbound_ids: string[]
+  external_source_ids?: string[]
   enabled: boolean
   url?: string
+  created_at_unix: number
+  updated_at_unix: number
+}
+
+export interface ExternalSource {
+  id: string
+  name: string
+  url: string
+  headers?: Record<string, string>
+  enabled: boolean
+  refresh_interval_sec: number
+  last_fetch_unix: number
+  last_success_unix: number
+  last_error?: string
+  content_type?: string
+  cached_proxy_count: number
   created_at_unix: number
   updated_at_unix: number
 }
@@ -549,6 +566,7 @@ export function createSubscription(body: {
   name: string
   format: string
   inbound_ids?: string[]
+  external_source_ids?: string[]
   enabled?: boolean
 }): Promise<Subscription> {
   return request('POST', '/subscriptions', body)
@@ -560,6 +578,7 @@ export function updateSubscription(
     name?: string
     format?: string
     inbound_ids?: string[]
+    external_source_ids?: string[]
     enabled?: boolean
     rotate_token?: boolean
   },
@@ -580,4 +599,50 @@ export async function previewSubscription(id: string): Promise<string> {
     throw new ApiError(res.status, text || res.statusText)
   }
   return res.text()
+}
+
+// --- External subscription sources ---
+
+export function listExternalSources(): Promise<ExternalSource[]> {
+  return request('GET', '/external-sources')
+}
+
+export function createExternalSource(body: {
+  name: string
+  url: string
+  headers?: Record<string, string>
+  enabled?: boolean
+  refresh_interval_sec?: number
+}): Promise<ExternalSource> {
+  return request('POST', '/external-sources', body)
+}
+
+export function updateExternalSource(
+  id: string,
+  body: {
+    name?: string
+    url?: string
+    headers?: Record<string, string>
+    enabled?: boolean
+    refresh_interval_sec?: number
+  },
+): Promise<ExternalSource> {
+  return request('PUT', `/external-sources/${id}`, body)
+}
+
+export function deleteExternalSource(id: string): Promise<void> {
+  return request('DELETE', `/external-sources/${id}`)
+}
+
+export function refreshExternalSource(id: string): Promise<ExternalSource> {
+  return request('POST', `/external-sources/${id}/refresh`)
+}
+
+export function previewExternalSource(id: string): Promise<{
+  count: number
+  names: string[]
+  warnings?: string[]
+  source: Partial<ExternalSource>
+}> {
+  return request('GET', `/external-sources/${id}/preview`)
 }

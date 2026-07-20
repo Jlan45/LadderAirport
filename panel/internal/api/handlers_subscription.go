@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -27,10 +28,11 @@ func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request)
 }
 
 type createSubBody struct {
-	Name       string   `json:"name"`
-	Format     string   `json:"format"`
-	InboundIDs []string `json:"inbound_ids"`
-	Enabled    *bool    `json:"enabled"`
+	Name              string   `json:"name"`
+	Format            string   `json:"format"`
+	InboundIDs        []string `json:"inbound_ids"`
+	ExternalSourceIDs []string `json:"external_source_ids"`
+	Enabled           *bool    `json:"enabled"`
 }
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +70,12 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if body.ExternalSourceIDs != nil {
+		if err := s.Store.SetSubscriptionExternalSources(sub.ID, body.ExternalSourceIDs); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	writeJSON(w, http.StatusCreated, s.enrichSub(r, sub))
 }
 
@@ -83,11 +91,12 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var body struct {
-		Name       *string  `json:"name"`
-		Format     *string  `json:"format"`
-		InboundIDs []string `json:"inbound_ids"`
-		Enabled    *bool    `json:"enabled"`
-		Rotate     bool     `json:"rotate_token"`
+		Name              *string  `json:"name"`
+		Format            *string  `json:"format"`
+		InboundIDs        []string `json:"inbound_ids"`
+		ExternalSourceIDs []string `json:"external_source_ids"`
+		Enabled           *bool    `json:"enabled"`
+		Rotate            bool     `json:"rotate_token"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -122,6 +131,12 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if body.ExternalSourceIDs != nil {
+		if err := s.Store.SetSubscriptionExternalSources(id, body.ExternalSourceIDs); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	updated, _ := s.Store.GetSubscription(id)
 	writeJSON(w, http.StatusOK, s.enrichSub(r, updated))
 }
@@ -150,7 +165,7 @@ func (s *Server) handlePreviewSubscription(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	body, ctype, err := s.renderSubscription(sub)
+	body, ctype, err := s.renderSubscription(r.Context(), sub)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -176,7 +191,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusForbidden, "subscription disabled")
 		return
 	}
-	body, ctype, err := s.renderSubscription(sub)
+	body, ctype, err := s.renderSubscription(r.Context(), sub)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -188,7 +203,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	_, _ = w.Write(body)
 }
 
-func (s *Server) renderSubscription(sub *store.Subscription) ([]byte, string, error) {
+func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription) ([]byte, string, error) {
 	nodes, err := s.Store.ListNodes()
 	if err != nil {
 		return nil, "", err
@@ -201,10 +216,25 @@ func (s *Server) renderSubscription(sub *store.Subscription) ([]byte, string, er
 		}
 		nodeAttachments[n.ID] = atts
 	}
-	eps, err := subscription.CollectEndpointsFromAttachments(nodes, nodeAttachments, sub.InboundIDs)
+	local, err := subscription.CollectEndpointsFromAttachments(nodes, nodeAttachments, sub.InboundIDs)
 	if err != nil {
 		return nil, "", err
 	}
+
+	var external []subscription.ProxyEndpoint
+	if s.Aggregator != nil {
+		sources, err := s.Store.ListExternalSourcesForSubscription(sub.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		// EndpointsForSources soft-fails individual sources.
+		external, _ = s.Aggregator.EndpointsForSources(ctx, sources)
+	}
+	eps := subscription.MergeEndpoints(local, external)
+	if len(eps) == 0 {
+		return nil, "", fmt.Errorf("no proxy endpoints (check node address, inbound attachments, and external sources)")
+	}
+
 	switch sub.Format {
 	case "clash":
 		b, err := subscription.RenderClash(eps)
@@ -219,13 +249,19 @@ func (s *Server) renderSubscription(sub *store.Subscription) ([]byte, string, er
 
 type subView struct {
 	store.Subscription
-	URL string `json:"url"`
+	URL               string   `json:"url"`
+	ExternalSourceIDs []string `json:"external_source_ids"`
 }
 
 func (s *Server) enrichSub(r *http.Request, sub *store.Subscription) subView {
+	ids, err := s.Store.ListExternalSourceIDsForSubscription(sub.ID)
+	if err != nil || ids == nil {
+		ids = []string{}
+	}
 	return subView{
-		Subscription: *sub,
-		URL:          s.subURL(r, sub.Token),
+		Subscription:      *sub,
+		URL:               s.subURL(r, sub.Token),
+		ExternalSourceIDs: ids,
 	}
 }
 
