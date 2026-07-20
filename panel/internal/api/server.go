@@ -19,7 +19,7 @@ import (
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
 
-// NodeLive is the subset of nodeclient used for probe/metrics/logs.
+// NodeLive is the subset of nodeclient used for probe/metrics/logs/upgrade.
 // *nodeclient.Client implements this interface.
 type NodeLive interface {
 	Close() error
@@ -27,6 +27,7 @@ type NodeLive interface {
 	GetStatus(ctx context.Context) (*agentv1.GetStatusResponse, error)
 	GetMetrics(ctx context.Context) (*agentv1.GetMetricsResponse, error)
 	ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesResponse, error)
+	UpgradeAgent(ctx context.Context, version, repo, downloadURL, sha256 string) (*agentv1.UpgradeAgentResponse, error)
 	StreamLogs(ctx context.Context, level string, tail int32) (agentv1.AgentControl_StreamLogsClient, error)
 }
 
@@ -160,6 +161,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/nodes/{id}/stop", s.handleNodeStop)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/metrics", s.handleNodeMetrics)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/interfaces", s.handleNodeInterfaces)
+	mux.HandleFunc("POST /api/v1/nodes/{id}/upgrade", s.handleNodeUpgrade)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/logs", s.handleNodeLogs)
 
 	mux.HandleFunc("POST /api/v1/batch/apply", s.handleBatchApply)

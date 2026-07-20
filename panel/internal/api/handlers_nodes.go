@@ -762,3 +762,88 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 }
+
+// handleNodeUpgrade asks the agent to stage a release binary; the node root helper
+// replaces the binary and restarts ladder-agent. Panel should re-probe afterwards.
+// POST /api/v1/nodes/{id}/upgrade
+// Body (optional): {"version":"v0.7.2","repo":"Jlan45/LadderAirport","download_url":"","sha256":""}
+func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
+	id := pathID(r)
+	node, err := s.Store.GetNode(id)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var body struct {
+		Version     string `json:"version"`
+		Repo        string `json:"repo"`
+		DownloadURL string `json:"download_url"`
+		SHA256      string `json:"sha256"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+	}
+	version := strings.TrimSpace(body.Version)
+	if version == "" {
+		if tag, _, _ := resolveRecommendedAgentVersion(); tag != "" {
+			version = tag
+		} else {
+			version = "latest"
+		}
+	}
+
+	// Staging + download may take longer than a normal probe.
+	timeout := s.opTimeout()
+	if timeout < 3*time.Minute {
+		timeout = 3 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("dial: %v", err))
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	resp, err := client.UpgradeAgent(ctx, version, strings.TrimSpace(body.Repo), strings.TrimSpace(body.DownloadURL), strings.TrimSpace(body.SHA256))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if resp == nil {
+		writeError(w, http.StatusBadGateway, "empty upgrade response")
+		return
+	}
+	statusCode := http.StatusOK
+	if !resp.GetOk() {
+		statusCode = http.StatusBadGateway
+	}
+	// Best-effort note on the node; do not flip status offline just for staging.
+	if msg := resp.GetMessage(); msg != "" {
+		node.LastError = ""
+		if !resp.GetOk() {
+			node.LastError = "upgrade: " + msg
+		}
+		_ = s.Store.UpdateNode(node)
+	}
+	writeJSON(w, statusCode, map[string]any{
+		"ok":               resp.GetOk(),
+		"message":          resp.GetMessage(),
+		"version":          resp.GetVersion(),
+		"staged_path":      resp.GetStagedPath(),
+		"previous_version": resp.GetPreviousVersion(),
+		"node_id":          node.ID,
+		"hint":             "binary staged; helper restarts agent shortly — click 探测 to refresh agent_version",
+	})
+}
+

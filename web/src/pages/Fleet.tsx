@@ -25,6 +25,7 @@ import {
   fleetRefresh,
   getMeta,
   getNodeInstallCommand,
+  upgradeNode,
   probeNode,
   startNode,
   stopNode,
@@ -264,26 +265,58 @@ export default function Fleet() {
   async function showUpgrade(id: string) {
     setCopied(false)
     setInstallBanner(null)
+    const version = meta?.recommended_agent_version || 'latest'
     try {
-      const info = await getNodeInstallCommand(id, {
-        version: meta?.recommended_agent_version || undefined,
-      })
-      const cmd =
-        info.upgrade_command ||
-        meta?.agent_upgrade_command ||
-        ''
-      if (!cmd) {
-        MessagePlugin.warning('暂无升级命令，请稍后重试或检查网络')
+      const res = await upgradeNode(id, { version })
+      if (!res.ok) {
+        MessagePlugin.error(res.message || '远程升级失败')
+        // Fall back to copyable command for older agents / missing helper.
+        try {
+          const info = await getNodeInstallCommand(id, { version })
+          const cmd = info.upgrade_command || meta?.agent_upgrade_command || ''
+          if (cmd) {
+            setUpgradeBanner({
+              node: info.node,
+              command: cmd,
+              recommended: info.recommended_agent_version || version,
+            })
+            MessagePlugin.warning('已回退为手动升级命令（节点可能尚未安装升级助手）')
+          }
+        } catch {
+          /* ignore */
+        }
         return
       }
-      setUpgradeBanner({
-        node: info.node,
-        command: cmd,
-        recommended: info.recommended_agent_version || meta?.recommended_agent_version,
-      })
-      MessagePlugin.success(`已生成节点「${info.node.name}」的升级命令`)
+      MessagePlugin.success(
+        res.message
+          ? `已触发远程升级 → ${res.version || version}：${res.message}`
+          : `已触发远程升级 → ${res.version || version}`,
+      )
+      // Probe a few times after helper restarts the agent.
+      window.setTimeout(() => {
+        void onProbe(id)
+      }, 4000)
+      window.setTimeout(() => {
+        void onProbe(id)
+      }, 10000)
     } catch (err) {
-      MessagePlugin.error(err instanceof Error ? err.message : '获取升级命令失败')
+      const msg = err instanceof Error ? err.message : '远程升级失败'
+      MessagePlugin.error(msg)
+      try {
+        const info = await getNodeInstallCommand(id, { version })
+        const cmd = info.upgrade_command || meta?.agent_upgrade_command || ''
+        if (cmd) {
+          const n = (allNodes ?? []).find((x) => x.id === id)
+          setUpgradeBanner({
+            node: info.node || n!,
+            command: cmd,
+            recommended: info.recommended_agent_version || version,
+          })
+          MessagePlugin.warning('远程升级不可用，已生成手动升级命令')
+        }
+      } catch {
+        /* ignore */
+      }
     }
   }
 
@@ -543,7 +576,7 @@ export default function Fleet() {
         <Card bordered className="la-section" title="版本提醒">
           <p className="la-page-desc" style={{ marginTop: 0 }}>
             推荐 Agent <code className="la-mono">{recommended}</code>
-            。以下节点版本落后或未知，请在节点上以 root 执行升级命令（保留 Token/TLS）：
+            。以下节点版本落后或未知：优先点「升级」触发远程升级；失败时再复制手动命令：
           </p>
           <Space breakLine size={8} style={{ marginBottom: 12 }}>
             {outdatedNodes.map((n) => (
@@ -559,7 +592,7 @@ export default function Fleet() {
             ))}
           </Space>
           <p className="la-page-desc" style={{ margin: 0 }}>
-            点击节点标签生成专属升级命令；通用命令也可直接使用：
+            点击节点「升级」会先尝试远程升级；失败时显示手动命令：
           </p>
           {meta?.agent_upgrade_command ? (
             <pre className="la-pre" style={{ marginTop: 8 }}>
@@ -573,7 +606,7 @@ export default function Fleet() {
         <Card
           bordered
           className="la-section"
-          title={`升级命令 · ${upgradeBanner.node.name}${
+          title={`手动升级命令 · ${upgradeBanner.node.name}${
             upgradeBanner.recommended ? ` → ${upgradeBanner.recommended}` : ''
           }`}
           actions={

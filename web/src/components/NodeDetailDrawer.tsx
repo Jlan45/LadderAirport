@@ -28,6 +28,7 @@ import {
   stopNode,
   streamNodeLogs,
   updateNode,
+  upgradeNode,
   type InboundConfig,
   type Metrics,
   type NetworkInterface,
@@ -329,6 +330,29 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       opts.push({ label: `${editEgress}（已保存，当前列表中不存在）`, value: editEgress })
     }
     return opts
+  }
+
+  async function onRemoteUpgrade() {
+    if (!id) return
+    setBusy(true)
+    try {
+      const version = installInfo?.recommended_agent_version || undefined
+      const res = await upgradeNode(id, version ? { version } : {})
+      if (!res.ok) {
+        MessagePlugin.error(res.message || '远程升级失败')
+        return
+      }
+      MessagePlugin.success(
+        `已触发远程升级${res.version ? ` → ${res.version}` : ''}：${res.message || 'staged'}`,
+      )
+      window.setTimeout(() => {
+        void load()
+      }, 5000)
+    } catch (err) {
+      MessagePlugin.error(err instanceof Error ? err.message : '远程升级失败')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function onShowInstall() {
@@ -772,6 +796,14 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                       onClick={() => void runAction('apply')}
                     >
                       重新下发
+                    </Button>
+                    <Button
+                      theme="warning"
+                      variant="outline"
+                      loading={busy}
+                      onClick={() => void onRemoteUpgrade()}
+                    >
+                      远程升级
                     </Button>
                   </div>
                   {task ? (

@@ -13,6 +13,10 @@ service AgentControl {
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
   rpc StreamLogs(StreamLogsRequest) returns (stream LogLine);
   rpc ListInterfaces(ListInterfacesRequest) returns (ListInterfacesResponse);
+  // UpgradeAgent downloads a release binary to the upgrade staging dir so a
+  // root-owned systemd path unit can replace /usr/local/bin/ladder-agent and restart.
+  // The RPC returns after staging (before restart). Panel should re-probe for the new version.
+  rpc UpgradeAgent(UpgradeAgentRequest) returns (UpgradeAgentResponse);
 }
 
 message PingRequest {}
@@ -83,4 +87,26 @@ message NetworkInterface {
 
 message ListInterfacesResponse {
   repeated NetworkInterface interfaces = 1;
+}
+
+message UpgradeAgentRequest {
+  // Target release tag, e.g. "v0.7.1". Empty or "latest" resolves GitHub latest.
+  string version = 1;
+  // Optional GitHub owner/repo override (default Jlan45/LadderAirport).
+  string repo = 2;
+  // Optional direct download URL for the linux binary (skips GitHub resolution).
+  string download_url = 3;
+  // Optional expected SHA-256 hex of the binary.
+  string sha256 = 4;
+}
+
+message UpgradeAgentResponse {
+  bool ok = 1;
+  string message = 2;
+  // Resolved version/tag when known.
+  string version = 3;
+  // Absolute path of the staged binary (before helper applies it).
+  string staged_path = 4;
+  // Previous agent version string reported by this process.
+  string previous_version = 5;
 }

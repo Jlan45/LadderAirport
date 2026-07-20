@@ -144,6 +144,35 @@ systemctl restart ladder-agent
 
 ### 升级
 
+#### Panel 远程一键升级（推荐）
+
+安装/升级脚本会部署 root 助手：
+
+- `ladder-agent-upgrade.path`：监视 `/var/lib/ladder-agent/upgrade/*.ready`
+- `ladder-agent-upgrade.service`：替换 `/usr/local/bin/ladder-agent` 并 restart
+
+流程：
+
+1. Panel → 节点列表/详情点 **远程升级**（或过期节点的「升级」）
+2. Agent 下载 Release 二进制到 staging 目录并写 `.ready` 标记
+3. systemd path 触发 root helper 替换二进制并重启服务
+4. Panel 自动探测刷新 `agent_version`
+
+要求：
+
+- 节点已用较新安装脚本装过（含 upgrade helper）；老节点先手动跑一次 `LADDER_ACTION=upgrade`
+- 节点能访问 GitHub Release（或后续可扩展自定义 `download_url`）
+- 当前 Agent 二进制已包含 `UpgradeAgent` gRPC（本功能发布后的版本）
+
+```bash
+# 老节点补齐升级助手（保留 Token/TLS）
+curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh   | sudo env LADDER_ACTION=upgrade bash
+
+systemctl status ladder-agent-upgrade.path
+```
+
+#### 手动 curl 升级
+
 只替换二进制、刷新 systemd unit 并 restart；**保留** `agent.env`、TLS 证书与 Token。旧二进制备份为 `/usr/local/bin/ladder-agent.bak`。
 
 ```bash

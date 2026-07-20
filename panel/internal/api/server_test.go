@@ -141,6 +141,17 @@ func (m *mockLive) ListInterfaces(_ context.Context) (*agentv1.ListInterfacesRes
 	}, nil
 }
 
+func (m *mockLive) UpgradeAgent(_ context.Context, version, repo, downloadURL, sha256 string) (*agentv1.UpgradeAgentResponse, error) {
+	return &agentv1.UpgradeAgentResponse{
+		Ok:              true,
+		Message:         "staged; waiting for upgrade helper to apply and restart",
+		Version:         version,
+		StagedPath:      "/var/lib/ladder-agent/upgrade/ladder-agent-linux-amd64",
+		PreviousVersion: "v0.0.0-test",
+	}, nil
+}
+
+
 func (m *mockLive) StreamLogs(_ context.Context, _ string, _ int32) (agentv1.AgentControl_StreamLogsClient, error) {
 	return &logStream{lines: []*agentv1.LogLine{
 		{TsUnixMs: 1, Level: "info", Message: "hello"},

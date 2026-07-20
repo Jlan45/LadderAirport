@@ -8,7 +8,7 @@
 
 | 能力 | 说明 |
 |------|------|
-| 节点管理 | 登记 Agent、探测连通、启停核心、卡片/表格总览 |
+| 节点管理 | 登记 Agent、探测连通、启停核心、远程升级、卡片/表格总览 |
 | 入站模板 | Shadowsocks / Trojan / VLESS(Reality) / Hysteria2 / TUIC / AnyTLS / VMess，密钥自动生成 |
 | 配置下发 | 入站关联到节点 → 转成完整 sing-box JSON → gRPC 热更新 |
 | 启动同步 | Panel 启动自动下发并 Start；未上线节点定时重试 |

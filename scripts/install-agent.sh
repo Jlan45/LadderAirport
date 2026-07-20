@@ -497,9 +497,13 @@ ensure_user_and_dirs() {
 
   echo "==> 准备目录"
   mkdir -p "${CONF_DIR}" "${DATA_DIR}"
+  mkdir -p "${DATA_DIR}/upgrade"
   chown -R "${USER_NAME}:${GROUP_NAME}" "${DATA_DIR}"
   chmod 750 "${DATA_DIR}"
   chmod 755 "${CONF_DIR}"
+  # Agent stages binaries here; root helper applies them.
+  chown "${USER_NAME}:${GROUP_NAME}" "${DATA_DIR}/upgrade"
+  chmod 755 "${DATA_DIR}/upgrade"
 }
 
 # Install binary; keep previous as .bak when upgrading.
@@ -550,9 +554,92 @@ WantedBy=multi-user.target
 EOF
 }
 
+# Root-owned helper: watches staged binary and replaces INSTALL_BIN + restarts agent.
+# Required because ladder-agent runs as unprivileged user with NoNewPrivileges.
+write_upgrade_units() {
+  local helper="/usr/local/lib/ladder-agent/apply-upgrade.sh"
+  local helper_dir
+  helper_dir="$(dirname "${helper}")"
+  mkdir -p "${helper_dir}"
+
+  echo "==> 写入远程升级助手: ${helper}"
+  cat >"${helper}" <<'EOS'
+#!/bin/bash
+set -euo pipefail
+INSTALL_BIN="${INSTALL_BIN:-/usr/local/bin/ladder-agent}"
+UPGRADE_DIR="${UPGRADE_DIR:-/var/lib/ladder-agent/upgrade}"
+SERVICE_NAME="${SERVICE_NAME:-ladder-agent.service}"
+ARCH="$(uname -m)"
+case "${ARCH}" in
+  x86_64|amd64) ASSET="ladder-agent-linux-amd64" ;;
+  aarch64|arm64) ASSET="ladder-agent-linux-arm64" ;;
+  *) echo "unsupported arch: ${ARCH}" >&2; exit 1 ;;
+esac
+STAGED="${UPGRADE_DIR}/${ASSET}"
+READY="${STAGED}.ready"
+LOG_TAG="ladder-agent-upgrade"
+
+if [[ ! -f "${READY}" ]]; then
+  exit 0
+fi
+if [[ ! -f "${STAGED}" ]]; then
+  logger -t "${LOG_TAG}" "ready marker present but staged binary missing: ${STAGED}"
+  rm -f "${READY}" || true
+  exit 1
+fi
+if [[ ! -s "${STAGED}" ]]; then
+  logger -t "${LOG_TAG}" "staged binary empty"
+  rm -f "${READY}" || true
+  exit 1
+fi
+
+logger -t "${LOG_TAG}" "applying staged binary ${STAGED} -> ${INSTALL_BIN}"
+if [[ -x "${INSTALL_BIN}" ]]; then
+  cp -a "${INSTALL_BIN}" "${INSTALL_BIN}.bak" || true
+fi
+install -m 0755 "${STAGED}" "${INSTALL_BIN}"
+rm -f "${READY}"
+# Keep staged copy briefly for debug; remove partials
+rm -f "${STAGED}.partial" || true
+systemctl restart "${SERVICE_NAME}"
+logger -t "${LOG_TAG}" "upgrade applied; ${SERVICE_NAME} restarted"
+EOS
+  chmod 0755 "${helper}"
+
+  local unit_dir="/etc/systemd/system"
+  echo "==> 写入 systemd path/service: ladder-agent-upgrade.*"
+  cat >"${unit_dir}/ladder-agent-upgrade.path" <<EOF
+[Unit]
+Description=Watch LadderAirport agent upgrade staging dir
+
+[Path]
+PathExists=${DATA_DIR}/upgrade/ladder-agent-linux-amd64.ready
+PathExists=${DATA_DIR}/upgrade/ladder-agent-linux-arm64.ready
+Unit=ladder-agent-upgrade.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat >"${unit_dir}/ladder-agent-upgrade.service" <<EOF
+[Unit]
+Description=Apply staged LadderAirport agent binary
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${helper}
+Nice=0
+EOF
+}
+
 enable_and_restart() {
+  write_upgrade_units
   systemctl daemon-reload
   systemctl enable "${SERVICE_NAME}"
+  systemctl enable ladder-agent-upgrade.path
+  systemctl restart ladder-agent-upgrade.path || systemctl start ladder-agent-upgrade.path || true
   systemctl restart "${SERVICE_NAME}"
   sleep 0.8
   systemctl --no-pager --full status "${SERVICE_NAME}" || true
@@ -752,6 +839,7 @@ do_upgrade() {
   echo
   echo "运维: systemctl status ladder-agent ; journalctl -u ladder-agent -f"
   echo "在 Panel 刷新/探测节点以确认 agent_version"
+  echo "远程升级: Panel 节点详情点「远程升级」（需 ladder-agent-upgrade.path 已 enable）"
 }
 
 # ---------- uninstall ----------
@@ -762,6 +850,10 @@ do_uninstall() {
     systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
     systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
   fi
+  systemctl stop ladder-agent-upgrade.path 2>/dev/null || true
+  systemctl disable ladder-agent-upgrade.path 2>/dev/null || true
+  rm -f /etc/systemd/system/ladder-agent-upgrade.path /etc/systemd/system/ladder-agent-upgrade.service
+  rm -f /usr/local/lib/ladder-agent/apply-upgrade.sh
   if [[ -f "${SERVICE_DST}" ]]; then
     rm -f "${SERVICE_DST}"
     echo "  已删除 unit: ${SERVICE_DST}"

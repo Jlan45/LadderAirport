@@ -163,6 +163,16 @@ func (c *Client) ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesRes
 	return c.api.ListInterfaces(c.withAuth(ctx), &agentv1.ListInterfacesRequest{})
 }
 
+// UpgradeAgent stages a new agent binary on the node for the root upgrade helper.
+func (c *Client) UpgradeAgent(ctx context.Context, version, repo, downloadURL, sha256 string) (*agentv1.UpgradeAgentResponse, error) {
+	return c.api.UpgradeAgent(c.withAuth(ctx), &agentv1.UpgradeAgentRequest{
+		Version:     version,
+		Repo:        repo,
+		DownloadUrl: downloadURL,
+		Sha256:      sha256,
+	})
+}
+
 // StreamLogs opens a server-streaming log subscription.
 func (c *Client) StreamLogs(ctx context.Context, level string, tail int32) (agentv1.AgentControl_StreamLogsClient, error) {
 	return c.api.StreamLogs(c.withAuth(ctx), &agentv1.StreamLogsRequest{

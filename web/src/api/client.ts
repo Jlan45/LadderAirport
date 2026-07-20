@@ -317,6 +317,24 @@ export function probeNode(id: string): Promise<ProbeResult> {
   return request('POST', `/nodes/${id}/probe`)
 }
 
+export interface UpgradeAgentResult {
+  ok: boolean
+  message: string
+  version?: string
+  staged_path?: string
+  previous_version?: string
+  node_id?: string
+  hint?: string
+}
+
+/** Stage remote agent upgrade (binary download + helper restart). */
+export function upgradeNode(
+  id: string,
+  body?: { version?: string; repo?: string; download_url?: string; sha256?: string },
+): Promise<UpgradeAgentResult> {
+  return request('POST', `/nodes/${id}/upgrade`, body ?? {})
+}
+
 export function listNodeInbounds(id: string): Promise<InboundConfig[]> {
   return request('GET', `/nodes/${id}/inbounds`)
 }

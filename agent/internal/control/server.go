@@ -100,6 +100,32 @@ func (s *Server) ListInterfaces(context.Context, *agentv1.ListInterfacesRequest)
 	return &agentv1.ListInterfacesResponse{Interfaces: ifaces}, nil
 }
 
+func (s *Server) UpgradeAgent(ctx context.Context, req *agentv1.UpgradeAgentRequest) (*agentv1.UpgradeAgentResponse, error) {
+	if req == nil {
+		req = &agentv1.UpgradeAgentRequest{}
+	}
+	res, err := StageAgentUpgrade(ctx, UpgradeRequest{
+		Version:     req.GetVersion(),
+		Repo:        req.GetRepo(),
+		DownloadURL: req.GetDownloadUrl(),
+		SHA256:      req.GetSha256(),
+	})
+	if err != nil {
+		return &agentv1.UpgradeAgentResponse{
+			Ok:              false,
+			Message:         err.Error(),
+			PreviousVersion: s.agentVersion,
+		}, nil
+	}
+	return &agentv1.UpgradeAgentResponse{
+		Ok:              true,
+		Message:         res.Message,
+		Version:         res.Version,
+		StagedPath:      res.StagedPath,
+		PreviousVersion: s.agentVersion,
+	}, nil
+}
+
 func (s *Server) StreamLogs(req *agentv1.StreamLogsRequest, stream agentv1.AgentControl_StreamLogsServer) error {
 	levelFilter := ""
 	tailN := 0
