@@ -30,10 +30,28 @@ func TestRenderClashHasCNRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, want := range []string{"type: ss", "GEOIP,CN,DIRECT", "GEOSITE,cn,DIRECT", "MATCH,PROXY", "PROXY"} {
+	for _, want := range []string{
+		"type: ss",
+		"RULE-SET,cn,",
+		"RULE-SET,cnip,",
+		"RULE-SET,privateip,",
+		"url-test",
+		"rule-providers:",
+		"respect-rules:",
+		"proxy-server-nameserver:",
+		"本地",
+		"节点选择",
+		"全球直连",
+	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "proxy-providers:") {
+		t.Fatalf("must not emit proxy-providers:\n%s", s)
+	}
+	if strings.Contains(s, "GEOIP,CN,DIRECT") || strings.Contains(s, "GEOSITE,cn,DIRECT") {
+		t.Fatalf("legacy GEOIP/GEOSITE rules should be gone:\n%s", s)
 	}
 }
 
@@ -229,5 +247,31 @@ func TestCollectEndpointsPerInboundNAT(t *testing.T) {
 		if ep.Port != wantPort[key] {
 			t.Fatalf("%s port=%d want %d", key, ep.Port, wantPort[key])
 		}
+	}
+}
+
+func TestRenderClashSourceGroups(t *testing.T) {
+	eps := []ProxyEndpoint{
+		{Name: "hk-ss", Server: "1.1.1.1", Port: 443, Protocol: "shadowsocks",
+			Params: map[string]any{"method": "aes-256-gcm", "password": "p"}},
+		{Name: "机场A-a", Server: "2.2.2.2", Port: 443, Protocol: "trojan",
+			Params: map[string]any{"password": "p"}, SourceID: "s1", SourceName: "机场A"},
+		{Name: "机场A-b", Server: "3.3.3.3", Port: 443, Protocol: "trojan",
+			Params: map[string]any{"password": "p"}, SourceID: "s1", SourceName: "机场A"},
+		{Name: "机场B-x", Server: "4.4.4.4", Port: 443, Protocol: "trojan",
+			Params: map[string]any{"password": "p"}, SourceID: "s2", SourceName: "机场B"},
+	}
+	b, err := RenderClash(eps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{"机场A", "机场B", "本地", "url-test", "hk-ss", "机场A-a"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("missing %q in:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "proxy-providers:") {
+		t.Fatal("proxy-providers must not appear")
 	}
 }

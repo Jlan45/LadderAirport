@@ -158,3 +158,35 @@ func TestDedupeMultiAOrderIndependentSamePort(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 }
+
+
+func TestFilterPlaceholderServers(t *testing.T) {
+	eps := []ProxyEndpoint{
+		{Name: "notice", Server: "0.0.0.0", Port: 443, Protocol: "trojan"},
+		{Name: "v6", Server: "::", Port: 443, Protocol: "trojan"},
+		{Name: "loop", Server: "127.0.0.1", Port: 443, Protocol: "trojan"},
+		{Name: "ok", Server: "1.2.3.4", Port: 443, Protocol: "trojan"},
+		{Name: "badport", Server: "1.2.3.4", Port: 0, Protocol: "trojan"},
+	}
+	out := filterDialableEndpoints(eps)
+	if len(out) != 1 || out[0].Name != "ok" {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestMergeDropsPlaceholderExternal(t *testing.T) {
+	local := []ProxyEndpoint{{Name: "mine", Server: "9.9.9.9", Port: 443, Protocol: "trojan"}}
+	ext := []ProxyEndpoint{
+		{Name: "notice", Server: "0.0.0.0", Port: 443, Protocol: "trojan"},
+		{Name: "good", Server: "8.8.8.8", Port: 443, Protocol: "trojan"},
+	}
+	out := MergeEndpoints(local, ext)
+	if len(out) != 2 {
+		t.Fatalf("got %d: %+v", len(out), out)
+	}
+	for _, ep := range out {
+		if ep.Server == "0.0.0.0" {
+			t.Fatalf("placeholder leaked: %+v", ep)
+		}
+	}
+}

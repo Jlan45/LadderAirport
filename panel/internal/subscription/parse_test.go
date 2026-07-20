@@ -142,3 +142,32 @@ func TestVLESSShareLinkReality(t *testing.T) {
 		t.Fatalf("%+v", eps[0].Params)
 	}
 }
+
+
+func TestDetectAndParseDropsZeroServer(t *testing.T) {
+	raw := []byte(`
+proxies:
+  - name: 一元机场-请立即到官网下载新客户端！
+    type: trojan
+    server: 0.0.0.0
+    port: 443
+    password: secret
+    sni: 0.0.0.0
+    skip-cert-verify: true
+  - name: real
+    type: trojan
+    server: edge.example.com
+    port: 443
+    password: secret
+`)
+	eps, kind, err := DetectAndParse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != ContentClashYAML {
+		t.Fatalf("kind=%s", kind)
+	}
+	if len(eps) != 1 || eps[0].Name != "real" || eps[0].Server != "edge.example.com" {
+		t.Fatalf("%+v", eps)
+	}
+}

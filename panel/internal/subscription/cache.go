@@ -85,6 +85,7 @@ func (a *Aggregator) EndpointsForSources(ctx context.Context, sources []store.Ex
 		for _, ep := range parsed {
 			ep.Name = prefixExternalName(src.Name, ep.Name)
 			ep.SourceID = src.ID
+			ep.SourceName = src.Name
 			eps = append(eps, ep)
 		}
 	}

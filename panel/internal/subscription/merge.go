@@ -53,6 +53,7 @@ func MergeEndpointsContext(ctx context.Context, local, external []ProxyEndpoint)
 	out := make([]ProxyEndpoint, 0, n)
 	out = append(out, local...)
 	out = append(out, external...)
+	out = filterDialableEndpoints(out)
 	out = dedupeByHost(ctx, out)
 	return uniquifyNames(out)
 }
@@ -159,6 +160,44 @@ func normalizeHost(server string) string {
 		s = h
 	}
 	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// isDialableServer reports whether server is usable as a client dial target.
+// Drops empty, unspecified (0.0.0.0 / ::), and common placeholder hosts used by
+// airport "notice" nodes.
+func isDialableServer(server string) bool {
+	host := normalizeHost(server)
+	if host == "" {
+		return false
+	}
+	switch host {
+	case "0.0.0.0", "::", "::0", "0", "localhost", "local":
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() {
+			return false
+		}
+	}
+	return true
+}
+
+// filterDialableEndpoints drops endpoints with unusable server or port.
+func filterDialableEndpoints(eps []ProxyEndpoint) []ProxyEndpoint {
+	if len(eps) == 0 {
+		return eps
+	}
+	out := make([]ProxyEndpoint, 0, len(eps))
+	for _, ep := range eps {
+		if ep.Port < 1 || ep.Port > 65535 {
+			continue
+		}
+		if !isDialableServer(ep.Server) {
+			continue
+		}
+		out = append(out, ep)
+	}
+	return out
 }
 
 func uniquifyNames(eps []ProxyEndpoint) []ProxyEndpoint {

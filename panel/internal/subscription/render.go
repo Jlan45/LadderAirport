@@ -16,14 +16,15 @@ import (
 // ProxyEndpoint is one client outbound derived from a node-bound inbound
 // or normalized from an external subscription source.
 type ProxyEndpoint struct {
-	Name     string
-	Node     store.Node          // zero for external sources
-	Inbound  store.InboundConfig // zero for external sources
-	Server   string
-	Port     int
-	Protocol string
-	Params   map[string]any
-	SourceID string // "" = local inventory; external source id when merged
+	Name       string
+	Node       store.Node          // zero for external sources
+	Inbound    store.InboundConfig // zero for external sources
+	Server     string
+	Port       int
+	Protocol   string
+	Params     map[string]any
+	SourceID   string // "" = local inventory; external source id when merged
+	SourceName string // display group name; empty = local ("本地")
 }
 
 // clientServerHost returns the host clients should dial.
@@ -114,45 +115,215 @@ func CollectEndpointsFromAttachments(nodes []store.Node, nodeAttachments map[str
 	return out, nil
 }
 
-// RenderClash produces Clash / Mihomo YAML with CN split.
+// Clash group / rule names (match common Mihomo CN templates).
+const (
+	clashGroupSelect = "🚀 节点选择"
+	clashGroupDirect = "🎯 全球直连"
+	clashGroupLocal  = "本地"
+	clashHealthURL   = "https://www.gstatic.com/generate_204"
+)
+
+// RenderClash produces Clash / Mihomo YAML.
+// Template follows a standard CN split config, but expands external sources as
+// inlined proxies + per-source url-test groups on the panel (no proxy-providers).
 func RenderClash(endpoints []ProxyEndpoint) ([]byte, error) {
 	proxies := make([]map[string]any, 0, len(endpoints))
-	names := make([]string, 0, len(endpoints))
 	for _, ep := range endpoints {
 		p, err := clashProxy(ep)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", ep.Name, err)
 		}
+		// Prefer UDP on/off already set per protocol; force udp true when absent
+		// so merged external nodes behave like provider override: udp: true.
+		if _, ok := p["udp"]; !ok {
+			switch ep.Protocol {
+			case "shadowsocks", "trojan", "vless", "vmess", "anytls":
+				p["udp"] = true
+			}
+		}
 		proxies = append(proxies, p)
-		names = append(names, ep.Name)
 	}
-	// Select group: all proxies + DIRECT
-	groupProxies := append([]string{}, names...)
-	groupProxies = append(groupProxies, "DIRECT")
 
 	doc := map[string]any{
-		"mixed-port":          7890,
-		"allow-lan":           true,
-		"mode":                "rule",
-		"log-level":           "info",
-		"external-controller": "127.0.0.1:9090",
-		"proxies":             proxies,
-		"proxy-groups": []map[string]any{
-			{
-				"name":    "PROXY",
-				"type":    "select",
-				"proxies": groupProxies,
-			},
-		},
+		"port":                       7890,
+		"socks-port":                 7891,
+		"allow-lan":                  true,
+		"mode":                       "rule",
+		"log-level":                  "info",
+		"external-controller":        "127.0.0.1:9090",
+		"unified-delay":              true,
+		"tcp-concurrent":             true,
+		"find-process-mode":          "strict",
+		"global-client-fingerprint":  "chrome",
+		"ipv6":                       false,
+		"dns":                        clashDNS(),
+		"proxies":                    proxies,
+		"proxy-groups":               clashProxyGroups(endpoints),
 		"rules": []string{
-			"GEOIP,LAN,DIRECT",
-			"GEOIP,CN,DIRECT",
-			"GEOSITE,cn,DIRECT",
-			"MATCH,PROXY",
+			"RULE-SET,privateip," + clashGroupDirect + ",no-resolve",
+			"RULE-SET,cn," + clashGroupDirect,
+			"RULE-SET,cnip," + clashGroupDirect + ",no-resolve",
+			"MATCH," + clashGroupSelect,
 		},
+		"rule-providers": clashRuleProviders(),
 	}
 	return yaml.Marshal(doc)
 }
+
+func clashDNS() map[string]any {
+	// Overseas DNS queries detour via the top select group (Clash #group syntax).
+	detour := "#" + clashGroupSelect
+	return map[string]any{
+		"enable":              true,
+		"listen":              "0.0.0.0:1053",
+		"ipv6":                false,
+		"enhanced-mode":       "fake-ip",
+		"fake-ip-range":       "198.18.0.1/16",
+		"fake-ip-filter-mode": "blacklist",
+		"cache-algorithm":     "arc",
+		"prefer-h3":           false,
+		"use-hosts":           true,
+		"use-system-hosts":    true,
+		"respect-rules":       true,
+		"default-nameserver": []string{
+			"223.5.5.5",
+			"119.29.29.29",
+			"114.114.114.114",
+		},
+		"proxy-server-nameserver": []string{
+			"223.5.5.5",
+			"119.29.29.29",
+			"114.114.114.114",
+			"https://dns.alidns.com/dns-query",
+			"https://doh.pub/dns-query",
+		},
+		"direct-nameserver": []string{
+			"https://dns.alidns.com/dns-query",
+			"https://doh.pub/dns-query",
+		},
+		"nameserver-policy": map[string]any{
+			"rule-set:cn": []string{
+				"https://dns.alidns.com/dns-query",
+				"https://doh.pub/dns-query",
+			},
+			"+.lan":   []string{"223.5.5.5"},
+			"+.local": []string{"223.5.5.5"},
+			"+.arpa":  []string{"223.5.5.5"},
+		},
+		"nameserver": []string{
+			"https://1.1.1.1/dns-query" + detour,
+			"https://1.0.0.1/dns-query" + detour,
+			"https://8.8.8.8/dns-query" + detour,
+			"https://8.8.4.4/dns-query" + detour,
+			"tls://1.1.1.1" + detour,
+			"tls://1.0.0.1" + detour,
+			"tls://8.8.8.8" + detour,
+			"tls://8.8.4.4" + detour,
+		},
+		"fake-ip-filter": []string{
+			"*.lan",
+			"*.local",
+			"*.arpa",
+			"localhost.ptlogin2.qq.com",
+			"+.msftconnecttest.com",
+			"+.msftncsi.com",
+			"time.*.com",
+			"time.*.gov",
+			"time.*.edu.cn",
+			"+.ntp.org.cn",
+			"+.pool.ntp.org",
+			"+.stun.*.*",
+			"+.stun.*.*.*",
+			"+.stun.*.*.*.*",
+			"+.srv.nintendo.net",
+			"+.xboxlive.com",
+			"+.battlenet.com.cn",
+			"+.wargaming.net",
+		},
+	}
+}
+
+func clashRuleProviders() map[string]any {
+	return map[string]any{
+		"cn": map[string]any{
+			"type":     "http",
+			"behavior": "domain",
+			"format":   "mrs",
+			"path":     "./ruleset/cn.mrs",
+			"url":      "https://testingcf.jsdelivr.net/gh/DustinWin/ruleset_geodata@refs/heads/mihomo-ruleset/cn.mrs",
+			"interval": 86400,
+		},
+		"privateip": map[string]any{
+			"type":     "http",
+			"behavior": "ipcidr",
+			"format":   "mrs",
+			"path":     "./ruleset/privateip.mrs",
+			"url":      "https://testingcf.jsdelivr.net/gh/DustinWin/ruleset_geodata@refs/heads/mihomo-ruleset/privateip.mrs",
+			"interval": 86400,
+		},
+		"cnip": map[string]any{
+			"type":     "http",
+			"behavior": "ipcidr",
+			"format":   "mrs",
+			"path":     "./ruleset/cnip.mrs",
+			"url":      "https://testingcf.jsdelivr.net/gh/DustinWin/ruleset_geodata@refs/heads/mihomo-ruleset/cnip.mrs",
+			"interval": 86400,
+		},
+	}
+}
+
+// clashProxyGroups builds:
+//   🚀 节点选择 (select of per-source groups)
+//   🎯 全球直连 (DIRECT / 节点选择)
+//   one url-test group per source (本地 + each external source name)
+// No proxy-providers — all members are inlined proxy names.
+func clashProxyGroups(endpoints []ProxyEndpoint) []map[string]any {
+	order := make([]string, 0)
+	members := map[string][]string{}
+	for _, ep := range endpoints {
+		g := strings.TrimSpace(ep.SourceName)
+		if g == "" {
+			g = clashGroupLocal
+		}
+		if _, ok := members[g]; !ok {
+			order = append(order, g)
+			members[g] = []string{}
+		}
+		members[g] = append(members[g], ep.Name)
+	}
+
+	groups := make([]map[string]any, 0, len(order)+2)
+
+	// Top select: list source groups (stable first-seen order).
+	selectProxies := append([]string{}, order...)
+	groups = append(groups, map[string]any{
+		"name":    clashGroupSelect,
+		"type":    "select",
+		"proxies": selectProxies,
+	})
+	groups = append(groups, map[string]any{
+		"name": clashGroupDirect,
+		"type": "select",
+		"proxies": []string{
+			"DIRECT",
+			clashGroupSelect,
+		},
+	})
+
+	for _, g := range order {
+		groups = append(groups, map[string]any{
+			"name":      g,
+			"type":      "url-test",
+			"proxies":   members[g],
+			"url":       clashHealthURL,
+			"interval":  300,
+			"tolerance": 100,
+			"lazy":      true,
+		})
+	}
+	return groups
+}
+
 
 // RenderSingbox produces sing-box client JSON with remote CN rule sets.
 func RenderSingbox(endpoints []ProxyEndpoint) ([]byte, error) {

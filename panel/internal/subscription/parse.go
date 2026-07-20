@@ -84,6 +84,7 @@ func DetectAndParse(raw []byte) ([]ProxyEndpoint, string, error) {
 }
 
 func truncateProxies(eps []ProxyEndpoint) []ProxyEndpoint {
+	eps = filterDialableEndpoints(eps)
 	if len(eps) > MaxProxiesPerSource {
 		return eps[:MaxProxiesPerSource]
 	}
