@@ -1,47 +1,103 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Button,
-  Card,
-  Col,
-  Form,
-  Input,
-  InputNumber,
-  MessagePlugin,
-  Row,
-  Space,
-} from 'tdesign-react'
-import { getMeta, getSettings, putSettings, type MetaInfo } from '../api/client'
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
+import {
+  getMeta,
+  getSettings,
+  putSettings,
+  type MetaInfo,
+  type Settings as SettingsResponse,
+} from '../api/client'
+import { useUnsavedNavigation } from '../lib/useUnsavedNavigation'
+import { toast } from '../lib/toast'
+import { RefreshCw, Save, Key, Network, Shield } from 'lucide-react'
+
+type NumericDraft = number | string
+
+type SettingsDraft = {
+  token: string
+  timeoutSec: NumericDraft
+  concurrency: NumericDraft
+  listenAddr: string
+  publicBase: string
+}
+
+type ValidationErrors = {
+  timeoutSec: string
+  concurrency: string
+  publicBase: string
+  newPassword: string
+  confirmPassword: string
+}
+
+const DEFAULT_DRAFT: SettingsDraft = {
+  token: '',
+  timeoutSec: 10,
+  concurrency: 8,
+  listenAddr: '',
+  publicBase: '',
+}
 
 export default function Settings() {
   const [meta, setMeta] = useState<MetaInfo | null>(null)
-
-  const [token, setToken] = useState('')
-  const [timeoutSec, setTimeoutSec] = useState(10)
-  const [concurrency, setConcurrency] = useState(8)
-  const [listenAddr, setListenAddr] = useState('')
-  const [publicBase, setPublicBase] = useState('')
+  const [draft, setDraft] = useState<SettingsDraft>(DEFAULT_DRAFT)
+  const [savedDraft, setSavedDraft] = useState<SettingsDraft | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [saveError, setSaveError] = useState('')
+  const loadSequence = useRef(0)
+
+  const dirty = useMemo(
+    () =>
+      savedDraft !== null &&
+      (!sameDraft(draft, savedDraft) || newPassword !== '' || confirmPassword !== ''),
+    [confirmPassword, draft, newPassword, savedDraft],
+  )
+
+  useUnsavedNavigation({
+    active: dirty,
+    message: '离开设置页会丢失尚未保存的系统设置。',
+  })
+
+  const errors = useMemo(
+    () => validate(draft, newPassword, confirmPassword),
+    [confirmPassword, draft, newPassword],
+  )
+  const hasValidationErrors = Object.values(errors).some(Boolean)
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current
     setLoading(true)
+    setLoadError('')
+    setSaveError('')
     try {
-      const [s, m] = await Promise.all([
+      const [settings, nextMeta] = await Promise.all([
         getSettings(),
         getMeta().catch(() => null),
       ])
-      if (m) setMeta(m)
-      setToken(s.default_agent_token || '')
-      setTimeoutSec(s.grpc_timeout_sec)
-      setConcurrency(s.max_concurrency)
-      setListenAddr(s.listen_addr || '')
-      setPublicBase(s.public_base_url || '')
+      if (sequence !== loadSequence.current) return
+      const nextDraft = draftFromResponse(settings)
+      setDraft(nextDraft)
+      setSavedDraft(nextDraft)
+      setNewPassword('')
+      setConfirmPassword('')
+      if (nextMeta) setMeta(nextMeta)
     } catch (err) {
-      MessagePlugin.error(err instanceof Error ? err.message : '加载系统设置失败')
+      if (sequence !== loadSequence.current) return
+      setLoadError(err instanceof Error ? err.message : '加载系统设置失败')
     } finally {
-      setLoading(false)
+      if (sequence === loadSequence.current) setLoading(false)
     }
   }, [])
 
@@ -49,192 +105,393 @@ export default function Settings() {
     void load()
   }, [load])
 
-  async function onSave() {
-    if (newPassword && newPassword !== confirmPassword) {
-      MessagePlugin.warning('两次输入的密码不一致')
+  useEffect(() => {
+    if (!dirty) return
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [dirty])
+
+  useEffect(() => {
+    setSaveError('')
+  }, [confirmPassword, draft, newPassword])
+
+  function updateDraft(patch: Partial<SettingsDraft>) {
+    setDraft((current) => ({ ...current, ...patch }))
+  }
+
+  function requestReload() {
+    if (!dirty) {
+      void load()
       return
     }
+    const confirmReload = window.confirm('放弃未保存的更改？\n重新加载会使用服务器上的设置覆盖您当前的修改。')
+    if (confirmReload) {
+      void load()
+    }
+  }
+
+  async function onSave() {
+    if (busy || loading || savedDraft === null) return
+    if (hasValidationErrors) {
+      setSaveError('请先修正标红的设置项')
+      return
+    }
+
     setBusy(true)
+    setSaveError('')
     try {
       const body: Parameters<typeof putSettings>[0] = {
-        default_agent_token: token,
-        grpc_timeout_sec: timeoutSec,
-        max_concurrency: concurrency,
-        listen_addr: listenAddr,
-        public_base_url: publicBase,
+        default_agent_token: draft.token,
+        grpc_timeout_sec: Number(draft.timeoutSec),
+        max_concurrency: Number(draft.concurrency),
+        listen_addr: draft.listenAddr.trim(),
+        public_base_url: normalizePublicBase(draft.publicBase),
       }
-      if (newPassword) {
-        body.new_password = newPassword
-      }
-      const s = await putSettings(body)
-      setToken(s.default_agent_token || '')
-      setTimeoutSec(s.grpc_timeout_sec)
-      setConcurrency(s.max_concurrency)
-      setListenAddr(s.listen_addr || '')
-      setPublicBase(s.public_base_url || '')
+      if (newPassword) body.new_password = newPassword
+
+      const settings = await putSettings(body)
+      const nextDraft = draftFromResponse(settings)
+      setDraft(nextDraft)
+      setSavedDraft(nextDraft)
       setNewPassword('')
       setConfirmPassword('')
-      MessagePlugin.success('系统设置保存成功')
+      toast.success('系统设置保存成功')
     } catch (err) {
-      MessagePlugin.error(err instanceof Error ? err.message : '保存失败')
+      setSaveError(err instanceof Error ? err.message : '保存系统设置失败')
     } finally {
       setBusy(false)
     }
   }
 
+  const formDisabled = loading || busy || savedDraft === null
+
   return (
-    <div className="la-settings">
-      <div className="la-page-header">
+    <div className="space-y-6">
+      {/* Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-5">
         <div>
-          <h1 className="la-page-title">系统设置</h1>
-          <p className="la-page-desc">管理节点连接默认值、Panel 对外地址与管理员账号</p>
-          {meta?.panel_version ? (
-            <p className="la-page-desc" style={{ marginTop: 4 }}>
-              Panel <code className="la-mono">{meta.panel_version}</code>
-              {meta.panel_commit && meta.panel_commit !== 'unknown'
-                ? ` (${meta.panel_commit})`
-                : ''}
-              {meta.recommended_agent_version
-                ? ` · 推荐 Agent ${meta.recommended_agent_version}`
-                : ''}
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">系统设置</h1>
+          <p className="text-sm text-zinc-400 mt-1">管理节点默认连接令牌、系统超时时长、Panel 自身监听接口及控制台访问密码</p>
+          {meta?.panel_version && (
+            <p className="text-xs text-zinc-500 mt-2 flex flex-wrap gap-2 items-center">
+              <span>Panel <code className="font-mono text-zinc-400">{meta.panel_version}</code></span>
+              {meta.panel_commit && meta.panel_commit !== 'unknown' && (
+                <span>({meta.panel_commit})</span>
+              )}
+              {meta.recommended_agent_version && (
+                <>
+                  <span className="text-zinc-800">•</span>
+                  <span>推荐 Agent {meta.recommended_agent_version}</span>
+                </>
+              )}
             </p>
-          ) : null}
+          )}
         </div>
-        <Space>
-          <Button variant="outline" loading={loading} onClick={() => void load()}>
-            重新加载
+
+        <div className="flex items-center gap-3 shrink-0">
+          {dirty ? (
+            <Badge variant="warning">有未保存更改</Badge>
+          ) : savedDraft ? (
+            <Badge variant="success">已保存</Badge>
+          ) : null}
+          <Button
+            variant="outline"
+            loading={loading}
+            disabled={busy}
+            onClick={requestReload}
+            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5 h-9"
+          >
+            {dirty ? '放弃修改并重载' : '重新加载'}
           </Button>
-          <Button theme="primary" loading={busy} onClick={() => void onSave()}>
-            保存全部
+          <Button
+            loading={busy}
+            disabled={loading || savedDraft === null || !dirty}
+            onClick={() => void onSave()}
+            className="gap-1.5 h-9"
+          >
+            <Save className="h-4 w-4" /> 保存设置
           </Button>
-        </Space>
+        </div>
       </div>
 
-      <div className="la-settings-grid">
-        <Card bordered className="la-section" title="连接与任务" subtitle="节点 gRPC 管控默认参数">
-          <Form labelAlign="top" disabled={loading}>
-            <Form.FormItem
-              label="默认 Agent 访问令牌"
-              help="新建节点未单独填写 Token 时使用；也用于生成安装命令"
-            >
-              <Input
-                type="password"
-                value={token}
-                onChange={(v) => setToken(String(v))}
-                autocomplete="off"
-                placeholder="长随机串，请勿使用弱口令"
-                clearable
-              />
-            </Form.FormItem>
-            <Row gutter={[16, 0]}>
-              <Col xs={12} sm={12} md={6}>
-                <Form.FormItem label="gRPC 超时（秒）" help="单次探测 / 下发 / 启停的等待上限">
-                  <InputNumber
-                    theme="column"
-                    style={{ width: '100%' }}
-                    min={1}
-                    max={600}
-                    value={timeoutSec}
-                    onChange={(v) => setTimeoutSec(Number(v) || 1)}
-                    suffix="秒"
-                  />
-                </Form.FormItem>
-              </Col>
-              <Col xs={12} sm={12} md={6}>
-                <Form.FormItem label="最大并发任务数" help="批量下发 / 启动时的并行上限">
-                  <InputNumber
-                    theme="column"
-                    style={{ width: '100%' }}
+      {loadError && (
+        <Alert variant="destructive">
+          <AlertTitle>系统设置加载失败</AlertTitle>
+          <AlertDescription>{loadError}</AlertDescription>
+          <Button size="sm" variant="outline" className="mt-2 text-red-400 border-red-900/30 hover:bg-red-950/20" onClick={() => void load()}>
+            重试
+          </Button>
+        </Alert>
+      )}
+
+      {saveError && (
+        <Alert variant="destructive">
+          <AlertTitle>系统设置未保存</AlertTitle>
+          <AlertDescription>{saveError}</AlertDescription>
+        </Alert>
+      )}
+
+      {loading && savedDraft === null ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <RefreshCw className="h-6 w-6 animate-spin text-zinc-500" />
+          <span className="text-sm text-zinc-400">正在加载系统设置…</span>
+        </div>
+      ) : savedDraft ? (
+        <div className="grid grid-cols-1 gap-6">
+          {/* Card 1: Connection & Tasks */}
+          <Card className="border-zinc-900 bg-zinc-900/30">
+            <CardHeader className="p-5 pb-3">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Key className="h-4 w-4 text-zinc-400" />
+                连接与任务参数
+              </CardTitle>
+              <CardDescription className="text-xs text-zinc-500">
+                定义节点连接的默认 Agent 令牌与连接/部署的并发数量
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-5 pt-0 space-y-4">
+              <div className="flex flex-col space-y-1.5">
+                <Label htmlFor="settings-token" className="text-zinc-300">默认 Agent 访问令牌</Label>
+                <Input
+                  id="settings-token"
+                  type="password"
+                  value={draft.token}
+                  disabled={formDisabled}
+                  autoComplete="off"
+                  onChange={(e) => updateDraft({ token: e.target.value })}
+                  placeholder="新建节点未指定令牌时默认填补此项，请使用强随机串"
+                  className="bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col space-y-1.5">
+                  <Label htmlFor="settings-grpc-timeout" className="text-zinc-300">gRPC 管控超时（秒）</Label>
+                  <div className="relative">
+                    <Input
+                      id="settings-grpc-timeout"
+                      type="number"
+                      min={1}
+                      max={600}
+                      value={draft.timeoutSec}
+                      disabled={formDisabled}
+                      onChange={(e) => updateDraft({ timeoutSec: e.target.value })}
+                      className={`bg-zinc-950 border-zinc-900 pr-10 focus-visible:ring-zinc-800 ${
+                        errors.timeoutSec ? 'border-red-500 focus-visible:ring-red-500' : ''
+                      }`}
+                    />
+                    <span className="absolute right-3 top-2.5 text-xs text-zinc-500 select-none">秒</span>
+                  </div>
+                  {errors.timeoutSec && (
+                    <p className="text-xs text-red-500 font-medium">{errors.timeoutSec}</p>
+                  )}
+                </div>
+
+                <div className="flex flex-col space-y-1.5">
+                  <Label htmlFor="settings-max-concurrency" className="text-zinc-300">最大并发任务数</Label>
+                  <Input
+                    id="settings-max-concurrency"
+                    type="number"
                     min={1}
                     max={256}
-                    value={concurrency}
-                    onChange={(v) => setConcurrency(Number(v) || 1)}
+                    value={draft.concurrency}
+                    disabled={formDisabled}
+                    onChange={(e) => updateDraft({ concurrency: e.target.value })}
+                    className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                      errors.concurrency ? 'border-red-500 focus-visible:ring-red-500' : ''
+                    }`}
                   />
-                </Form.FormItem>
-              </Col>
-            </Row>
-          </Form>
-        </Card>
+                  {errors.concurrency && (
+                    <p className="text-xs text-red-500 font-medium">{errors.concurrency}</p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-        <Card bordered className="la-section" title="服务与订阅" subtitle="Panel 自身监听与对外公开地址">
-          <Form labelAlign="top" disabled={loading}>
-            <Form.FormItem
-              label="Public Base URL"
-              help="用于完整订阅链接，以及「添加节点」安装命令里的 LADDER_PANEL 自动 enroll"
-            >
-              <Input
-                value={publicBase}
-                onChange={(v) => setPublicBase(String(v))}
-                placeholder="https://panel.example.com"
-                clearable
-              />
-            </Form.FormItem>
-            <Form.FormItem
-              label="面板监听地址"
-              help="仅记录在设置中，修改后通常需要重启 Panel 进程才生效"
-            >
-              <Input
-                value={listenAddr}
-                onChange={(v) => setListenAddr(String(v))}
-                placeholder=":8080 或 127.0.0.1:8080"
-                clearable
-              />
-            </Form.FormItem>
-          </Form>
-        </Card>
+          {/* Card 2: Services & Subscriptions */}
+          <Card className="border-zinc-900 bg-zinc-900/30">
+            <CardHeader className="p-5 pb-3">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Network className="h-4 w-4 text-zinc-400" />
+                服务监听与订阅公开地址
+              </CardTitle>
+              <CardDescription className="text-xs text-zinc-500">
+                配置面板的本地监听端口和外部客户端用以访问订阅的公开地址
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-5 pt-0 space-y-4">
+              <div className="flex flex-col space-y-1.5">
+                <Label htmlFor="settings-public-base" className="text-zinc-300">Public Base URL</Label>
+                <Input
+                  id="settings-public-base"
+                  value={draft.publicBase}
+                  disabled={formDisabled}
+                  onChange={(e) => updateDraft({ publicBase: e.target.value })}
+                  placeholder="例如: https://panel.example.com"
+                  className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                    errors.publicBase ? 'border-red-500 focus-visible:ring-red-500' : ''
+                  }`}
+                />
+                <span className="text-[10px] text-zinc-500">用于生成安装命令中 Agent 的上报端点以及分发 Clash/sing-box 订阅解析文件的 base 根路径</span>
+                {errors.publicBase && (
+                  <p className="text-xs text-red-500 font-medium">{errors.publicBase}</p>
+                )}
+              </div>
 
-        <Card bordered className="la-section" title="安全" subtitle="控制台管理员密码">
-          <Form labelAlign="top" disabled={loading}>
-            <Row gutter={[16, 0]}>
-              <Col xs={12} sm={12} md={6}>
-                <Form.FormItem label="新密码" help="留空表示不修改">
+              <div className="flex flex-col space-y-1.5">
+                <Label htmlFor="settings-listen-address" className="text-zinc-300">面板网络监听地址</Label>
+                <Input
+                  id="settings-listen-address"
+                  value={draft.listenAddr}
+                  disabled={formDisabled}
+                  onChange={(e) => updateDraft({ listenAddr: e.target.value })}
+                  placeholder="例如: :8080 或 127.0.0.1:8080"
+                  className="bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800"
+                />
+                <span className="text-[10px] text-zinc-500">本配置仅保存在设置文件中。修改后，您通常需要重启后端面板程序才会正式生效</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Card 3: Security & Credentials */}
+          <Card className="border-zinc-900 bg-zinc-900/30">
+            <CardHeader className="p-5 pb-3">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Shield className="h-4 w-4 text-zinc-400" />
+                安全管理
+              </CardTitle>
+              <CardDescription className="text-xs text-zinc-500">
+                更新后端 Web 运维控制台的管理员登录凭证
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-5 pt-0 space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col space-y-1.5">
+                  <Label htmlFor="settings-new-password" className="text-zinc-300">新管理员密码</Label>
                   <Input
+                    id="settings-new-password"
                     type="password"
                     value={newPassword}
-                    onChange={(v) => setNewPassword(String(v))}
-                    autocomplete="new-password"
-                    placeholder="新管理员密码"
-                    clearable
+                    disabled={formDisabled}
+                    autoComplete="new-password"
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="留空表示不修改管理员登录密码"
+                    className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                      errors.newPassword ? 'border-red-500 focus-visible:ring-red-500' : ''
+                    }`}
                   />
-                </Form.FormItem>
-              </Col>
-              <Col xs={12} sm={12} md={6}>
-                <Form.FormItem label="确认新密码">
+                  {errors.newPassword && (
+                    <p className="text-xs text-red-500 font-medium">{errors.newPassword}</p>
+                  )}
+                </div>
+
+                <div className="flex flex-col space-y-1.5">
+                  <Label htmlFor="settings-confirm-password" className="text-zinc-300">确认新密码</Label>
                   <Input
+                    id="settings-confirm-password"
                     type="password"
                     value={confirmPassword}
-                    onChange={(v) => setConfirmPassword(String(v))}
-                    autocomplete="new-password"
-                    placeholder="再次输入以确认"
-                    clearable
-                    status={
-                      confirmPassword && newPassword && confirmPassword !== newPassword
-                        ? 'error'
-                        : undefined
-                    }
-                    tips={
-                      confirmPassword && newPassword && confirmPassword !== newPassword
-                        ? '两次输入不一致'
-                        : undefined
-                    }
+                    disabled={formDisabled}
+                    autoComplete="new-password"
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="请再次输入以确认新管理员密码"
+                    className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                      errors.confirmPassword ? 'border-red-500 focus-visible:ring-red-500' : ''
+                    }`}
                   />
-                </Form.FormItem>
-              </Col>
-            </Row>
-          </Form>
-        </Card>
-      </div>
-
-      <div className="la-settings-footer">
-        <Space>
-          <Button variant="outline" loading={loading} onClick={() => void load()}>
-            放弃未保存并重载
-          </Button>
-          <Button theme="primary" loading={busy} onClick={() => void onSave()}>
-            保存设置
-          </Button>
-        </Space>
-      </div>
+                  {errors.confirmPassword && (
+                    <p className="text-xs text-red-500 font-medium">{errors.confirmPassword}</p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
     </div>
   )
+}
+
+function draftFromResponse(settings: SettingsResponse): SettingsDraft {
+  return {
+    token: settings.default_agent_token || '',
+    timeoutSec: settings.grpc_timeout_sec,
+    concurrency: settings.max_concurrency,
+    listenAddr: settings.listen_addr || '',
+    publicBase: settings.public_base_url || '',
+  }
+}
+
+function sameDraft(a: SettingsDraft, b: SettingsDraft): boolean {
+  return (
+    a.token === b.token &&
+    String(a.timeoutSec) === String(b.timeoutSec) &&
+    String(a.concurrency) === String(b.concurrency) &&
+    a.listenAddr === b.listenAddr &&
+    a.publicBase === b.publicBase
+  )
+}
+
+function validate(
+  draft: SettingsDraft,
+  newPassword: string,
+  confirmPassword: string,
+): ValidationErrors {
+  return {
+    timeoutSec: validateInteger(draft.timeoutSec, 1, 600, 'gRPC 超时'),
+    concurrency: validateInteger(draft.concurrency, 1, 256, '最大并发任务数'),
+    publicBase: validatePublicBase(draft.publicBase),
+    newPassword: validatePassword(newPassword, confirmPassword),
+    confirmPassword: validatePasswordConfirmation(newPassword, confirmPassword),
+  }
+}
+
+function validateInteger(value: NumericDraft, min: number, max: number, label: string): string {
+  if (value === '' || String(value).trim() === '') return `${label}不能为空`
+  const number = Number(value)
+  if (!Number.isFinite(number) || !Number.isInteger(number)) return `${label}必须是整数`
+  if (number < min || number > max) return `${label}必须在 ${min} 到 ${max} 之间`
+  return ''
+}
+
+function validatePublicBase(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return '仅支持 http:// 或 https:// 地址'
+    }
+    if (url.username || url.password) return '地址中不能包含用户名或密码'
+    if ((url.pathname && url.pathname !== '/') || url.search || url.hash) {
+      return '请填写不含路径、查询参数或片段的 Panel 根地址'
+    }
+  } catch {
+    return '请输入完整地址，例如 https://panel.example.com'
+  }
+  return ''
+}
+
+function normalizePublicBase(value: string): string {
+  const trimmed = value.trim()
+  return trimmed ? new URL(trimmed).origin : ''
+}
+
+function validatePassword(password: string, confirmation: string): string {
+  if (!password) return confirmation ? '请先填写新密码' : ''
+  if (Array.from(password).length < 8) return '密码至少需要 8 个字符'
+  if (new TextEncoder().encode(password).length > 72) return '密码不能超过 72 字节'
+  return ''
+}
+
+function validatePasswordConfirmation(password: string, confirmation: string): string {
+  if (!password) return confirmation ? '请先填写新密码' : ''
+  if (!confirmation) return '请再次输入新密码'
+  if (password !== confirmation) return '两次输入的密码不一致'
+  return ''
 }

@@ -151,7 +151,6 @@ func (m *mockLive) UpgradeAgent(_ context.Context, version, repo, downloadURL, s
 	}, nil
 }
 
-
 func (m *mockLive) StreamLogs(_ context.Context, _ string, _ int32) (agentv1.AgentControl_StreamLogsClient, error) {
 	return &logStream{lines: []*agentv1.LogLine{
 		{TsUnixMs: 1, Level: "info", Message: "hello"},
@@ -263,6 +262,290 @@ func TestLoginWrongPassword(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestLogoutClearsSession(t *testing.T) {
+	ts, client, _ := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login status = %d", resp.StatusCode)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/logout", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout status = %d, want 204", resp.StatusCode)
+	}
+
+	resp, err = client.Get(ts.URL + "/api/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("nodes after logout status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestLogoutClearsMissingOrInvalidSession(t *testing.T) {
+	ts, _, _ := newTestServer(t, nil, nil)
+	for _, tc := range []struct {
+		name   string
+		cookie string
+	}{
+		{name: "missing"},
+		{name: "invalid", cookie: "not-a-valid-session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/logout", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: "session", Value: tc.cookie, Path: "/"})
+			}
+			resp, err := ts.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent {
+				t.Fatalf("logout status = %d, want 204", resp.StatusCode)
+			}
+			var cleared *http.Cookie
+			for _, cookie := range resp.Cookies() {
+				if cookie.Name == "session" {
+					cleared = cookie
+					break
+				}
+			}
+			if cleared == nil {
+				t.Fatal("logout response did not clear session cookie")
+			}
+			if cleared.Value != "" || cleared.Path != "/" || cleared.MaxAge >= 0 || !cleared.Expires.Before(time.Now()) {
+				t.Fatalf("unexpected cleared cookie: %+v", cleared)
+			}
+		})
+	}
+}
+
+func TestUpdateNodeIsPartialAndPreservesLiveFields(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+
+	n := &store.Node{
+		Name:            "edge-one",
+		Address:         "203.0.113.10",
+		GRPCPort:        50051,
+		Token:           "node-token",
+		Labels:          []string{"edge", "prod"},
+		TLSSkipVerify:   true,
+		CACertPEM:       "certificate",
+		PublicAddress:   "edge.example.com",
+		PortMappings:    []store.PortMapping{{ListenPort: 8443, PublicPort: 443}},
+		EgressInterface: "eth0",
+		Status:          "online",
+		LastSeenUnix:    1234,
+		ConfigHash:      "config-hash",
+		RuntimeState:    "running",
+		AgentVersion:    "v1.2.3",
+		SingboxVersion:  "v1.11.0",
+		Connections:     17,
+		UplinkBytes:     100,
+		DownlinkBytes:   200,
+		CPUPercent:      12.5,
+		MemoryRSSBytes:  4096,
+		MetricsAtUnix:   1220,
+		LastError:       "cached warning",
+	}
+	if err := st.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+
+	// Runtime fields mirror a stale browser snapshot and must be ignored. An
+	// explicitly empty address, however, is an operator edit and must be saved.
+	resp, body := doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+n.ID, map[string]any{
+		"address":          "",
+		"status":           "unreachable",
+		"runtime_state":    "stopped",
+		"agent_version":    "stale",
+		"connections":      0,
+		"last_seen_unix":   1,
+		"config_hash":      "stale-hash",
+		"metrics_at_unix":  1,
+		"memory_rss_bytes": 0,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update node status = %d body=%v", resp.StatusCode, body)
+	}
+	got, err := st.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Address != "" || got.Status != "pending" {
+		t.Fatalf("address/status = %q/%q, want empty/pending", got.Address, got.Status)
+	}
+	if got.RuntimeState != "running" || got.AgentVersion != "v1.2.3" || got.Connections != 17 ||
+		got.LastSeenUnix != 1234 || got.ConfigHash != "config-hash" || got.MetricsAtUnix != 1220 ||
+		got.MemoryRSSBytes != 4096 {
+		t.Fatalf("live fields overwritten by partial update: %+v", got)
+	}
+	if got.Token != "node-token" || len(got.Labels) != 2 || !got.TLSSkipVerify ||
+		got.CACertPEM != "certificate" || got.PublicAddress != "edge.example.com" ||
+		got.EgressInterface != "eth0" || len(got.PortMappings) != 1 {
+		t.Fatalf("omitted editable fields were not preserved: %+v", got)
+	}
+
+	resp, body = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+n.ID, map[string]any{
+		"token":            "",
+		"labels":           []string{},
+		"ca_cert_pem":      "",
+		"public_address":   "",
+		"port_mappings":    []any{},
+		"egress_interface": "",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clear node fields status = %d body=%v", resp.StatusCode, body)
+	}
+	got, err = st.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Token != "" || len(got.Labels) != 0 || got.CACertPEM != "" || got.PublicAddress != "" ||
+		len(got.PortMappings) != 0 || got.EgressInterface != "" {
+		t.Fatalf("explicit empty values were not saved: %+v", got)
+	}
+
+	resp, _ = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+n.ID, map[string]any{"grpc_port": 0})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid grpc_port status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestInboundEnabledDefaultsAndPartialUpdate(t *testing.T) {
+	ts, client, _ := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+
+	resp, created := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
+		"name": "default-enabled", "protocol": "shadowsocks",
+		"params": map[string]any{"port": 8388, "method": "aes-256-gcm"},
+	})
+	if resp.StatusCode != http.StatusCreated || created["enabled"] != true {
+		t.Fatalf("default enabled create status=%d body=%v", resp.StatusCode, created)
+	}
+	id, _ := created["id"].(string)
+	resp, updated := doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/inbounds/"+id, map[string]any{
+		"name": "renamed",
+	})
+	if resp.StatusCode != http.StatusOK || updated["enabled"] != true {
+		t.Fatalf("partial update disabled inbound: status=%d body=%v", resp.StatusCode, updated)
+	}
+
+	resp, created = doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
+		"name": "explicit-disabled", "protocol": "shadowsocks", "enabled": false,
+		"params": map[string]any{"port": 8389, "method": "aes-256-gcm"},
+	})
+	if resp.StatusCode != http.StatusCreated || created["enabled"] != false {
+		t.Fatalf("explicit disabled create status=%d body=%v", resp.StatusCode, created)
+	}
+}
+
+func TestSubscriptionCanExcludeAllLocalInbounds(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+
+	n := &store.Node{Name: "edge", Address: "203.0.113.20", GRPCPort: 50051, Status: "online"}
+	if err := st.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	in := &store.InboundConfig{
+		Name: "ss", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{"port": 8388, "method": "aes-256-gcm", "password": "secret"},
+	}
+	if err := st.CreateInbound(in); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(n.ID, []string{in.ID}); err != nil {
+		t.Fatal(err)
+	}
+	resp, bad := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/subscriptions", map[string]any{
+		"name": "bad-source", "format": "clash", "inbound_ids": []string{},
+		"include_all_inbounds": false, "external_source_ids": []string{"missing-source"},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid source create status=%d body=%v", resp.StatusCode, bad)
+	}
+	list, err := st.ListSubscriptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("failed create left subscription behind: %+v", list)
+	}
+
+	resp, externalOnly := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/subscriptions", map[string]any{
+		"name": "external-only", "format": "clash", "inbound_ids": []string{},
+		"include_all_inbounds": false,
+	})
+	if resp.StatusCode != http.StatusCreated || externalOnly["include_all_inbounds"] != false {
+		t.Fatalf("external-only create status=%d body=%v", resp.StatusCode, externalOnly)
+	}
+	externalID, _ := externalOnly["id"].(string)
+	resp, err = client.Get(ts.URL + "/api/v1/subscriptions/" + externalID + "/preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("external-only preview included local endpoint: status=%d", resp.StatusCode)
+	}
+
+	// Legacy clients omitted the new flag and used [] for all local inbounds.
+	resp, legacy := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/subscriptions", map[string]any{
+		"name": "legacy-all", "format": "clash", "inbound_ids": []string{},
+	})
+	if resp.StatusCode != http.StatusCreated || legacy["include_all_inbounds"] != true {
+		t.Fatalf("legacy create status=%d body=%v", resp.StatusCode, legacy)
+	}
+	legacyID, _ := legacy["id"].(string)
+	legacyBefore, err := st.GetSubscription(legacyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, bad = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/subscriptions/"+legacyID, map[string]any{
+		"name": "should-roll-back", "rotate_token": true,
+		"external_source_ids": []string{"missing-source"},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid source update status=%d body=%v", resp.StatusCode, bad)
+	}
+	legacyAfter, err := st.GetSubscription(legacyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyAfter.Name != legacyBefore.Name || legacyAfter.Token != legacyBefore.Token {
+		t.Fatalf("failed update was partially committed: before=%+v after=%+v", legacyBefore, legacyAfter)
+	}
+	resp, err = client.Get(ts.URL + "/api/v1/subscriptions/" + legacyID + "/preview")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("legacy all-local preview status=%d body=%s", resp.StatusCode, body)
 	}
 }
 
@@ -390,6 +673,20 @@ func TestFleetFlow(t *testing.T) {
 	ca, _ := node2["ca_cert_pem"].(string)
 	if !strings.Contains(ca, "BEGIN CERTIFICATE") {
 		t.Fatalf("ca after enroll = %q", ca)
+	}
+	resp, _ = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+bootID, map[string]any{
+		"tls_skip_verify": true,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("enable TLS skip verify: %d", resp.StatusCode)
+	}
+	resp, insecureTLSInstall := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+bootID+"/install-command", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("install-command with skipped verification: %d", resp.StatusCode)
+	}
+	insecureTLSCommand, _ := insecureTLSInstall["install_command"].(string)
+	if insecureTLSInstall["enable_tls"] != true || !strings.Contains(insecureTLSCommand, "LADDER_TLS=1") {
+		t.Fatalf("TLS transport disabled by skip-verify: %v", insecureTLSInstall)
 	}
 
 	// Create inbound (shadowsocks).

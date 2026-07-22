@@ -2,6 +2,8 @@
 
 const API = '/api/v1'
 
+export const AUTH_EXPIRED_EVENT = 'ladder-airport:auth-expired'
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -19,13 +21,14 @@ async function request<T>(
   const opts: RequestInit = {
     method,
     credentials: 'include',
-    headers: {},
+    headers: { Accept: 'application/json' },
   }
   if (body !== undefined) {
     ;(opts.headers as Record<string, string>)['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(body)
   }
   const res = await fetch(`${API}${path}`, opts)
+  notifyAuthExpired(res.status, path)
   if (res.status === 204) {
     return undefined as T
   }
@@ -46,6 +49,31 @@ async function request<T>(
     throw new ApiError(res.status, msg)
   }
   return data as T
+}
+
+function notifyAuthExpired(status: number, path: string) {
+  if (status !== 401 || path === '/auth/login' || typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
+}
+
+async function requestText(path: string): Promise<string> {
+  const res = await fetch(`${API}${path}`, {
+    credentials: 'include',
+    headers: { Accept: 'text/plain, application/json' },
+  })
+  notifyAuthExpired(res.status, path)
+  const text = await res.text()
+  if (!res.ok) {
+    let message = text || res.statusText || `HTTP ${res.status}`
+    try {
+      const data = JSON.parse(text) as { error?: unknown }
+      if (data.error != null) message = String(data.error)
+    } catch {
+      // Keep the plain-text response.
+    }
+    throw new ApiError(res.status, message)
+  }
+  return text
 }
 
 // --- Types ---
@@ -181,6 +209,8 @@ export interface Subscription {
   format: 'clash' | 'singbox' | string
   token: string
   inbound_ids: string[]
+  /** True includes every enabled local inbound; false allows an external-only subscription. */
+  include_all_inbounds: boolean
   external_source_ids?: string[]
   enabled: boolean
   url?: string
@@ -227,6 +257,19 @@ export interface CreateNodeInput {
   labels?: string[]
   tls_skip_verify?: boolean
   ca_cert_pem?: string
+}
+
+export interface UpdateNodeInput {
+  name?: string
+  address?: string
+  grpc_port?: number
+  public_address?: string
+  token?: string
+  labels?: string[]
+  tls_skip_verify?: boolean
+  ca_cert_pem?: string
+  egress_interface?: string
+  port_mappings?: PortMapping[]
 }
 
 export interface BootstrapNodeInput {
@@ -293,6 +336,10 @@ export function login(password: string): Promise<{ ok: boolean }> {
   return request('POST', '/auth/login', { password })
 }
 
+export function logout(): Promise<void> {
+  return request('POST', '/auth/logout')
+}
+
 // --- Fleet (multi-node overview / refresh) ---
 
 export function fleetOverview(): Promise<FleetOverview> {
@@ -336,7 +383,7 @@ export function getNodeInstallCommand(
   return request('GET', `/nodes/${id}/install-command${qs ? `?${qs}` : ''}`)
 }
 
-export function updateNode(id: string, body: Partial<Node>): Promise<Node> {
+export function updateNode(id: string, body: UpdateNodeInput): Promise<Node> {
   return request('PUT', `/nodes/${id}`, body)
 }
 
@@ -452,6 +499,7 @@ export async function streamNodeLogs(
     signal: opts.signal,
     headers: { Accept: 'text/event-stream' },
   })
+  notifyAuthExpired(res.status, `/nodes/${id}/logs`)
   if (!res.ok) {
     const text = await res.text()
     let msg = res.statusText
@@ -566,6 +614,7 @@ export function createSubscription(body: {
   name: string
   format: string
   inbound_ids?: string[]
+  include_all_inbounds?: boolean
   external_source_ids?: string[]
   enabled?: boolean
 }): Promise<Subscription> {
@@ -578,6 +627,7 @@ export function updateSubscription(
     name?: string
     format?: string
     inbound_ids?: string[]
+    include_all_inbounds?: boolean
     external_source_ids?: string[]
     enabled?: boolean
     rotate_token?: boolean
@@ -591,14 +641,7 @@ export function deleteSubscription(id: string): Promise<void> {
 }
 
 export async function previewSubscription(id: string): Promise<string> {
-  const res = await fetch(`/api/v1/subscriptions/${id}/preview`, {
-    credentials: 'include',
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new ApiError(res.status, text || res.statusText)
-  }
-  return res.text()
+  return requestText(`/subscriptions/${id}/preview`)
 }
 
 // --- External subscription sources ---

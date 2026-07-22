@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -97,14 +98,15 @@ func (s *Store) migrate() error {
 			public_base_url TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS subscriptions (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			format TEXT NOT NULL,
-			token TEXT NOT NULL UNIQUE,
-			inbound_ids_json TEXT NOT NULL DEFAULT '[]',
-			enabled INTEGER NOT NULL DEFAULT 1,
-			created_at_unix INTEGER NOT NULL,
-			updated_at_unix INTEGER NOT NULL
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				format TEXT NOT NULL,
+				token TEXT NOT NULL UNIQUE,
+				inbound_ids_json TEXT NOT NULL DEFAULT '[]',
+				include_all_inbounds INTEGER NOT NULL DEFAULT 1,
+				enabled INTEGER NOT NULL DEFAULT 1,
+				created_at_unix INTEGER NOT NULL,
+				updated_at_unix INTEGER NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS config_snapshots (
 			id TEXT PRIMARY KEY,
@@ -166,9 +168,20 @@ func (s *Store) migrate() error {
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
+		// Nullable during migration so legacy rows can be backfilled from inbound_ids_json.
+		`ALTER TABLE subscriptions ADD COLUMN include_all_inbounds INTEGER`,
 	}
 	for _, stmt := range alters {
 		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
+	}
+	if _, err := s.db.Exec(`
+		UPDATE subscriptions
+		SET include_all_inbounds = CASE
+			WHEN TRIM(inbound_ids_json) IN ('', '[]', 'null') THEN 1
+			ELSE 0
+		END
+		WHERE include_all_inbounds IS NULL`); err != nil {
+		return fmt.Errorf("migrate subscription local inbound mode: %w", err)
 	}
 	return nil
 }
@@ -313,6 +326,79 @@ func (s *Store) UpdateNode(n *Node) error {
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("node not found: %s", n.ID)
+	}
+	return nil
+}
+
+// UpdateNodeOperatorFields updates only operator-owned columns. An address edit
+// adjusts status atomically; metrics, versions and config hashes stay untouched.
+func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) error {
+	if id == "" {
+		return fmt.Errorf("node id required")
+	}
+
+	sets := make([]string, 0, 12)
+	args := make([]any, 0, 14)
+	add := func(column string, value any) {
+		sets = append(sets, column+" = ?")
+		args = append(args, value)
+	}
+
+	if update.Name != nil {
+		add("name", *update.Name)
+	}
+	if update.Address != nil {
+		add("address", *update.Address)
+		sets = append(sets, `status = CASE
+			WHEN ? = '' THEN 'pending'
+			WHEN status = 'pending' THEN 'unknown'
+			ELSE status
+		END`)
+		args = append(args, *update.Address)
+	}
+	if update.GRPCPort != nil {
+		add("grpc_port", *update.GRPCPort)
+	}
+	if update.Token != nil {
+		add("token", *update.Token)
+	}
+	if update.Labels != nil {
+		labels := append([]string{}, (*update.Labels)...)
+		labelsJSON, err := marshalJSON(labels)
+		if err != nil {
+			return fmt.Errorf("marshal labels: %w", err)
+		}
+		add("labels_json", labelsJSON)
+	}
+	if update.TLSSkipVerify != nil {
+		add("tls_skip_verify", boolToInt(*update.TLSSkipVerify))
+	}
+	if update.CACertPEM != nil {
+		add("ca_cert_pem", *update.CACertPEM)
+	}
+	if update.PublicAddress != nil {
+		add("public_address", *update.PublicAddress)
+	}
+	if update.PortMappings != nil {
+		mappingsJSON, err := marshalJSON(NormalizePortMappings(*update.PortMappings))
+		if err != nil {
+			return fmt.Errorf("marshal port_mappings: %w", err)
+		}
+		add("port_mappings_json", mappingsJSON)
+	}
+	if update.EgressInterface != nil {
+		add("egress_interface", *update.EgressInterface)
+	}
+
+	add("updated_at_unix", nowUnix())
+	args = append(args, id)
+	res, err := s.db.Exec(`UPDATE nodes SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+	if err != nil {
+		return fmt.Errorf("update node operator fields: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("node not found: %s", id)
 	}
 	return nil
 }
@@ -933,14 +1019,20 @@ func (s *Store) CreateSubscription(sub *Subscription) error {
 	if sub.InboundIDs == nil {
 		sub.InboundIDs = []string{}
 	}
+	if sub.IncludeAllInbounds {
+		sub.InboundIDs = []string{}
+	}
 	idsJSON, err := marshalJSON(sub.InboundIDs)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec(`
-		INSERT INTO subscriptions (id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		sub.ID, sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.Enabled), sub.CreatedAtUnix, sub.UpdatedAtUnix,
+		INSERT INTO subscriptions (
+			id, name, format, token, inbound_ids_json, include_all_inbounds,
+			enabled, created_at_unix, updated_at_unix
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sub.ID, sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.IncludeAllInbounds),
+		boolToInt(sub.Enabled), sub.CreatedAtUnix, sub.UpdatedAtUnix,
 	)
 	if err != nil {
 		return fmt.Errorf("create subscription: %w", err)
@@ -956,14 +1048,19 @@ func (s *Store) UpdateSubscription(sub *Subscription) error {
 	if sub.InboundIDs == nil {
 		sub.InboundIDs = []string{}
 	}
+	if sub.IncludeAllInbounds {
+		sub.InboundIDs = []string{}
+	}
 	idsJSON, err := marshalJSON(sub.InboundIDs)
 	if err != nil {
 		return err
 	}
 	res, err := s.db.Exec(`
-		UPDATE subscriptions SET name=?, format=?, token=?, inbound_ids_json=?, enabled=?, updated_at_unix=?
+		UPDATE subscriptions SET
+			name=?, format=?, token=?, inbound_ids_json=?, include_all_inbounds=?, enabled=?, updated_at_unix=?
 		WHERE id=?`,
-		sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.Enabled), sub.UpdatedAtUnix, sub.ID,
+		sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.IncludeAllInbounds),
+		boolToInt(sub.Enabled), sub.UpdatedAtUnix, sub.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update subscription: %w", err)
@@ -989,14 +1086,16 @@ func (s *Store) DeleteSubscription(id string) error {
 
 func (s *Store) GetSubscription(id string) (*Subscription, error) {
 	row := s.db.QueryRow(`
-		SELECT id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix
+		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
+			enabled, created_at_unix, updated_at_unix
 		FROM subscriptions WHERE id = ?`, id)
 	return scanSubscription(row)
 }
 
 func (s *Store) GetSubscriptionByToken(token string) (*Subscription, error) {
 	row := s.db.QueryRow(`
-		SELECT id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix
+		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
+			enabled, created_at_unix, updated_at_unix
 		FROM subscriptions WHERE token = ?`, token)
 	sub, err := scanSubscription(row)
 	if err != nil {
@@ -1007,7 +1106,8 @@ func (s *Store) GetSubscriptionByToken(token string) (*Subscription, error) {
 
 func (s *Store) ListSubscriptions() ([]Subscription, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, format, token, inbound_ids_json, enabled, created_at_unix, updated_at_unix
+		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
+			enabled, created_at_unix, updated_at_unix
 		FROM subscriptions ORDER BY created_at_unix ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list subscriptions: %w", err)
@@ -1032,8 +1132,11 @@ func scanSubscription(row interface {
 }) (*Subscription, error) {
 	var sub Subscription
 	var idsJSON string
-	var enabled int
-	err := row.Scan(&sub.ID, &sub.Name, &sub.Format, &sub.Token, &idsJSON, &enabled, &sub.CreatedAtUnix, &sub.UpdatedAtUnix)
+	var enabled, includeAll int
+	err := row.Scan(
+		&sub.ID, &sub.Name, &sub.Format, &sub.Token, &idsJSON, &includeAll,
+		&enabled, &sub.CreatedAtUnix, &sub.UpdatedAtUnix,
+	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("subscription not found")
 	}
@@ -1041,13 +1144,16 @@ func scanSubscription(row interface {
 		return nil, err
 	}
 	sub.Enabled = enabled != 0
+	sub.IncludeAllInbounds = includeAll != 0
 	sub.InboundIDs = []string{}
 	if err := unmarshalJSON(idsJSON, &sub.InboundIDs); err != nil {
 		return nil, fmt.Errorf("unmarshal inbound_ids: %w", err)
 	}
+	if sub.InboundIDs == nil {
+		sub.InboundIDs = []string{}
+	}
 	return &sub, nil
 }
-
 
 // --- External sources ---
 
@@ -1100,16 +1206,17 @@ func (s *Store) UpdateExternalSource(src *ExternalSource) error {
 	if err != nil {
 		return err
 	}
-	urlChanged := strings.TrimSpace(existing.URL) != strings.TrimSpace(src.URL)
-	src.UpdatedAtUnix = nowUnix()
 	if src.Headers == nil {
 		src.Headers = map[string]string{}
 	}
+	fetchInputChanged := strings.TrimSpace(existing.URL) != strings.TrimSpace(src.URL) ||
+		!maps.Equal(existing.Headers, src.Headers)
+	src.UpdatedAtUnix = nowUnix()
 	headersJSON, err := marshalJSON(src.Headers)
 	if err != nil {
 		return err
 	}
-	if urlChanged {
+	if fetchInputChanged {
 		src.CachedBody = ""
 		src.CachedProxyCount = 0
 		src.ContentType = ""

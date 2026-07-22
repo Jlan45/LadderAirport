@@ -204,8 +204,9 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "node has no token; set node token or default_agent_token in settings")
 		return
 	}
-	// Prefer TLS install when the node expects cert verification.
-	enableTLS := !n.TLSSkipVerify
+	// Transport is TLS whenever a CA is configured. TLSSkipVerify controls
+	// certificate verification only; it must not switch the transport to plaintext.
+	enableTLS := strings.TrimSpace(n.CACertPEM) != ""
 	q := r.URL.Query()
 	if v := q.Get("tls"); v == "0" || v == "false" {
 		enableTLS = false
@@ -253,7 +254,7 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
-	existing, err := s.Store.GetNode(id)
+	_, err := s.Store.GetNode(id)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -262,33 +263,42 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	var body store.Node
+	var body store.NodeOperatorUpdate
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	body.ID = id
-	body.CreatedAtUnix = existing.CreatedAtUnix
-	// Preserve runtime fields if client omits them.
-	if body.Status == "" {
-		body.Status = existing.Status
+	if body.Name != nil {
+		name := strings.TrimSpace(*body.Name)
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "name must not be empty")
+			return
+		}
+		body.Name = &name
 	}
-	if body.LastSeenUnix == 0 {
-		body.LastSeenUnix = existing.LastSeenUnix
+	if body.Address != nil {
+		address := strings.TrimSpace(*body.Address)
+		body.Address = &address
 	}
-	if body.ConfigHash == "" {
-		body.ConfigHash = existing.ConfigHash
+	if body.GRPCPort != nil {
+		if *body.GRPCPort < 1 || *body.GRPCPort > 65535 {
+			writeError(w, http.StatusBadRequest, "grpc_port must be between 1 and 65535")
+			return
+		}
 	}
-	if body.Name == "" {
-		body.Name = existing.Name
+	if body.Token != nil {
+		token := strings.TrimSpace(*body.Token)
+		body.Token = &token
 	}
-	if body.Address == "" {
-		body.Address = existing.Address
+	if body.PublicAddress != nil {
+		publicAddress := strings.TrimSpace(*body.PublicAddress)
+		body.PublicAddress = &publicAddress
 	}
-	if body.GRPCPort == 0 {
-		body.GRPCPort = existing.GRPCPort
+	if body.EgressInterface != nil {
+		egressInterface := strings.TrimSpace(*body.EgressInterface)
+		body.EgressInterface = &egressInterface
 	}
-	if err := s.Store.UpdateNode(&body); err != nil {
+	if err := s.Store.UpdateNodeOperatorFields(id, body); err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
@@ -866,4 +876,3 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 		"hint":             "binary staged; helper restarts agent shortly — click 探测 to refresh agent_version",
 	})
 }
-

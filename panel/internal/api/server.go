@@ -123,6 +123,10 @@ func isPublicAPI(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/login" {
 		return true
 	}
+	// Logout is idempotent and must be able to clear an expired or invalid cookie.
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/logout" {
+		return true
+	}
 	// Agent install enrollment (auth via node token, not admin session).
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/enroll" {
 		return true
@@ -139,6 +143,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sub/{token}", s.handlePublicSubscription)
 
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("POST /api/v1/agent/enroll", s.handleAgentEnroll)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)

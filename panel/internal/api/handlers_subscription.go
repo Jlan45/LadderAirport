@@ -28,11 +28,12 @@ func (s *Server) handleListSubscriptions(w http.ResponseWriter, r *http.Request)
 }
 
 type createSubBody struct {
-	Name              string   `json:"name"`
-	Format            string   `json:"format"`
-	InboundIDs        []string `json:"inbound_ids"`
-	ExternalSourceIDs []string `json:"external_source_ids"`
-	Enabled           *bool    `json:"enabled"`
+	Name               string   `json:"name"`
+	Format             string   `json:"format"`
+	InboundIDs         []string `json:"inbound_ids"`
+	IncludeAllInbounds *bool    `json:"include_all_inbounds"`
+	ExternalSourceIDs  []string `json:"external_source_ids"`
+	Enabled            *bool    `json:"enabled"`
 }
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -59,12 +60,20 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	if body.Enabled != nil {
 		enabled = *body.Enabled
 	}
+	// Backward compatibility: legacy clients use an empty inbound_ids array for
+	// "all local inbounds". New clients send include_all_inbounds explicitly so
+	// false + [] can represent an external-only subscription.
+	includeAll := len(body.InboundIDs) == 0
+	if body.IncludeAllInbounds != nil {
+		includeAll = *body.IncludeAllInbounds
+	}
 	sub := &store.Subscription{
-		Name:       body.Name,
-		Format:     format,
-		Token:      token,
-		InboundIDs: body.InboundIDs,
-		Enabled:    enabled,
+		Name:               body.Name,
+		Format:             format,
+		Token:              token,
+		InboundIDs:         body.InboundIDs,
+		IncludeAllInbounds: includeAll,
+		Enabled:            enabled,
 	}
 	if err := s.Store.CreateSubscription(sub); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -72,6 +81,12 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if body.ExternalSourceIDs != nil {
 		if err := s.Store.SetSubscriptionExternalSources(sub.ID, body.ExternalSourceIDs); err != nil {
+			// Association replacement is transactional. Remove the just-created
+			// subscription as well so a 400 response never leaves a hidden row behind.
+			if cleanupErr := s.Store.DeleteSubscription(sub.ID); cleanupErr != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v (cleanup: %v)", err, cleanupErr))
+				return
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -91,17 +106,20 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var body struct {
-		Name              *string  `json:"name"`
-		Format            *string  `json:"format"`
-		InboundIDs        []string `json:"inbound_ids"`
-		ExternalSourceIDs []string `json:"external_source_ids"`
-		Enabled           *bool    `json:"enabled"`
-		Rotate            bool     `json:"rotate_token"`
+		Name               *string  `json:"name"`
+		Format             *string  `json:"format"`
+		InboundIDs         []string `json:"inbound_ids"`
+		IncludeAllInbounds *bool    `json:"include_all_inbounds"`
+		ExternalSourceIDs  []string `json:"external_source_ids"`
+		Enabled            *bool    `json:"enabled"`
+		Rotate             bool     `json:"rotate_token"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	before := *existing
+	before.InboundIDs = append([]string{}, existing.InboundIDs...)
 	if body.Name != nil && strings.TrimSpace(*body.Name) != "" {
 		existing.Name = *body.Name
 	}
@@ -115,6 +133,13 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if body.InboundIDs != nil {
 		existing.InboundIDs = body.InboundIDs
+		if body.IncludeAllInbounds == nil {
+			// Preserve legacy update semantics: [] meant all, a non-empty list meant selected.
+			existing.IncludeAllInbounds = len(body.InboundIDs) == 0
+		}
+	}
+	if body.IncludeAllInbounds != nil {
+		existing.IncludeAllInbounds = *body.IncludeAllInbounds
 	}
 	if body.Enabled != nil {
 		existing.Enabled = *body.Enabled
@@ -133,6 +158,10 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if body.ExternalSourceIDs != nil {
 		if err := s.Store.SetSubscriptionExternalSources(id, body.ExternalSourceIDs); err != nil {
+			if rollbackErr := s.Store.UpdateSubscription(&before); rollbackErr != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v (rollback: %v)", err, rollbackErr))
+				return
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -216,9 +245,16 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		}
 		nodeAttachments[n.ID] = atts
 	}
-	local, err := subscription.CollectEndpointsFromAttachments(nodes, nodeAttachments, sub.InboundIDs)
-	if err != nil {
-		return nil, "", err
+	local := []subscription.ProxyEndpoint{}
+	if sub.IncludeAllInbounds || len(sub.InboundIDs) > 0 {
+		filter := sub.InboundIDs
+		if sub.IncludeAllInbounds {
+			filter = nil
+		}
+		local, err = subscription.CollectEndpointsFromAttachments(nodes, nodeAttachments, filter)
+		if err != nil {
+			return nil, "", err
+		}
 	}
 
 	var external []subscription.ProxyEndpoint

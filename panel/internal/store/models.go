@@ -13,7 +13,7 @@ type PortMapping struct {
 type Node struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
-	Address       string   `json:"address"` // control dial host (Panel → Agent)
+	Address       string   `json:"address"`   // control dial host (Panel → Agent)
 	GRPCPort      int      `json:"grpc_port"` // control dial port (external mapped port if NAT)
 	Token         string   `json:"token,omitempty"`
 	Labels        []string `json:"labels"`
@@ -46,6 +46,21 @@ type Node struct {
 	InboundCount   int     `json:"inbound_count,omitempty"` // filled by overview, not persisted
 	CreatedAtUnix  int64   `json:"created_at_unix"`
 	UpdatedAtUnix  int64   `json:"updated_at_unix"`
+}
+
+// NodeOperatorUpdate contains only fields controlled by an operator. Runtime
+// status, metrics, versions and config hashes are deliberately excluded.
+type NodeOperatorUpdate struct {
+	Name            *string        `json:"name"`
+	Address         *string        `json:"address"`
+	GRPCPort        *int           `json:"grpc_port"`
+	Token           *string        `json:"token"`
+	Labels          *[]string      `json:"labels"`
+	TLSSkipVerify   *bool          `json:"tls_skip_verify"`
+	CACertPEM       *string        `json:"ca_cert_pem"`
+	PublicAddress   *string        `json:"public_address"`
+	PortMappings    *[]PortMapping `json:"port_mappings"`
+	EgressInterface *string        `json:"egress_interface"`
 }
 
 // NormalizePortMappings drops invalid/identity rows and keeps the last mapping per listen_port.
@@ -156,14 +171,15 @@ type Settings struct {
 
 // Subscription is a client-facing share link (Clash YAML or sing-box JSON).
 type Subscription struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Format        string   `json:"format"`      // clash | singbox
-	Token         string   `json:"token"`       // URL secret for public /sub/{token}
-	InboundIDs    []string `json:"inbound_ids"` // empty = all enabled inbounds attached to any node
-	Enabled       bool     `json:"enabled"`
-	CreatedAtUnix int64    `json:"created_at_unix"`
-	UpdatedAtUnix int64    `json:"updated_at_unix"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Format             string   `json:"format"`      // clash | singbox
+	Token              string   `json:"token"`       // URL secret for public /sub/{token}
+	InboundIDs         []string `json:"inbound_ids"` // selected IDs when IncludeAllInbounds is false
+	IncludeAllInbounds bool     `json:"include_all_inbounds"`
+	Enabled            bool     `json:"enabled"`
+	CreatedAtUnix      int64    `json:"created_at_unix"`
+	UpdatedAtUnix      int64    `json:"updated_at_unix"`
 }
 
 // ExternalSource is a remote subscription URL that can be attached to panel subscriptions.

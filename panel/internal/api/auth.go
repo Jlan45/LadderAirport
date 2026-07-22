@@ -106,6 +106,18 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, token string) {
 	})
 }
 
+func (s *Server) clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+	})
+}
+
 type loginRequest struct {
 	Password string `json:"password"`
 }
@@ -140,4 +152,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setSessionCookie(w, token)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	s.clearSessionCookie(w)
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -90,6 +90,8 @@ export function taskStatusLabel(status: string): string {
       return '成功'
     case 'failed':
       return '失败'
+    case 'partial':
+      return '部分成功'
     case 'pending':
       return '等待中'
     case 'running':

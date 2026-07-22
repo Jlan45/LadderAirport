@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -14,6 +15,63 @@ func openTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+func TestSubscriptionInboundModeMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE subscriptions (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			format TEXT NOT NULL,
+			token TEXT NOT NULL UNIQUE,
+			inbound_ids_json TEXT NOT NULL DEFAULT '[]',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		);
+		INSERT INTO subscriptions VALUES ('all', 'all', 'clash', 'token-all', '[]', 1, 1, 1);
+		INSERT INTO subscriptions VALUES ('selected', 'selected', 'clash', 'token-selected', '["in-1"]', 1, 1, 1);
+		INSERT INTO subscriptions VALUES ('null-ids', 'null ids', 'clash', 'token-null', 'null', 1, 1, 1);
+	`)
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	all, err := s.GetSubscription("all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !all.IncludeAllInbounds || len(all.InboundIDs) != 0 {
+		t.Fatalf("legacy empty filter migration = %+v, want include all", all)
+	}
+	selected, err := s.GetSubscription("selected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.IncludeAllInbounds || len(selected.InboundIDs) != 1 || selected.InboundIDs[0] != "in-1" {
+		t.Fatalf("legacy selected filter migration = %+v", selected)
+	}
+	nullIDs, err := s.GetSubscription("null-ids")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nullIDs.IncludeAllInbounds || nullIDs.InboundIDs == nil || len(nullIDs.InboundIDs) != 0 {
+		t.Fatalf("legacy null filter migration = %+v, want non-nil empty include-all filter", nullIDs)
+	}
 }
 
 func TestCreateAndListNodes(t *testing.T) {
@@ -244,6 +302,153 @@ func TestUpdateNodeGetDelete(t *testing.T) {
 	}
 }
 
+func TestUpdateNodeOperatorFieldsPreservesNewerRuntimeState(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{
+		Name:           "edge",
+		Address:        "192.0.2.10",
+		GRPCPort:       50051,
+		Token:          "old-token",
+		Labels:         []string{"prod"},
+		Status:         "unknown",
+		RuntimeState:   "stopped",
+		AgentVersion:   "v1",
+		SingboxVersion: "1.0",
+		Connections:    1,
+		UplinkBytes:    2,
+		DownlinkBytes:  3,
+		CPUPercent:     4,
+		MemoryRSSBytes: 5,
+		MetricsAtUnix:  6,
+		LastSeenUnix:   7,
+		ConfigHash:     "old-hash",
+		LastError:      "old-error",
+	}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+
+	// The operator starts editing this stale snapshot before a live refresh lands.
+	stale, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := *stale
+	live.Status = "online"
+	live.RuntimeState = "running"
+	live.AgentVersion = "v2"
+	live.SingboxVersion = "2.0"
+	live.Connections = 101
+	live.UplinkBytes = 102
+	live.DownlinkBytes = 103
+	live.CPUPercent = 10.5
+	live.MemoryRSSBytes = 104
+	live.MetricsAtUnix = 105
+	live.LastSeenUnix = 106
+	live.ConfigHash = "new-hash"
+	live.LastError = ""
+	if err := s.UpdateNode(&live); err != nil {
+		t.Fatal(err)
+	}
+
+	name := stale.Name + "-renamed"
+	token := "new-token"
+	labels := append(stale.Labels, "edited")
+	if err := s.UpdateNodeOperatorFields(n.ID, NodeOperatorUpdate{
+		Name:   &name,
+		Token:  &token,
+		Labels: &labels,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != name || got.Token != token || len(got.Labels) != 2 {
+		t.Fatalf("operator fields were not updated: %+v", got)
+	}
+	if got.Status != live.Status || got.RuntimeState != live.RuntimeState ||
+		got.AgentVersion != live.AgentVersion || got.SingboxVersion != live.SingboxVersion ||
+		got.Connections != live.Connections || got.UplinkBytes != live.UplinkBytes ||
+		got.DownlinkBytes != live.DownlinkBytes || got.CPUPercent != live.CPUPercent ||
+		got.MemoryRSSBytes != live.MemoryRSSBytes || got.MetricsAtUnix != live.MetricsAtUnix ||
+		got.LastSeenUnix != live.LastSeenUnix || got.ConfigHash != live.ConfigHash ||
+		got.LastError != live.LastError {
+		t.Fatalf("operator update overwrote newer runtime state: got=%+v live=%+v", got, live)
+	}
+}
+
+func TestUpdateExternalSourceInvalidatesCacheOnFetchInputChange(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*ExternalSource)
+		wantClear bool
+	}{
+		{
+			name: "url",
+			mutate: func(src *ExternalSource) {
+				src.URL = "https://new.example/sub"
+			},
+			wantClear: true,
+		},
+		{
+			name: "headers",
+			mutate: func(src *ExternalSource) {
+				src.Headers = map[string]string{"Authorization": "Bearer new"}
+			},
+			wantClear: true,
+		},
+		{
+			name: "metadata-only",
+			mutate: func(src *ExternalSource) {
+				src.Name = "renamed"
+				src.RefreshIntervalSec = 3600
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openTestStore(t)
+			src := &ExternalSource{
+				Name:               "source",
+				URL:                "https://old.example/sub",
+				Headers:            map[string]string{"Authorization": "Bearer old"},
+				Enabled:            true,
+				RefreshIntervalSec: 60,
+				LastFetchUnix:      10,
+				LastSuccessUnix:    9,
+				LastError:          "cached warning",
+				ContentType:        "clash_yaml",
+				CachedBody:         "proxies: []",
+				CachedProxyCount:   4,
+			}
+			if err := s.CreateExternalSource(src); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(src)
+			if err := s.UpdateExternalSource(src); err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.GetExternalSource(src.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantClear {
+				if got.CachedBody != "" || got.CachedProxyCount != 0 || got.ContentType != "" ||
+					got.LastFetchUnix != 0 || got.LastSuccessUnix != 0 || got.LastError != "" {
+					t.Fatalf("fetch input change retained cache: %+v", got)
+				}
+				return
+			}
+			if got.CachedBody != "proxies: []" || got.CachedProxyCount != 4 ||
+				got.ContentType != "clash_yaml" || got.LastFetchUnix != 10 ||
+				got.LastSuccessUnix != 9 || got.LastError != "cached warning" {
+				t.Fatalf("metadata-only change cleared cache: %+v", got)
+			}
+		})
+	}
+}
+
 func TestSaveAndLatestSnapshot(t *testing.T) {
 	s := openTestStore(t)
 
@@ -337,9 +542,9 @@ func TestNodePublicAddress(t *testing.T) {
 func TestNodePortMappings(t *testing.T) {
 	s := openTestStore(t)
 	n := &Node{
-		Name:     "nat-map",
-		Address:  "10.0.0.8",
-		GRPCPort: 50051,
+		Name:          "nat-map",
+		Address:       "10.0.0.8",
+		GRPCPort:      50051,
 		PublicAddress: "203.0.113.9",
 		PortMappings: []PortMapping{
 			{ListenPort: 8443, PublicPort: 443},
@@ -397,7 +602,6 @@ func TestNormalizePortMappings(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 }
-
 
 func TestNodeInboundNATBindings(t *testing.T) {
 	s := openTestStore(t)

@@ -4,8 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ladder Airport</title>
-    <script type="module" crossorigin src="/assets/index-p76hAKi3.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DaMy89-y.css">
+    <script>
+      (function() {
+        const theme = localStorage.getItem('la-theme') || 'light';
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-DKFGwOjW.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-D2SvxB5u.css">
   </head>
   <body>
     <div id="root"></div>

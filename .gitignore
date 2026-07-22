@@ -11,6 +11,8 @@ dist/
 # Frontend
 node_modules/
 web/dist/
+web/.test-dist/
+.cache/
 
 # Runtime / local data
 data/
