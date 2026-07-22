@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { ApiError, AUTH_EXPIRED_EVENT, listNodes, logout } from './api/client'
 import { toast } from './lib/toast'
+import { LOGO_DARK_BASE64, LOGO_LIGHT_BASE64 } from './lib/logos'
 
 const Login = lazy(() => import('./pages/Login'))
 const Fleet = lazy(() => import('./pages/Fleet'))
@@ -157,10 +158,10 @@ function AppLayout() {
       <header className="sticky top-0 z-40 w-full border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
           <div className="flex items-center gap-6">
-            <Link className="flex items-center gap-2 text-sm font-bold tracking-tight text-zinc-100 hover:opacity-90" to="/" aria-label="Ladder Airport 节点管理">
-              <span className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-100 font-extrabold flex items-center justify-center text-xs shadow-inner">
-                LA
-              </span>
+            <Link className="flex items-center gap-2.5 text-sm font-bold tracking-tight text-zinc-100 hover:opacity-90 group" to="/" aria-label="Ladder Airport 节点管理">
+              <div className="relative flex items-center justify-center rounded-md overflow-hidden transition-all duration-300 group-hover:scale-105 shadow-[0_0_10px_rgba(6,182,212,0.4)] dark:shadow-[0_0_12px_rgba(168,85,247,0.45)]">
+                <img src={theme === 'dark' ? LOGO_DARK_BASE64 : LOGO_LIGHT_BASE64} alt="Logo" className="w-8 h-8 object-contain" />
+              </div>
               <span className="hidden sm:inline">Ladder Airport</span>
             </Link>
             <nav className="flex items-center gap-1 sm:gap-2" aria-label="主导航">

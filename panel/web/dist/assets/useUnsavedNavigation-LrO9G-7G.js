@@ -1,0 +1,2 @@
+import{r as a,as as t}from"./index-D24J5rCN.js";function h({active:l,title:u="放弃未保存的更改？",message:c="离开当前页面会丢失尚未保存的修改。"}){const f=a.useRef(!1),n=a.useCallback(({currentLocation:r,nextLocation:s})=>f.current?(f.current=!1,!1):!l||s.pathname==="/login"?!1:r.pathname!==s.pathname||r.search!==s.search||r.hash!==s.hash,[l]),e=t(n);return a.useEffect(()=>{if(e.state!=="blocked")return;window.confirm(`${u}
+${c}`)?e.proceed():e.reset()},[e,c,u]),a.useCallback(()=>{f.current=!0},[])}export{h as u};

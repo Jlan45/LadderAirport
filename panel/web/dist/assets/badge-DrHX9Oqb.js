@@ -1,0 +1,6 @@
+import{d as t,j as d,f as n}from"./index-D24J5rCN.js";/**
+ * @license lucide-react v1.25.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const s=[["path",{d:"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8",key:"v9h5vc"}],["path",{d:"M21 3v5h-5",key:"1q7to0"}],["path",{d:"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16",key:"3uifl3"}],["path",{d:"M8 16H3v5",key:"1cv678"}]],b=t("refresh-cw",s);function c({className:r,variant:e="default",...o}){return d.jsx("div",{className:n("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",{"border-transparent bg-primary text-primary-foreground shadow":e==="default","border-transparent bg-secondary text-secondary-foreground":e==="secondary","border-transparent bg-red-950/80 text-red-400 border border-red-900/50":e==="destructive","border-transparent bg-emerald-950/80 text-emerald-400 border border-emerald-900/50":e==="success","border-transparent bg-blue-950/80 text-blue-400 border border-blue-900/50":e==="info","border-transparent bg-amber-950/80 text-amber-400 border border-amber-900/50":e==="warning","text-foreground":e==="outline"},r),...o})}export{c as B,b as R};

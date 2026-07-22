@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ApiError, listNodes, login } from '../api/client'
 import { toast } from '../lib/toast'
+import { LOGO_DARK_BASE64, LOGO_LIGHT_BASE64 } from '../lib/logos'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -16,8 +17,13 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   const nextPath = safeNextPath(searchParams.get('next'))
 
+  const [logo, setLogo] = useState(LOGO_LIGHT_BASE64)
+
   useEffect(() => {
     document.title = '登录 · Ladder Airport'
+    const isDark = document.documentElement.classList.contains('dark') || 
+                   localStorage.getItem('la-theme') === 'dark'
+    setLogo(isDark ? LOGO_DARK_BASE64 : LOGO_LIGHT_BASE64)
   }, [])
 
   useEffect(() => {
@@ -68,9 +74,7 @@ export default function Login() {
         <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-zinc-800 via-zinc-400 to-zinc-800" />
         <CardHeader className="space-y-4 pt-8 pb-4 text-center">
           <div className="flex justify-center" aria-hidden="true">
-            <span className="w-12 h-12 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-100 font-extrabold flex items-center justify-center text-lg shadow-inner">
-              LA
-            </span>
+            <img src={logo} alt="Logo" className="w-12 h-12 object-contain rounded-lg" />
           </div>
           <div className="space-y-1.5">
             <CardTitle className="text-2xl font-bold tracking-tight text-zinc-100">Ladder Airport</CardTitle>
