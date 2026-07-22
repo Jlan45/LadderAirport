@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -93,6 +94,7 @@ func main() {
 	case sig := <-sigCh:
 		log.Printf("signal %v, shutting down", sig)
 		gs.GracefulStop()
+		_ = rt.Stop(context.Background())
 	case err := <-errCh:
 		if err != nil {
 			log.Fatalf("serve: %v", err)

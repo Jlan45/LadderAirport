@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	stdjson "encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,10 +57,15 @@ type BoxRuntime struct {
 // NewBoxRuntime creates a BoxRuntime. dataDir, if non-empty, receives current.json
 // snapshots of the last successfully applied config.
 func NewBoxRuntime(dataDir string) *BoxRuntime {
-	return &BoxRuntime{
+	r := &BoxRuntime{
 		dataDir: dataDir,
 		state:   StateStopped,
 	}
+	r.loadTraffic()
+	if dataDir != "" {
+		go r.startTrafficPersistLoop()
+	}
+	return r
 }
 
 func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) error {
@@ -140,6 +146,8 @@ func (r *BoxRuntime) stopInstanceLocked() {
 	r.startedAtUnix = 0
 	// Keep configJSON/hash so Start can re-apply after Stop.
 	r.mu.Unlock()
+
+	r.saveTraffic()
 
 	if old != nil {
 		_ = old.Close()
@@ -300,4 +308,64 @@ func (r *BoxRuntime) writeCurrent(dataDir, configJSON string) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+type trafficState struct {
+	Uplink   int64 `json:"uplink"`
+	Downlink int64 `json:"downlink"`
+}
+
+func (r *BoxRuntime) loadTraffic() {
+	if r.dataDir == "" {
+		return
+	}
+	path := filepath.Join(r.dataDir, "traffic.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var state trafficState
+	if err := stdjson.Unmarshal(data, &state); err == nil {
+		r.mu.Lock()
+		r.prevUplink = state.Uplink
+		r.prevDownlink = state.Downlink
+		r.mu.Unlock()
+	}
+}
+
+func (r *BoxRuntime) saveTraffic() {
+	if r.dataDir == "" {
+		return
+	}
+	r.mu.Lock()
+	var up, down int64
+	if r.tracker != nil {
+		_, u, d := r.tracker.Snapshot()
+		up, down = u, d
+	}
+	totalUp := up + r.prevUplink
+	totalDown := down + r.prevDownlink
+	r.mu.Unlock()
+
+	state := trafficState{
+		Uplink:   totalUp,
+		Downlink: totalDown,
+	}
+	data, err := stdjson.Marshal(state)
+	if err != nil {
+		return
+	}
+	path := filepath.Join(r.dataDir, "traffic.json")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, path)
+}
+
+func (r *BoxRuntime) startTrafficPersistLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	for range ticker.C {
+		r.saveTraffic()
+	}
 }
