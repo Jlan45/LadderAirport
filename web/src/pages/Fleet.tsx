@@ -1174,25 +1174,21 @@ function NodeCard({
 
         {/* Metrics Grid */}
         <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-zinc-900 bg-zinc-950/10 rounded px-1.5 text-center">
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             <span className="text-[10px] text-zinc-500 block">入站 / 连接</span>
-            <span className="text-xs font-semibold text-zinc-300">
+            <span className="text-xs font-semibold text-zinc-300 font-mono block">
               {n.inbound_count ?? 0} / {hasMetrics ? (n.connections ?? 0) : '—'}
             </span>
           </div>
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             <span className="text-[10px] text-zinc-500 block">吞吐 (上传/下载)</span>
-            <span className="text-[11px] font-semibold text-zinc-300 font-mono leading-none">
-              {hasMetrics ? (
-                <span className="block">
-                  {formatBytes(n.uplink_bytes)} / {formatBytes(n.downlink_bytes)}
-                </span>
-              ) : '—'}
+            <span className="text-xs font-semibold text-zinc-300 font-mono block">
+              {hasMetrics ? `${formatBytes(n.uplink_bytes)} / ${formatBytes(n.downlink_bytes)}` : '—'}
             </span>
           </div>
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             <span className="text-[10px] text-zinc-500 block">内存 / CPU</span>
-            <span className="text-xs font-semibold text-zinc-300">
+            <span className="text-xs font-semibold text-zinc-300 font-mono block">
               {hasMetrics ? `${formatBytes(n.memory_rss_bytes)} / ${(n.cpu_percent ?? 0).toFixed(1)}%` : '—'}
             </span>
           </div>
