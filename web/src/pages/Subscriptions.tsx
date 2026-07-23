@@ -16,13 +16,6 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -33,6 +26,12 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -48,7 +47,13 @@ import {
   Eye,
   RotateCw,
   Trash2,
-  HelpCircle,
+  QrCode,
+  ExternalLink,
+  Rss,
+  Globe,
+  Radio,
+  Layers,
+  Server,
 } from 'lucide-react'
 import {
   createExternalSource,
@@ -70,6 +75,7 @@ import {
 import { copyText } from '../lib/clipboard'
 import { formatTime } from '../lib/nodeDisplay'
 import { toast } from '../lib/toast'
+import { QRCodeModal } from '../components/QRCodeModal'
 
 type LocalMode = 'all' | 'custom' | 'none'
 type NumericDraft = number | string
@@ -133,6 +139,14 @@ export default function Subscriptions() {
   const [sourcePreview, setSourcePreview] = useState<SourcePreview | null>(null)
   const [sourcePreviewTitle, setSourcePreviewTitle] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  
+  // QR Code Modal state
+  const [qrModal, setQrModal] = useState<{ open: boolean; title: string; url: string }>({
+    open: false,
+    title: '',
+    url: '',
+  })
+
   const loadVersion = useRef(0)
   const pendingRef = useRef<Set<string>>(new Set())
   const savingRef = useRef(false)
@@ -298,79 +312,61 @@ export default function Subscriptions() {
     if (!beginOperation(key)) return
     try {
       const updated = await updateSubscription(subscription.id, { enabled: !subscription.enabled })
-      setSubscriptions((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
-      )
+      setSubscriptions((current) => current.map((item) => (item.id === updated.id ? updated : item)))
       toast.success(updated.enabled ? '订阅已启用' : '订阅已禁用')
     } catch (err) {
-      toast.error(errorText(err, '更新订阅失败'))
+      toast.error(errorText(err, '切换订阅状态失败'))
     } finally {
       endOperation(key)
     }
   }
 
-  async function copySubscriptionURL(subscription: Subscription) {
+  async function rotateSubscriptionToken(subscription: Subscription) {
+    const confirmRotate = window.confirm(`确定重置「${subscription.name}」的订阅 Token 吗？重置后旧链接将失效。`)
+    if (!confirmRotate) return
+    const key = `subscription-rotate:${subscription.id}`
+    if (!beginOperation(key)) return
     try {
-      await copyText(subscription.url || '')
-      setCopiedId(subscription.id)
-      toast.success('订阅链接已复制')
-      setTimeout(() => setCopiedId(null), 2000)
+      const updated = await updateSubscription(subscription.id, { rotate_token: true })
+      setSubscriptions((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      toast.success('Token 已重置，旧链接已失效')
     } catch (err) {
-      toast.error(errorText(err, '复制失败'))
+      toast.error(errorText(err, '重置 Token 失败'))
+    } finally {
+      endOperation(key)
     }
   }
 
-  async function showSubscriptionPreview(subscription: Subscription) {
+  async function onDeleteSubscription(subscription: Subscription) {
+    const confirmDelete = window.confirm(`确定删除订阅「${subscription.name}」吗？此操作无法撤销。`)
+    if (!confirmDelete) return
+    const key = `subscription-delete:${subscription.id}`
+    if (!beginOperation(key)) return
+    try {
+      await deleteSubscription(subscription.id)
+      setSubscriptions((current) => current.filter((item) => item.id !== subscription.id))
+      toast.success('订阅已删除')
+    } catch (err) {
+      toast.error(errorText(err, '删除订阅失败'))
+    } finally {
+      endOperation(key)
+    }
+  }
+
+  async function onPreviewSubscription(subscription: Subscription) {
     const key = `subscription-preview:${subscription.id}`
     if (!beginOperation(key)) return
     try {
-      const text = await previewSubscription(subscription.id)
-      setTextPreview({ title: `订阅预览 · ${subscription.name}`, text })
+      const res = await previewSubscription(subscription.id)
+      setTextPreview({
+        title: `订阅内容预览 · ${subscription.name} (${subscription.format})`,
+        text: res,
+      })
     } catch (err) {
-      toast.error(errorText(err, '预览失败'))
+      toast.error(errorText(err, '预览订阅失败'))
     } finally {
       endOperation(key)
     }
-  }
-
-  function rotateSubscription(subscription: Subscription) {
-    const confirmRotate = window.confirm(`轮换订阅 Token\n确定要轮换订阅「${subscription.name}」的 Token 吗？轮换后旧订阅链接将立即失效，所有客户端需要重新导入链接。`)
-    if (!confirmRotate) return
-
-    const key = `subscription-rotate:${subscription.id}`
-    if (!beginOperation(key)) return
-    void (async () => {
-      try {
-        const updated = await updateSubscription(subscription.id, { rotate_token: true })
-        setSubscriptions((current) =>
-          current.map((item) => (item.id === updated.id ? updated : item)),
-        )
-        toast.success('Token 已轮换成功')
-      } catch (err) {
-        toast.error(errorText(err, '轮换失败'))
-      } finally {
-        endOperation(key)
-      }
-    })()
-  }
-
-  function removeSubscription(subscription: Subscription) {
-    const confirmRemove = window.confirm(`删除订阅\n确定要删除订阅「${subscription.name}」吗？此操作不可逆。`)
-    if (!confirmRemove) return
-
-    const key = `subscription-delete:${subscription.id}`
-    if (!beginOperation(key)) return
-    void (async () => {
-      try {
-        await deleteSubscription(subscription.id)
-        setSubscriptions((current) => current.filter((item) => item.id !== subscription.id))
-        toast.success('订阅已成功删除')
-      } catch (err) {
-        toast.error(errorText(err, '删除订阅失败'))
-      } finally {
-        endOperation(key)
-      }
-    })()
   }
 
   function openCreateSource() {
@@ -385,41 +381,34 @@ export default function Subscriptions() {
       id: source.id,
       name: source.name,
       url: source.url,
-      interval: source.refresh_interval_sec || 0,
-      headers:
-        source.headers && Object.keys(source.headers).length
-          ? JSON.stringify(source.headers, null, 2)
-          : '',
+      interval: source.refresh_interval_sec,
+      headers: formatHeadersObject(source.headers),
       enabled: source.enabled,
     })
   }
 
   function closeSourceEditor() {
-    if (!saving) setSourceEditor({ ...EMPTY_SOURCE_EDITOR })
+    if (!saving) setSourceEditor(EMPTY_SOURCE_EDITOR)
   }
 
   async function saveSource() {
     if (savingRef.current) return
     const name = sourceEditor.name.trim()
-    if (!name) {
-      setEditorError('请填写外部源名称')
-      return
-    }
-    const urlError = validateSourceURL(sourceEditor.url)
-    if (urlError) {
-      setEditorError(urlError)
+    const url = sourceEditor.url.trim()
+    if (!name || !url) {
+      setEditorError('请填写名称与源 URL')
       return
     }
     const interval = Number(sourceEditor.interval)
-    if (!Number.isInteger(interval) || interval < 0 || interval > 31_536_000) {
-      setEditorError('刷新间隔必须是 0 到 31536000 之间的整数秒')
+    if (Number.isNaN(interval) || interval <= 0) {
+      setEditorError('刷新间隔必须为大于 0 的数字（秒）')
       return
     }
-    let headers: Record<string, string>
+    let headers: Record<string, string> = {}
     try {
-      headers = parseHeaders(sourceEditor.headers)
+      headers = parseHeadersText(sourceEditor.headers)
     } catch (err) {
-      setEditorError(errorText(err, '请求头格式错误'))
+      setEditorError(err instanceof Error ? err.message : 'HTTP 请求头格式不正确')
       return
     }
 
@@ -427,8 +416,8 @@ export default function Subscriptions() {
     setEditorError('')
     const body = {
       name,
-      url: sourceEditor.url.trim(),
-      refresh_interval_sec: interval,
+      url,
+      interval_seconds: Math.floor(interval),
       headers,
       enabled: sourceEditor.enabled,
     }
@@ -441,8 +430,8 @@ export default function Subscriptions() {
           ? current.map((item) => (item.id === saved.id ? saved : item))
           : [...current, saved],
       )
-      toast.success(sourceEditor.id ? '外部源已更新' : '外部源已添加')
-      setSourceEditor({ ...EMPTY_SOURCE_EDITOR })
+      toast.success(sourceEditor.id ? '外部源已更新' : '外部源已创建')
+      setSourceEditor(EMPTY_SOURCE_EDITOR)
     } catch (err) {
       setEditorError(errorText(err, '保存外部源失败'))
     } finally {
@@ -450,31 +439,13 @@ export default function Subscriptions() {
     }
   }
 
-  async function toggleSource(source: ExternalSource) {
-    const key = `source-toggle:${source.id}`
-    if (!beginOperation(key)) return
-    try {
-      const updated = await updateExternalSource(source.id, { enabled: !source.enabled })
-      setSources((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
-      )
-      toast.success(updated.enabled ? '外部源已启用' : '外部源已禁用')
-    } catch (err) {
-      toast.error(errorText(err, '更新外部源失败'))
-    } finally {
-      endOperation(key)
-    }
-  }
-
-  async function refreshSource(source: ExternalSource) {
+  async function onRefreshSource(source: ExternalSource) {
     const key = `source-refresh:${source.id}`
     if (!beginOperation(key)) return
     try {
       const updated = await refreshExternalSource(source.id)
-      setSources((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
-      )
-      toast.success(`已刷新 ${updated.cached_proxy_count ?? 0} 个节点`)
+      setSources((current) => current.map((item) => (item.id === updated.id ? updated : item)))
+      toast.success(`外部源「${source.name}」已刷新，发现 ${updated.cached_proxy_count} 个节点`)
     } catch (err) {
       toast.error(errorText(err, '刷新外部源失败'))
     } finally {
@@ -482,13 +453,13 @@ export default function Subscriptions() {
     }
   }
 
-  async function showSourcePreview(source: ExternalSource) {
+  async function onPreviewSource(source: ExternalSource) {
     const key = `source-preview:${source.id}`
     if (!beginOperation(key)) return
     try {
-      const data = await previewExternalSource(source.id)
-      setSourcePreview(data)
-      setSourcePreviewTitle(`外部源预览 · ${source.name}`)
+      const res = await previewExternalSource(source.id)
+      setSourcePreview(res)
+      setSourcePreviewTitle(`外部源解析预览 · ${source.name}`)
     } catch (err) {
       toast.error(errorText(err, '预览外部源失败'))
     } finally {
@@ -496,324 +467,457 @@ export default function Subscriptions() {
     }
   }
 
-  function removeSource(source: ExternalSource) {
-    const confirmRemove = window.confirm(`删除外部源\n确定要删除外部源「${source.name}」吗？订阅关联会一并移除。`)
-    if (!confirmRemove) return
-
+  async function onDeleteSource(source: ExternalSource) {
+    const confirmDelete = window.confirm(`确定删除外部源「${source.name}」吗？此操作无法撤销。`)
+    if (!confirmDelete) return
     const key = `source-delete:${source.id}`
     if (!beginOperation(key)) return
-    void (async () => {
-      try {
-        await deleteExternalSource(source.id)
-        setSources((current) => current.filter((item) => item.id !== source.id))
-        setSubscriptions((current) =>
-          current.map((item) => ({
-            ...item,
-            external_source_ids: (item.external_source_ids ?? []).filter((id) => id !== source.id),
-          })),
-        )
-        toast.success('外部源已成功删除')
-      } catch (err) {
-        toast.error(errorText(err, '删除外部源失败'))
-      } finally {
-        endOperation(key)
-      }
-    })()
+    try {
+      await deleteExternalSource(source.id)
+      setSources((current) => current.filter((item) => item.id !== source.id))
+      toast.success('外部源已删除')
+    } catch (err) {
+      toast.error(errorText(err, '删除外部源失败'))
+    } finally {
+      endOperation(key)
+    }
   }
 
-  const sourceName = (id: string) => sources.find((source) => source.id === id)?.name || id.slice(0, 8)
+  function getFullSubscriptionUrl(path: string | undefined): string {
+    if (!path) return ''
+    if (path.startsWith('http://') || path.startsWith('https://')) return path
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+    return `${origin}${path.startsWith('/') ? '' : '/'}${path}`
+  }
+
+  async function copySubscriptionUrl(path: string | undefined, id: string) {
+    const fullUrl = getFullSubscriptionUrl(path)
+    try {
+      await copyText(fullUrl)
+      setCopiedId(id)
+      toast.success('已复制完整订阅链接')
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch {
+      toast.error('复制失败')
+    }
+  }
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      {/* Header Title Section */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">订阅</h1>
-          <p className="text-sm text-zinc-400 mt-1">管理本地节点和入站对外发布订阅链接，以及远程节点配置源</p>
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-100 flex items-center gap-2.5">
+            <Rss className="h-6 w-6 text-cyan-400" />
+            订阅配置管理
+          </h1>
+          <p className="text-sm text-zinc-400 mt-1 leading-normal">
+            发布面向客户端的代理订阅分发链接 · 聚合与解析第三方外部订阅源
+          </p>
         </div>
-        <Button
-          variant="outline"
-          className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 h-9 gap-1.5"
-          loading={loading}
-          disabled={saving || pending.size > 0}
-          onClick={() => void load()}
-        >
-          <RefreshCw className="h-4 w-4" /> 刷新
-        </Button>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            onClick={() => void load()}
+            loading={loading}
+            disabled={saving || pending.size > 0}
+            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5 h-9"
+          >
+            <RefreshCw className="h-4 w-4" /> 刷新
+          </Button>
+        </div>
       </div>
 
       {loadError && (
         <Alert variant="destructive">
-          <AlertTitle>部分数据加载失败</AlertTitle>
+          <AlertTitle>数据加载遇到问题</AlertTitle>
           <AlertDescription>{loadError}</AlertDescription>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2 text-red-400 border-red-900/30 hover:bg-red-950/20"
-            onClick={() => void load()}
-          >
-            重试
-          </Button>
         </Alert>
       )}
 
-      {/* Subscriptions Card */}
-      <Card className="border-zinc-900 bg-zinc-900/30">
-        <CardHeader className="p-5 pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-base font-semibold">
-            订阅列表{subscriptions.length > 0 ? ` (${subscriptions.length})` : ''}
-          </CardTitle>
-          <Button size="sm" onClick={openCreateSubscription} className="gap-1.5">
-            <Plus className="h-4 w-4" /> 创建订阅
-          </Button>
-        </CardHeader>
-        <CardContent className="p-5 pt-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader className="bg-zinc-900/40 border-zinc-800">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-40">名称</TableHead>
-                  <TableHead className="w-24">格式</TableHead>
-                  <TableHead className="w-36">本地入站</TableHead>
-                  <TableHead className="w-44">包含外部源</TableHead>
-                  <TableHead className="w-20">启用</TableHead>
-                  <TableHead>订阅链接</TableHead>
-                  <TableHead className="w-[200px] text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y divide-zinc-900 border-zinc-900">
-                {subscriptions.length === 0 ? (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={7} className="text-center py-8 text-zinc-500 font-medium">
-                      暂无本地节点订阅配置
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  subscriptions.map((row) => {
-                    const rowPending = entityOperationPending('subscription', row.id)
-                    const isCopied = copiedId === row.id
-                    return (
-                      <TableRow key={row.id} className="hover:bg-zinc-900/20 border-zinc-900/60">
-                        <TableCell className="font-semibold text-zinc-200">
-                          {row.name}
-                        </TableCell>
-                        <TableCell>
-                          <code className="text-xs font-mono text-zinc-300">{row.format}</code>
-                        </TableCell>
-                        <TableCell className="text-zinc-300 text-xs font-medium">
-                          {row.include_all_inbounds ?? row.inbound_ids.length === 0
-                            ? '全部启用项'
-                            : row.inbound_ids.length
-                              ? `${row.inbound_ids.length} 个指定项`
-                              : '无本地入站'}
-                        </TableCell>
-                        <TableCell>
-                          {(row.external_source_ids ?? []).length ? (
-                            <div className="flex flex-wrap gap-1">
-                              {(row.external_source_ids ?? []).map((sourceId) => (
-                                <Badge key={sourceId} variant="outline" className="text-[10px] border-zinc-800 text-zinc-400">
-                                  {sourceName(sourceId)}
-                                </Badge>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-zinc-600">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Switch
-                            checked={row.enabled}
-                            disabled={rowPending}
-                            onCheckedChange={() => void toggleSubscription(row)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <code className="text-xs font-mono text-zinc-400 break-all select-all block bg-zinc-950/40 p-1.5 rounded border border-zinc-900/40">
-                            {row.url || '—'}
-                          </code>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <TooltipProvider>
-                            <div className="flex items-center justify-end gap-1">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => openEditSubscription(row)} className="h-8 w-8 text-zinc-400 hover:text-zinc-200">
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>编辑订阅</TooltipContent>
-                              </Tooltip>
+      {/* Primary Tabs */}
+      <Tabs defaultValue="publish" className="w-full space-y-6">
+        <div className="border-b border-zinc-900 pb-2">
+          <TabsList className="bg-zinc-900/60 p-1 border border-zinc-800/80 rounded-lg">
+            <TabsTrigger
+              value="publish"
+              className="gap-2 text-xs font-semibold px-4 py-2 cursor-pointer data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100"
+            >
+              <Radio className="h-4 w-4 text-cyan-400" />
+              发布订阅 ({subscriptions.length})
+            </TabsTrigger>
+            <TabsTrigger
+              value="sources"
+              className="gap-2 text-xs font-semibold px-4 py-2 cursor-pointer data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100"
+            >
+              <Globe className="h-4 w-4 text-violet-400" />
+              外部订阅源 ({sources.length})
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending || !row.url} onClick={() => void copySubscriptionURL(row)} className="h-8 w-8 text-zinc-400 hover:text-zinc-200">
-                                    {isCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>复制订阅链接</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => void showSubscriptionPreview(row)} className="h-8 w-8 text-zinc-400 hover:text-zinc-200">
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>预览生成的配置</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => rotateSubscription(row)} className="h-8 w-8 text-zinc-400 hover:text-zinc-200">
-                                    <RotateCw className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>轮换 Token</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => removeSubscription(row)} className="h-8 w-8 text-red-500 hover:text-red-400 hover:bg-red-950/20">
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>删除订阅</TooltipContent>
-                              </Tooltip>
-                            </div>
-                          </TooltipProvider>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })
-                )}
-              </TableBody>
-            </Table>
+        {/* Tab 1: Publish Subscriptions */}
+        <TabsContent value="publish" className="space-y-6 mt-0">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold text-zinc-200">面向客户端的公网订阅分发</h2>
+              <p className="text-xs text-zinc-500">
+                支持编译出标准的 Clash (YAML) 与 sing-box (JSON) 订阅。客户端发起请求时动态包含在线节点。
+              </p>
+            </div>
+            <Button onClick={openCreateSubscription} className="gap-1.5 h-9">
+              <Plus className="h-4 w-4" /> 新建订阅
+            </Button>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* External Sources Card */}
-      <Card className="border-zinc-900 bg-zinc-900/30">
-        <CardHeader className="p-5 pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-base font-semibold">
-            外部节点订阅源{sources.length > 0 ? ` (${sources.length})` : ''}
-          </CardTitle>
-          <Button size="sm" variant="outline" onClick={openCreateSource} className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5">
-            <Plus className="h-4 w-4" /> 添加外部源
-          </Button>
-        </CardHeader>
-        <CardContent className="p-5 pt-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader className="bg-zinc-900/40 border-zinc-800">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-40">名称</TableHead>
-                  <TableHead>配置 URL</TableHead>
-                  <TableHead className="w-20 text-center">解出节点</TableHead>
-                  <TableHead className="w-32">格式</TableHead>
-                  <TableHead className="w-40">更新成功时间</TableHead>
-                  <TableHead className="w-20">启用</TableHead>
-                  <TableHead className="w-44">最近同步错误</TableHead>
-                  <TableHead className="w-[180px] text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody className="divide-y divide-zinc-900 border-zinc-900">
-                {sources.length === 0 ? (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={8} className="text-center py-8 text-zinc-500 font-medium">
-                      暂无外部节点订阅源
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  sources.map((row) => {
-                    const rowPending = entityOperationPending('source', row.id)
-                    return (
-                      <TableRow key={row.id} className="hover:bg-zinc-900/20 border-zinc-900/60">
-                        <TableCell className="font-semibold text-zinc-200">
-                          {row.name}
-                        </TableCell>
-                        <TableCell>
-                          <code className="text-xs font-mono text-zinc-500 break-all block">
-                            {row.url}
-                          </code>
-                        </TableCell>
-                        <TableCell className="text-center font-bold text-zinc-300">
-                          {row.cached_proxy_count ?? 0}
-                        </TableCell>
-                        <TableCell className="text-xs text-zinc-400">
-                          {row.content_type || '—'}
-                        </TableCell>
-                        <TableCell className="text-xs font-mono text-zinc-400">
-                          {formatTime(row.last_success_unix)}
-                        </TableCell>
-                        <TableCell>
+          {loading && subscriptions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 space-y-3">
+              <RefreshCw className="h-6 w-6 animate-spin text-zinc-500" />
+              <span className="text-sm text-zinc-400">正在加载订阅分发列表…</span>
+            </div>
+          ) : subscriptions.length === 0 ? (
+            <Card className="border-zinc-900 bg-zinc-900/20 py-12 text-center">
+              <CardContent className="space-y-3">
+                <Rss className="h-10 w-10 text-zinc-700 mx-auto" />
+                <div className="space-y-1">
+                  <h3 className="text-base font-semibold text-zinc-300">暂无已发布的订阅</h3>
+                  <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+                    点击右上角“新建订阅”按钮，创建一个支持 Clash 或 sing-box 的公网订阅链接。
+                  </p>
+                </div>
+                <Button onClick={openCreateSubscription} className="gap-1.5 mt-2">
+                  <Plus className="h-4 w-4" /> 创建第一个订阅
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {subscriptions.map((sub) => {
+                const subPending = entityOperationPending('subscription', sub.id)
+                const isClash = sub.format === 'clash'
+                const fullUrl = getFullSubscriptionUrl(sub.url)
+                const clashScheme = `clash://install-config?url=${encodeURIComponent(fullUrl)}`
+                const singboxScheme = `sing-box://import-remote?url=${encodeURIComponent(fullUrl)}`
+
+                const themeGlow = isClash
+                  ? 'border-cyan-950/50 bg-cyan-950/10 shadow-cyan-950/20'
+                  : 'border-violet-950/50 bg-violet-950/10 shadow-violet-950/20'
+
+                return (
+                  <Card
+                    key={sub.id}
+                    className={`relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] ${themeGlow} border`}
+                  >
+                    <CardHeader className="p-5 pb-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2.5">
+                            <CardTitle className="text-base font-bold text-zinc-100">
+                              {sub.name}
+                            </CardTitle>
+                            <Badge
+                              variant="outline"
+                              className={
+                                isClash
+                                  ? 'border-cyan-800/80 bg-cyan-950/60 text-cyan-300 font-mono text-[11px]'
+                                  : 'border-violet-800/80 bg-violet-950/60 text-violet-300 font-mono text-[11px]'
+                              }
+                            >
+                              {isClash ? 'Clash (YAML)' : 'sing-box (JSON)'}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
                           <Switch
-                            checked={row.enabled}
-                            disabled={rowPending}
-                            onCheckedChange={() => void toggleSource(row)}
+                            checked={sub.enabled}
+                            disabled={subPending || saving}
+                            onCheckedChange={() => void toggleSubscription(sub)}
                           />
-                        </TableCell>
-                        <TableCell className="text-xs font-mono text-red-400 break-all leading-normal max-w-[200px]">
-                          {row.last_error || <span className="text-zinc-600">—</span>}
-                        </TableCell>
-                        <TableCell className="text-right">
+                        </div>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="p-5 pt-0 space-y-4">
+                      {/* Subscription URL Box */}
+                      <div className="space-y-1.5">
+                        <span className="text-[11px] font-medium text-zinc-400 block">公网订阅地址</span>
+                        <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-950 border border-zinc-900">
+                          <code className="text-xs font-mono text-zinc-300 truncate flex-1 select-all px-1">
+                            {fullUrl}
+                          </code>
                           <TooltipProvider>
-                            <div className="flex items-center justify-end gap-1">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => openEditSource(row)} className="h-8 w-8 text-zinc-400 hover:text-zinc-200">
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>编辑外部源</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => void refreshSource(row)} className="h-8 w-8 text-zinc-400 hover:text-zinc-200">
-                                    <RefreshCw className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>刷新并同步节点</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => void showSourcePreview(row)} className="h-8 w-8 text-zinc-400 hover:text-zinc-200">
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>预览解出节点</TooltipContent>
-                              </Tooltip>
-
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button size="icon" variant="ghost" disabled={rowPending} onClick={() => removeSource(row)} className="h-8 w-8 text-red-500 hover:text-red-400 hover:bg-red-950/20">
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>删除外部源</TooltipContent>
-                              </Tooltip>
-                            </div>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => void copySubscriptionUrl(sub.url, sub.id)}
+                                  className="h-7 px-2.5 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900 shrink-0 cursor-pointer"
+                                >
+                                  {copiedId === sub.id ? (
+                                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                  <span className="ml-1.5">{copiedId === sub.id ? '已复制' : '复制'}</span>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>复制完整公网订阅 URL</TooltipContent>
+                            </Tooltip>
                           </TooltipProvider>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })
-                )}
-              </TableBody>
-            </Table>
+                        </div>
+                      </div>
+
+                      {/* Client Quick Action Bar */}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setQrModal({ open: true, title: sub.name, url: fullUrl })}
+                          className="h-8 text-xs border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 gap-1.5 cursor-pointer"
+                        >
+                          <QrCode className="h-3.5 w-3.5 text-cyan-400" /> 扫码
+                        </Button>
+
+                        <a
+                          href={isClash ? clashScheme : singboxScheme}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 h-8 px-3 transition-colors gap-1.5 cursor-pointer"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 text-emerald-400" />
+                          一键导入 {isClash ? 'Clash' : 'sing-box'}
+                        </a>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void onPreviewSubscription(sub)}
+                          loading={subPending}
+                          disabled={subPending}
+                          className="h-8 text-xs text-zinc-400 hover:text-zinc-200 gap-1.5 ml-auto cursor-pointer"
+                        >
+                          <Eye className="h-3.5 w-3.5" /> 预览结构
+                        </Button>
+                      </div>
+
+                      {/* Content Aggregation Summary */}
+                      <div className="grid grid-cols-2 gap-2 pt-3 border-t border-zinc-900/80 text-xs">
+                        <div className="space-y-0.5">
+                          <span className="text-[10px] text-zinc-500 block">本地节点范围</span>
+                          <span className="text-zinc-300 font-medium flex items-center gap-1">
+                            <Server className="h-3 w-3 text-zinc-500" />
+                            {sub.include_all_inbounds
+                              ? `全网可接入 (${inbounds.length} 个)`
+                              : (sub.inbound_ids?.length ?? 0) > 0
+                                ? `指定 ${sub.inbound_ids.length} 个入站`
+                                : '不包含本地'}
+                          </span>
+                        </div>
+                        <div className="space-y-0.5">
+                          <span className="text-[10px] text-zinc-500 block">关联外部订阅源</span>
+                          <span className="text-zinc-300 font-medium flex items-center gap-1">
+                            <Layers className="h-3 w-3 text-zinc-500" />
+                            {(sub.external_source_ids?.length ?? 0) > 0
+                              ? `包含 ${sub.external_source_ids?.length ?? 0} 个外部源`
+                              : '仅本地节点'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Footer Actions */}
+                      <div className="flex items-center justify-between pt-3 border-t border-zinc-900/80 text-xs text-zinc-400">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void rotateSubscriptionToken(sub)}
+                          loading={subPending}
+                          disabled={subPending}
+                          className="h-7 text-xs text-zinc-500 hover:text-amber-400 px-2 cursor-pointer gap-1"
+                        >
+                          <RotateCw className="h-3 w-3" /> 重置 Token
+                        </Button>
+
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openEditSubscription(sub)}
+                            disabled={subPending}
+                            className="h-7 text-xs text-zinc-400 hover:text-zinc-200 px-2.5 cursor-pointer gap-1"
+                          >
+                            <Edit className="h-3.5 w-3.5" /> 编辑
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void onDeleteSubscription(sub)}
+                            disabled={subPending}
+                            className="h-7 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/20 px-2.5 cursor-pointer gap-1"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> 删除
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Tab 2: External Sources */}
+        <TabsContent value="sources" className="space-y-6 mt-0">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold text-zinc-200">第三方外部订阅源聚合</h2>
+              <p className="text-xs text-zinc-500">
+                配置外部机场或提供者的订阅 URL，系统后台会定时抓取并解析节点，合并下发给指定订阅。
+              </p>
+            </div>
+            <Button onClick={openCreateSource} className="gap-1.5 h-9">
+              <Plus className="h-4 w-4" /> 添加外部源
+            </Button>
           </div>
-        </CardContent>
-      </Card>
+
+          {loading && sources.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 space-y-3">
+              <RefreshCw className="h-6 w-6 animate-spin text-zinc-500" />
+              <span className="text-sm text-zinc-400">正在加载外部订阅源列表…</span>
+            </div>
+          ) : sources.length === 0 ? (
+            <Card className="border-zinc-900 bg-zinc-900/20 py-12 text-center">
+              <CardContent className="space-y-3">
+                <Globe className="h-10 w-10 text-zinc-700 mx-auto" />
+                <div className="space-y-1">
+                  <h3 className="text-base font-semibold text-zinc-300">暂无第三方外部订阅源</h3>
+                  <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+                    添加外部订阅源链接后，面板可以自动抓取并将其中的节点合并到您发布的订阅中。
+                  </p>
+                </div>
+                <Button onClick={openCreateSource} className="gap-1.5 mt-2">
+                  <Plus className="h-4 w-4" /> 添加第一个外部源
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="border-zinc-900 bg-zinc-900/30">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader className="bg-zinc-900/40 border-zinc-800">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="min-w-[140px]">源名称</TableHead>
+                        <TableHead className="min-w-[220px]">抓取 URL</TableHead>
+                        <TableHead className="w-24 text-center">解析节点数</TableHead>
+                        <TableHead className="w-28 text-center">刷新间隔</TableHead>
+                        <TableHead className="w-32">最后更新</TableHead>
+                        <TableHead className="w-20">状态</TableHead>
+                        <TableHead className="w-[200px] text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="divide-y divide-zinc-900 border-zinc-900">
+                      {sources.map((src) => {
+                        const srcPending = entityOperationPending('source', src.id)
+                        return (
+                          <TableRow key={src.id} className="hover:bg-zinc-900/30 border-zinc-900/60">
+                            <TableCell className="font-semibold text-zinc-200">
+                              {src.name}
+                            </TableCell>
+                            <TableCell>
+                              <code className="text-xs font-mono text-zinc-400 break-all block max-w-xs truncate">
+                                {src.url}
+                              </code>
+                              {src.last_error && (
+                                <span className="text-[10px] font-mono text-red-400 block truncate mt-0.5">
+                                  抓取失败: {src.last_error}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-center font-mono font-bold text-zinc-200">
+                              {src.cached_proxy_count ?? 0}
+                            </TableCell>
+                            <TableCell className="text-center font-mono text-xs text-zinc-400">
+                              {formatInterval(src.refresh_interval_sec)}
+                            </TableCell>
+                            <TableCell className="text-xs text-zinc-400 font-mono">
+                              {formatTime(src.updated_at_unix)}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={src.enabled ? 'success' : 'secondary'}
+                                className="text-[10px]"
+                              >
+                                {src.enabled ? '已启用' : '已禁用'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  loading={srcPending}
+                                  disabled={srcPending}
+                                  onClick={() => void onRefreshSource(src)}
+                                  className="h-8 px-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/20 cursor-pointer gap-1"
+                                >
+                                  <RefreshCw className="h-3.5 w-3.5" /> 刷新
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  loading={srcPending}
+                                  disabled={srcPending}
+                                  onClick={() => void onPreviewSource(src)}
+                                  className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer gap-1"
+                                >
+                                  <Eye className="h-3.5 w-3.5" /> 预览
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={srcPending}
+                                  onClick={() => openEditSource(src)}
+                                  className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer gap-1"
+                                >
+                                  <Edit className="h-3.5 w-3.5" /> 编辑
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={srcPending}
+                                  onClick={() => void onDeleteSource(src)}
+                                  className="h-8 px-2 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/20 cursor-pointer gap-1"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" /> 删除
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Subscription Editor Dialog */}
-      <Dialog open={subEditor.open} onOpenChange={(v) => { if (!v && !saving) closeSubscriptionEditor() }}>
-        <DialogContent className="max-w-2xl bg-zinc-950 border-zinc-800 text-zinc-100 max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">
-              {subEditor.id ? '编辑订阅' : '创建订阅'}
+      <Dialog open={subEditor.open} onOpenChange={(v) => !v && closeSubscriptionEditor()}>
+        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Rss className="h-5 w-5 text-cyan-400" />
+              {subEditor.id ? '编辑订阅设置' : '创建新订阅'}
             </DialogTitle>
+            <p className="text-xs text-zinc-400">
+              面向客户端生成标准 Clash (YAML) 或 sing-box (JSON) 订阅配置链接。
+            </p>
           </DialogHeader>
 
           {editorError && (
@@ -822,151 +926,161 @@ export default function Subscriptions() {
             </Alert>
           )}
 
-          <div className="space-y-4 my-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="sub-name" className="text-zinc-300">订阅名称 *</Label>
-                <Input
-                  id="sub-name"
-                  value={subEditor.name}
-                  maxLength={80}
-                  disabled={saving}
-                  onChange={(e) => setSubEditor((c) => ({ ...c, name: e.target.value }))}
-                  placeholder="例如: clash-fast"
-                  className="bg-zinc-900 border-zinc-800"
-                />
-              </div>
-
-              <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="sub-format" className="text-zinc-300">配置文件格式</Label>
-                <Select
-                  disabled={saving}
-                  value={subEditor.format}
-                  onValueChange={(val) => setSubEditor((c) => ({ ...c, format: val as 'clash' | 'singbox' }))}
-                >
-                  <SelectTrigger className="bg-zinc-900 border-zinc-800" id="sub-format">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-zinc-900 border-zinc-800">
-                    <SelectItem value="clash" className="text-zinc-200">Clash / Mihomo (YAML)</SelectItem>
-                    <SelectItem value="singbox" className="text-zinc-200">sing-box (JSON)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2 pt-2">
-              <Switch
-                id="sub-enabled"
-                checked={subEditor.enabled}
-                disabled={saving}
-                onCheckedChange={(checked) => setSubEditor((c) => ({ ...c, enabled: checked }))}
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-300">订阅名称</Label>
+              <Input
+                value={subEditor.name}
+                onChange={(e) => setSubEditor({ ...subEditor, name: e.target.value })}
+                placeholder="例：常用客户端订阅 / Clash 节点池"
+                className="bg-zinc-900 border-zinc-800 text-sm"
               />
-              <Label htmlFor="sub-enabled" className="text-zinc-300 cursor-pointer select-none">启用此发布订阅</Label>
             </div>
 
-            {/* Local Inbound Range Radio Group */}
-            <div className="space-y-2 pt-4 border-t border-zinc-900">
-              <Label className="text-zinc-300 block font-medium">包含本地入站节点</Label>
-              <div className="flex border border-zinc-800 rounded-md bg-zinc-900 p-0.5 max-w-sm">
-                {(['all', 'custom', 'none'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    disabled={saving}
-                    onClick={() => setSubEditor(c => ({ ...c, localMode: mode }))}
-                    className={`flex-1 text-center py-1.5 rounded text-xs font-medium transition-colors cursor-pointer ${
-                      subEditor.localMode === mode
-                        ? 'bg-zinc-850 text-zinc-100 shadow-sm border border-zinc-700/50'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    {mode === 'all' ? '全部启用项' : mode === 'custom' ? '指定入站' : '不包含本地'}
-                  </button>
-                ))}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-300">客户端文件格式</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSubEditor({ ...subEditor, format: 'clash' })}
+                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                    subEditor.format === 'clash'
+                      ? 'border-cyan-600 bg-cyan-950/40 text-cyan-200'
+                      : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="font-bold text-sm">Clash 格式</div>
+                  <div className="text-[11px] opacity-80 mt-0.5">标准 YAML 节点列表模版</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSubEditor({ ...subEditor, format: 'singbox' })}
+                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                    subEditor.format === 'singbox'
+                      ? 'border-violet-600 bg-violet-950/40 text-violet-200'
+                      : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700'
+                  }`}
+                >
+                  <div className="font-bold text-sm">sing-box 格式</div>
+                  <div className="text-[11px] opacity-80 mt-0.5">标准 JSON Outbounds 配置模版</div>
+                </button>
               </div>
             </div>
 
-            {/* Custom inbounds checklist */}
-            {subEditor.localMode === 'custom' && (
-              <div className="space-y-2 p-3 bg-zinc-900/50 border border-zinc-900 rounded-lg max-h-[160px] overflow-y-auto">
-                <span className="text-xs text-zinc-400 font-medium block mb-2">选择指定入站节点配置：</span>
-                {inbounds.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {inbounds.map((inbound) => (
-                      <div key={inbound.id} className="flex items-center space-x-2">
+            <div className="space-y-2 pt-2 border-t border-zinc-900">
+              <Label className="text-xs text-zinc-300 block">包含本地节点范围</Label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSubEditor({ ...subEditor, localMode: 'all' })}
+                  className={`p-2 text-center rounded border text-xs font-medium transition-all cursor-pointer ${
+                    subEditor.localMode === 'all'
+                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                  }`}
+                >
+                  包含全部节点
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubEditor({ ...subEditor, localMode: 'custom' })}
+                  className={`p-2 text-center rounded border text-xs font-medium transition-all cursor-pointer ${
+                    subEditor.localMode === 'custom'
+                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                  }`}
+                >
+                  选择指定节点
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubEditor({ ...subEditor, localMode: 'none' })}
+                  className={`p-2 text-center rounded border text-xs font-medium transition-all cursor-pointer ${
+                    subEditor.localMode === 'none'
+                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                  }`}
+                >
+                  不包含本地节点
+                </button>
+              </div>
+
+              {subEditor.localMode === 'custom' && (
+                <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 max-h-40 overflow-y-auto space-y-2 mt-2">
+                  {inbounds.length === 0 ? (
+                    <div className="text-xs text-zinc-500 text-center py-2">暂无可用入站</div>
+                  ) : (
+                    inbounds.map((ib) => (
+                      <div key={ib.id} className="flex items-center space-x-2 text-xs">
                         <Checkbox
-                          id={`sub-inb-${inbound.id}`}
-                          checked={subEditor.inboundIds.has(inbound.id)}
-                          onCheckedChange={() => toggleEditorInbound(inbound.id)}
+                          id={`ib-${ib.id}`}
+                          checked={subEditor.inboundIds.has(ib.id)}
+                          onCheckedChange={() => toggleEditorInbound(ib.id)}
                         />
-                        <Label htmlFor={`sub-inb-${inbound.id}`} className="text-xs text-zinc-300 font-mono cursor-pointer flex items-center gap-1">
-                          {inbound.name} <span className="text-zinc-500 font-sans">({inbound.protocol})</span>
-                          {!inbound.enabled && <Badge variant="secondary" className="scale-75">禁用</Badge>}
-                        </Label>
+                        <label htmlFor={`ib-${ib.id}`} className="text-zinc-300 font-mono cursor-pointer">
+                          {ib.name} ({ib.protocol})
+                        </label>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-xs text-zinc-500">系统中暂无入站配置</span>
-                )}
-              </div>
-            )}
-
-            {/* External sources checklist */}
-            <div className="space-y-2 pt-4 border-t border-zinc-900">
-              <Label className="text-zinc-300 block font-medium">合并外部节点订阅源</Label>
-              {sources.length > 0 ? (
-                <div className="p-3 bg-zinc-900/50 border border-zinc-900 rounded-lg space-y-2 max-h-[160px] overflow-y-auto">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {sources.map((source) => {
-                      const checked = subEditor.sourceIds.has(source.id)
-                      return (
-                        <div key={source.id} className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`sub-src-${source.id}`}
-                            checked={checked}
-                            disabled={!source.enabled && !checked}
-                            onCheckedChange={() => toggleEditorSource(source.id)}
-                          />
-                          <Label htmlFor={`sub-src-${source.id}`} className="text-xs text-zinc-300 cursor-pointer flex items-center gap-1.5">
-                            {source.name}
-                            {!source.enabled && <Badge variant="secondary" className="scale-75">禁用</Badge>}
-                            {source.cached_proxy_count > 0 && (
-                              <Badge variant="outline" className="scale-75 text-zinc-500 border-zinc-800">
-                                {source.cached_proxy_count} 节点
-                              </Badge>
-                            )}
-                          </Label>
-                        </div>
-                      )
-                    })}
-                  </div>
+                    ))
+                  )}
                 </div>
-              ) : (
-                <span className="text-xs text-zinc-500 leading-normal block">暂无外部源。添加外部源后，您可以将购买/托管的外部订阅源混合并入此处生成的 Clash/sing-box 发布订阅中。</span>
               )}
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-zinc-900">
+              <Label className="text-xs text-zinc-300 block">合并第三方外部订阅源</Label>
+              {sources.length === 0 ? (
+                <p className="text-xs text-zinc-500 italic">暂无已启用的外部订阅源</p>
+              ) : (
+                <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 max-h-40 overflow-y-auto space-y-2">
+                  {sources.map((src) => (
+                    <div key={src.id} className="flex items-center space-x-2 text-xs">
+                      <Checkbox
+                        id={`src-${src.id}`}
+                        checked={subEditor.sourceIds.has(src.id)}
+                        onCheckedChange={() => toggleEditorSource(src.id)}
+                      />
+                      <label htmlFor={`src-${src.id}`} className="text-zinc-300 cursor-pointer">
+                        {src.name} <span className="text-zinc-500 font-mono text-[10px]">({src.cached_proxy_count} 个节点)</span>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
+              <Label className="text-xs text-zinc-300">启用该订阅分发</Label>
+              <Switch
+                checked={subEditor.enabled}
+                onCheckedChange={(v) => setSubEditor({ ...subEditor, enabled: v })}
+              />
             </div>
           </div>
 
-          <DialogFooter className="mt-4">
-            <Button variant="outline" disabled={saving} onClick={closeSubscriptionEditor} className="border-zinc-800 hover:bg-zinc-900">
+          <DialogFooter className="gap-2 pt-2">
+            <Button variant="outline" onClick={closeSubscriptionEditor} disabled={saving}>
               取消
             </Button>
-            <Button loading={saving} onClick={() => void saveSubscription()}>
-              {subEditor.id ? '保存修改' : '创建订阅'}
+            <Button onClick={() => void saveSubscription()} loading={saving}>
+              {subEditor.id ? '更新订阅' : '创建订阅'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* External Source Editor Dialog */}
-      <Dialog open={sourceEditor.open} onOpenChange={(v) => { if (!v && !saving) closeSourceEditor() }}>
-        <DialogContent className="max-w-2xl bg-zinc-950 border-zinc-800 text-zinc-100 max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-bold">
-              {sourceEditor.id ? '编辑外部源' : '添加外部源'}
+      <Dialog open={sourceEditor.open} onOpenChange={(v) => !v && closeSourceEditor()}>
+        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Globe className="h-5 w-5 text-violet-400" />
+              {sourceEditor.id ? '编辑外部订阅源' : '添加外部订阅源'}
             </DialogTitle>
+            <p className="text-xs text-zinc-400">
+              抓取并解析外部 HTTP/HTTPS 机场订阅链接，将其中的节点合并入本系统的订阅分发中。
+            </p>
           </DialogHeader>
 
           {editorError && (
@@ -975,148 +1089,136 @@ export default function Subscriptions() {
             </Alert>
           )}
 
-          <div className="space-y-4 my-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="src-name" className="text-zinc-300">外部源名称 *</Label>
-                <Input
-                  id="src-name"
-                  value={sourceEditor.name}
-                  maxLength={80}
-                  disabled={saving}
-                  onChange={(e) => setSourceEditor((c) => ({ ...c, name: e.target.value }))}
-                  placeholder="例如: 机场 A"
-                  className="bg-zinc-900 border-zinc-800"
-                />
-              </div>
-
-              <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="src-interval" className="text-zinc-300">自动同步间隔（秒）</Label>
-                <Input
-                  id="src-interval"
-                  type="number"
-                  min={0}
-                  max={31536000}
-                  value={sourceEditor.interval}
-                  disabled={saving}
-                  onChange={(e) => setSourceEditor((c) => ({ ...c, interval: Number(e.target.value) || 0 }))}
-                  placeholder="0 表示使用默认 24 小时"
-                  className="bg-zinc-900 border-zinc-800"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col space-y-1.5">
-              <Label htmlFor="src-url" className="text-zinc-300">订阅 URL *</Label>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-300">源名称</Label>
               <Input
-                id="src-url"
+                value={sourceEditor.name}
+                onChange={(e) => setSourceEditor({ ...sourceEditor, name: e.target.value })}
+                placeholder="例：香港备用节点池 / 外部机场"
+                className="bg-zinc-900 border-zinc-800 text-sm"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-300">抓取订阅 URL</Label>
+              <Input
                 value={sourceEditor.url}
-                disabled={saving}
-                onChange={(e) => setSourceEditor((c) => ({ ...c, url: e.target.value }))}
-                placeholder="https://example.com/sub/token?clash=1"
-                className="bg-zinc-900 border-zinc-800 font-mono text-xs"
+                onChange={(e) => setSourceEditor({ ...sourceEditor, url: e.target.value })}
+                placeholder="https://example.com/api/v1/client/subscribe?token=..."
+                className="bg-zinc-900 border-zinc-800 text-sm font-mono"
               />
             </div>
 
-            <div className="flex flex-col space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="src-headers" className="text-zinc-300">自定义 HTTP 请求头 (JSON格式)</Label>
-                <span className="text-[10px] text-zinc-500 flex items-center gap-0.5">
-                  <HelpCircle className="h-3 w-3" /> 可选，设置 User-Agent 等
-                </span>
-              </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-300">后台自动刷新间隔 (秒)</Label>
+              <Input
+                type="number"
+                value={sourceEditor.interval}
+                onChange={(e) => setSourceEditor({ ...sourceEditor, interval: e.target.value })}
+                placeholder="86400 (默认 24 小时)"
+                className="bg-zinc-900 border-zinc-800 text-sm font-mono"
+              />
+              <span className="text-[10px] text-zinc-500 block">
+                常用提示：86400 秒 = 24 小时，43200 秒 = 12 小时。
+              </span>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs text-zinc-300">自定义 HTTP 请求头 (可选，每行 Key: Value)</Label>
               <textarea
-                id="src-headers"
                 value={sourceEditor.headers}
-                disabled={saving}
-                onChange={(e) => setSourceEditor((c) => ({ ...c, headers: e.target.value }))}
-                placeholder='{\n  "User-Agent": "clash.meta"\n}'
+                onChange={(e) => setSourceEditor({ ...sourceEditor, headers: e.target.value })}
                 rows={3}
-                className="flex w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                placeholder="User-Agent: ClashMeta&#10;Authorization: Bearer xyz"
+                className="w-full rounded-md bg-zinc-900 border border-zinc-800 p-2.5 text-xs font-mono text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-700"
               />
             </div>
 
-            <div className="flex items-center space-x-2 pt-2">
+            <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
+              <Label className="text-xs text-zinc-300">启用自动抓取</Label>
               <Switch
-                id="src-enabled"
                 checked={sourceEditor.enabled}
-                disabled={saving}
-                onCheckedChange={(checked) => setSourceEditor((c) => ({ ...c, enabled: checked }))}
+                onCheckedChange={(v) => setSourceEditor({ ...sourceEditor, enabled: v })}
               />
-              <Label htmlFor="src-enabled" className="text-zinc-300 cursor-pointer select-none">启用此外部源同步</Label>
             </div>
           </div>
 
-          <DialogFooter className="mt-4">
-            <Button variant="outline" disabled={saving} onClick={closeSourceEditor} className="border-zinc-800 hover:bg-zinc-900">
+          <DialogFooter className="gap-2 pt-2">
+            <Button variant="outline" onClick={closeSourceEditor} disabled={saving}>
               取消
             </Button>
-            <Button loading={saving} onClick={() => void saveSource()}>
-              {sourceEditor.id ? '保存修改' : '添加外部源'}
+            <Button onClick={() => void saveSource()} loading={saving}>
+              {sourceEditor.id ? '更新外部源' : '创建外部源'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Configuration Text Preview Dialog */}
-      <Dialog open={textPreview !== null} onOpenChange={(v) => { if (!v) setTextPreview(null) }}>
-        <DialogContent className="max-w-4xl bg-zinc-950 border-zinc-800 text-zinc-100">
-          <DialogHeader>
-            <DialogTitle className="text-base font-bold">
+      {/* QR Code Modal */}
+      <QRCodeModal
+        open={qrModal.open}
+        onClose={() => setQrModal({ open: false, title: '', url: '' })}
+        title={qrModal.title}
+        url={qrModal.url}
+      />
+
+      {/* Text Preview Modal */}
+      <Dialog open={textPreview !== null} onOpenChange={(v) => !v && setTextPreview(null)}>
+        <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-base font-bold text-zinc-100">
               {textPreview?.title}
             </DialogTitle>
           </DialogHeader>
-          <pre className="p-4 bg-zinc-900 border border-zinc-800 rounded-md overflow-auto text-xs font-mono text-zinc-300 leading-relaxed max-h-[500px] select-all">
-            {textPreview?.text}
-          </pre>
+
+          <div className="relative">
+            <pre className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-h-[60vh] overflow-y-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all leading-relaxed">
+              {textPreview?.text}
+            </pre>
+          </div>
+
           <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (textPreview) {
+                  void copyText(textPreview.text)
+                  toast.success('已复制预览内容')
+                }
+              }}
+            >
+              <Copy className="h-4 w-4 mr-2" /> 复制全部
+            </Button>
             <Button onClick={() => setTextPreview(null)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* External Source Preview Dialog */}
-      <Dialog open={sourcePreview !== null} onOpenChange={(v) => { if (!v) setSourcePreview(null) }}>
-        <DialogContent className="max-w-2xl bg-zinc-950 border-zinc-800 text-zinc-100">
-          <DialogHeader>
-            <DialogTitle className="text-base font-bold">
+      {/* Source Preview Modal */}
+      <Dialog open={sourcePreview !== null} onOpenChange={(v) => !v && setSourcePreview(null)}>
+        <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-base font-bold text-zinc-100">
               {sourcePreviewTitle}
             </DialogTitle>
           </DialogHeader>
 
           {sourcePreview && (
-            <div className="space-y-4 my-2">
-              <div className="flex gap-2">
-                <Badge>{sourcePreview.count} 个节点</Badge>
-                {sourcePreview.source.content_type && (
-                  <Badge variant="outline" className="border-zinc-800 text-zinc-500">
-                    {sourcePreview.source.content_type}
-                  </Badge>
-                )}
+            <div className="space-y-3">
+              <div className="text-xs text-zinc-400 font-mono">
+                此外部源成功解析出 <strong className="text-cyan-400">{sourcePreview.count}</strong> 个节点。
               </div>
 
-              {(sourcePreview.warnings ?? []).length > 0 && (
-                <Alert variant="warning">
-                  <AlertTitle>解析警告信息</AlertTitle>
-                  <AlertDescription>
-                    {(sourcePreview.warnings ?? []).join('；')}
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              <div className="space-y-1">
-                <span className="text-xs text-zinc-400 font-semibold uppercase tracking-wider block mb-1">节点名称列表 (显示前 300 个)</span>
-                <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-h-[300px] overflow-y-auto flex flex-wrap gap-1.5 text-xs text-zinc-300 leading-relaxed">
-                  {sourcePreview.names.length === 0 ? (
-                    <span className="text-zinc-600 italic">未解析出任何节点，请确认 URL 及节点格式。</span>
-                  ) : (
-                    sourcePreview.names.slice(0, 300).map((name, index) => (
-                      <span key={`${name}-${index}`} className="px-2 py-0.5 rounded bg-zinc-950 border border-zinc-900 text-zinc-400 font-mono">
-                        {name}
-                      </span>
-                    ))
-                  )}
-                </div>
+              <div className="p-3 bg-zinc-900 border border-zinc-800 rounded-lg max-h-[50vh] overflow-y-auto space-y-2">
+                {sourcePreview.names.map((name, idx) => (
+                  <div key={idx} className="p-2 rounded bg-zinc-950 border border-zinc-900 text-xs flex items-center justify-between font-mono">
+                    <span className="font-bold text-zinc-200">{name}</span>
+                    <Badge variant="outline" className="text-[10px] border-zinc-800 text-zinc-400">
+                      外部节点
+                    </Badge>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -1130,42 +1232,57 @@ export default function Subscriptions() {
   )
 }
 
-function toggleSet(source: Set<string>, id: string): Set<string> {
-  const next = new Set(source)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
+function toggleSet<T>(set: Set<T>, item: T): Set<T> {
+  const next = new Set(set)
+  if (next.has(item)) next.delete(item)
+  else next.add(item)
   return next
 }
 
-function validateSourceURL(value: string): string {
-  const trimmed = value.trim()
-  if (!trimmed) return '请填写订阅 URL'
-  try {
-    const url = new URL(trimmed)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '订阅 URL 仅支持 http 或 https'
-    if (url.username || url.password) return '订阅 URL 不能包含明文用户名或密码'
-  } catch {
-    return '请输入完整有效的订阅 URL'
-  }
-  return ''
+function formatHeadersObject(headers: Record<string, string> | undefined): string {
+  if (!headers) return ''
+  return Object.entries(headers)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n')
 }
 
-function parseHeaders(value: string): Record<string, string> {
-  if (!value.trim()) return {}
-  const parsed = JSON.parse(value) as unknown
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('请求头必须是 JSON 对象')
-  }
-  const headers: Record<string, string> = {}
-  for (const [key, headerValue] of Object.entries(parsed)) {
-    if (!key.trim() || typeof headerValue !== 'string') {
-      throw new Error('请求头名称不能为空，值必须是字符串')
+function parseHeadersText(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  const lines = text.split('\n')
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line) continue
+    const idx = line.indexOf(':')
+    if (idx <= 0) {
+      throw new Error(`请求头格式错误 (缺少冒号)：${line}`)
     }
-    headers[key.trim()] = headerValue
+    const key = line.slice(0, idx).trim()
+    const val = line.slice(idx + 1).trim()
+    if (!key) {
+      throw new Error(`请求头 Key 不能为空：${line}`)
+    }
+    out[key] = val
   }
-  return headers
+  return out
 }
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback
+function formatInterval(seconds: number): string {
+  if (!seconds || seconds <= 0) return '—'
+  if (seconds >= 86400 && seconds % 86400 === 0) {
+    return `${seconds / 86400} 天`
+  }
+  if (seconds >= 3600 && seconds % 3600 === 0) {
+    return `${seconds / 3600} 小时`
+  }
+  if (seconds >= 60 && seconds % 60 === 0) {
+    return `${seconds / 60} 分钟`
+  }
+  return `${seconds} 秒`
+}
+
+function errorText(err: unknown, fallback: string): string {
+  if (!err) return fallback
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message
+  return fallback
 }

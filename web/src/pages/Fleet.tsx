@@ -306,11 +306,15 @@ export default function Fleet() {
       setLastTask(task)
       const ok = task.results?.filter((r) => r.ok).length ?? 0
       const total = task.results?.length ?? 0
-      const message = `批量${kind === 'apply' ? '下发配置' : kind === 'start' ? '启动' : '停止'}完成：${ok}/${total} 成功（${taskStatusLabel(task.status)}）`
+      const message = `批量${kind === 'apply' ? '下发配置（核心已自动拉起）' : kind === 'start' ? '启动' : '停止'}完成：${ok}/${total} 成功（${taskStatusLabel(task.status)}）`
       if (total > 0 && ok === total) toast.success(message)
       else if (ok > 0) toast.warning(message)
       else toast.error(message)
       await refreshLive({ silent: true })
+      if (kind === 'apply' || kind === 'start') {
+        setTimeout(() => void refreshLive({ silent: true }), 1500)
+        setTimeout(() => void refreshLive({ silent: true }), 3500)
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '批量操作失败')
     } finally {
@@ -936,9 +940,11 @@ export default function Fleet() {
                         </TableCell>
                         <TableCell className="space-y-0.5">
                           <code className="text-xs font-mono text-zinc-300 block">{n.agent_version || '—'}</code>
-                          {outdated && (
+                          {outdated ? (
                             <Badge variant="warning" className="text-[9px] px-1 py-0 scale-95 origin-left">可升级</Badge>
-                          )}
+                          ) : n.agent_version ? (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 scale-95 origin-left border-emerald-900/50 text-emerald-400/80">已最新</Badge>
+                          ) : null}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -965,18 +971,21 @@ export default function Fleet() {
                             >
                               安装
                             </Button>
-                            {outdated && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 px-2 text-xs text-amber-500 hover:text-amber-400 hover:bg-amber-950/20 cursor-pointer"
-                                loading={activeActions[n.id] === 'upgrade'}
-                                disabled={actionBusy}
-                                onClick={() => void showUpgrade(n.id)}
-                              >
-                                升级
-                              </Button>
-                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className={`h-8 px-2 text-xs cursor-pointer ${
+                                outdated
+                                  ? 'text-amber-500 hover:text-amber-400 hover:bg-amber-950/20'
+                                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900'
+                              }`}
+                              loading={activeActions[n.id] === 'upgrade'}
+                              disabled={actionBusy}
+                              title={outdated ? '远程升级 Agent 到最新推荐版本' : `当前已是最新版本 (${n.agent_version || recommended})，点击可重新推送升级指令`}
+                              onClick={() => void showUpgrade(n.id)}
+                            >
+                              {outdated ? '升级' : '重升'}
+                            </Button>
                             <Button
                               size="sm"
                               variant="ghost"
@@ -1267,20 +1276,19 @@ function NodeCard({
           >
             安装
           </Button>
-          {outdated ? (
-            <Button
-              size="sm"
-              variant="outline"
-              loading={activeAction === 'upgrade'}
-              disabled={actionBusy && activeAction !== 'upgrade'}
-              onClick={onUpgrade}
-              className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-amber-500 hover:text-amber-400"
-            >
-              升级
-            </Button>
-          ) : (
-            <div />
-          )}
+          <Button
+            size="sm"
+            variant="outline"
+            loading={activeAction === 'upgrade'}
+            disabled={actionBusy && activeAction !== 'upgrade'}
+            onClick={onUpgrade}
+            title={outdated ? '远程升级 Agent 到最新推荐版本' : `当前已是最新版本 (${n.agent_version || recommended})，点击可重新推送升级指令`}
+            className={`h-8 border-zinc-800 text-xs hover:bg-zinc-900 ${
+              outdated ? 'text-amber-500 hover:text-amber-400' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            {outdated ? '升级' : '重升'}
+          </Button>
           <Button
             size="sm"
             variant="outline"

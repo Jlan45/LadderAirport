@@ -548,13 +548,24 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         else if (res.start_task) setTask(res.start_task)
         setSavedInboundNAT(JSON.parse(JSON.stringify(inboundNAT)) as Record<string, InboundNATEdit>)
       }
-      const base = res.deploy_message || (res.deployed ? '已关联并下发配置' : '关联已保存')
+      const base = res.deploy_message || (res.deployed ? '关联已保存，配置已下发且核心服务已自动拉起' : '关联已保存')
       if (!res.deployed && res.apply_task?.status === 'failed') {
         toast.error(base)
       } else {
         toast.success(base)
       }
       void load(id, current, { syncConnection: false, syncInbounds: false })
+      // Multi-stage polling to ensure the auto-started running state is fetched and shown in header badges
+      setTimeout(() => {
+        if (isCurrentNode(id, current)) {
+          void load(id, current, { syncConnection: false, syncInbounds: false })
+        }
+      }, 1500)
+      setTimeout(() => {
+        if (isCurrentNode(id, current)) {
+          void load(id, current, { syncConnection: false, syncInbounds: false })
+        }
+      }, 3500)
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '保存失败')
@@ -572,12 +583,24 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       const task = await fn(id)
       if (isCurrentNode(id, current)) setTask(task)
       const ok = task.results?.[0]?.ok
-      const text = `${action === 'apply' ? '下发' : action === 'start' ? '启动' : '停止'} ${
-        ok ? '成功' : '失败'
+      const text = `${action === 'apply' ? '配置下发' : action === 'start' ? '启动' : '停止'} ${
+        ok ? (action === 'apply' ? '成功（核心已自动拉起）' : '成功') : '失败'
       }: ${task.results?.[0]?.message || taskStatusLabel(task.status)}`
       if (ok) toast.success(text)
       else toast.error(text)
       void load(id, current, { syncConnection: false, syncInbounds: false })
+      if (action === 'apply' || action === 'start') {
+        setTimeout(() => {
+          if (isCurrentNode(id, current)) {
+            void load(id, current, { syncConnection: false, syncInbounds: false })
+          }
+        }, 1500)
+        setTimeout(() => {
+          if (isCurrentNode(id, current)) {
+            void load(id, current, { syncConnection: false, syncInbounds: false })
+          }
+        }, 3500)
+      }
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '操作失败')
@@ -781,14 +804,19 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     {node.runtime_state ? (
                       <Badge variant={runtimeTheme(node.runtime_state) as any}>{runtimeLabel(node.runtime_state)}</Badge>
                     ) : null}
-                    {installInfo &&
-                    isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
-                      <Badge variant="warning">
-                        可升级
-                        {installInfo.recommended_agent_version
-                          ? ` → ${installInfo.recommended_agent_version}`
-                          : ''}
-                      </Badge>
+                    {installInfo ? (
+                      isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
+                        <Badge variant="warning">
+                          可升级
+                          {installInfo.recommended_agent_version
+                            ? ` → ${installInfo.recommended_agent_version}`
+                            : ''}
+                        </Badge>
+                      ) : node.agent_version ? (
+                        <Badge variant="outline" className="border-emerald-900/50 text-emerald-400">
+                          已最新 ({node.agent_version})
+                        </Badge>
+                      ) : null
                     ) : null}
                   </div>
                 </div>
@@ -1140,9 +1168,14 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                   <div className="space-y-6">
                     <div className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900/20 p-5">
                       <div className="space-y-1">
-                        <h3 className="text-sm font-semibold text-zinc-200">关联入站 + NAT 映射</h3>
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-zinc-200">关联入站 + NAT 映射</h3>
+                          <Badge variant="success" className="text-[10px] px-2 py-0.5 font-medium">
+                            保存后自动下发并启动核心
+                          </Badge>
+                        </div>
                         <p className="text-xs text-zinc-500">
-                          勾选入站后可填写该入站的公网 IP/域名 和公网端口（仅订阅用）。保存会<strong>自动下发并启动核心</strong>。
+                          勾选入站后可填写该入站的公网 IP/域名 和公网端口（仅订阅用）。保存后会自动下发 sing-box 配置并<strong>自动启动核心服务</strong>。
                         </p>
                       </div>
 
@@ -1351,15 +1384,25 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                         >
                           <RefreshCw className="h-4 w-4" /> 重新下发
                         </Button>
-                        <Button
-                          variant="outline"
-                          loading={busyAction === 'upgrade'}
-                          disabled={busy}
-                          onClick={() => void onRemoteUpgrade()}
-                          className="w-full border-zinc-800 text-amber-400 hover:bg-zinc-900 hover:text-amber-300 gap-1.5"
-                        >
-                          <Wifi className="h-4 w-4" /> 远程升级
-                        </Button>
+                        {(() => {
+                          const isOutdated = installInfo ? isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) : false
+                          return (
+                            <Button
+                              variant="outline"
+                              loading={busyAction === 'upgrade'}
+                              disabled={busy}
+                              onClick={() => void onRemoteUpgrade()}
+                              title={isOutdated ? '远程升级 Agent 到最新推荐版本' : '当前已是最新版本，再次点击可重推送升级指令'}
+                              className={`w-full border-zinc-800 gap-1.5 ${
+                                isOutdated
+                                  ? 'text-amber-400 hover:bg-zinc-900 hover:text-amber-300'
+                                  : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                              }`}
+                            >
+                              <Wifi className="h-4 w-4" /> {isOutdated ? '远程升级' : '重新升级 (已最新)'}
+                            </Button>
+                          )
+                        })()}
                       </div>
 
                       {task && (
