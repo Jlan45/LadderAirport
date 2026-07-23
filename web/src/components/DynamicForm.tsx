@@ -115,7 +115,7 @@ function renderInput(
             disabled={disabled}
             className={cn(
               error ? 'border-red-500 focus-visible:ring-red-500' : '',
-              isPort ? 'pr-10 bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800' : ''
+              isPort ? 'pr-10 bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700' : ''
             )}
             value={current === '' || current == null ? '' : Number(current)}
             onChange={(e) => {

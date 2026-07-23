@@ -339,7 +339,7 @@ export default function Inbounds() {
               }}
               className="space-y-6"
             >
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
                 <div className="flex flex-col space-y-1.5">
                   <Label htmlFor="inbound-name" className="text-zinc-300">
                     配置名称 <span className="text-red-500">*</span>
@@ -354,7 +354,7 @@ export default function Inbounds() {
                       if (nameError) setNameError('')
                     }}
                     placeholder="例如: ss-edge-1"
-                    className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 h-9 ${
                       nameError ? 'border-red-500 focus-visible:ring-red-500' : ''
                     }`}
                   />
@@ -370,7 +370,7 @@ export default function Inbounds() {
                     value={protocol}
                     onValueChange={(val) => onProtocolChange(val)}
                   >
-                    <SelectTrigger className="bg-zinc-950 border-zinc-900" id="inbound-protocol">
+                    <SelectTrigger className="bg-zinc-950 border-zinc-800 h-9" id="inbound-protocol">
                       <SelectValue placeholder={loading ? '加载中…' : '请选择协议'} />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-900 border-zinc-800">
@@ -386,16 +386,19 @@ export default function Inbounds() {
                   )}
                 </div>
 
-                <div className="flex items-center space-x-2 border border-zinc-900 bg-zinc-950/20 rounded-md px-3 h-9">
-                  <Checkbox
-                    id="inbound-enabled-chk"
-                    checked={enabled}
-                    disabled={busy}
-                    onCheckedChange={(c) => setEnabled(Boolean(c))}
-                  />
-                  <Label htmlFor="inbound-enabled-chk" className="text-xs text-zinc-300 cursor-pointer select-none">
-                    {editingId ? '保存后保持启用此配置' : '创建后立即启用配置'}
-                  </Label>
+                <div className="flex flex-col space-y-1.5">
+                  <Label className="text-transparent select-none" aria-hidden="true">状态</Label>
+                  <div className="flex items-center space-x-2 border border-zinc-800 bg-zinc-950 rounded-md px-3 h-9">
+                    <Checkbox
+                      id="inbound-enabled-chk"
+                      checked={enabled}
+                      disabled={busy}
+                      onCheckedChange={(c) => setEnabled(Boolean(c))}
+                    />
+                    <Label htmlFor="inbound-enabled-chk" className="text-xs text-zinc-300 cursor-pointer select-none">
+                      {editingId ? '保存后保持启用此配置' : '创建后立即启用配置'}
+                    </Label>
+                  </div>
                 </div>
               </div>
 

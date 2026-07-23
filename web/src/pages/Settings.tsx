@@ -264,7 +264,7 @@ export default function Settings() {
                   autoComplete="off"
                   onChange={(e) => updateDraft({ token: e.target.value })}
                   placeholder="新建节点未指定令牌时默认填补此项，请使用强随机串"
-                  className="bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800"
+                  className="bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
 
@@ -280,7 +280,7 @@ export default function Settings() {
                       value={draft.timeoutSec}
                       disabled={formDisabled}
                       onChange={(e) => updateDraft({ timeoutSec: e.target.value })}
-                      className={`bg-zinc-950 border-zinc-900 pr-10 focus-visible:ring-zinc-800 ${
+                      className={`bg-zinc-950 border-zinc-800 pr-10 focus-visible:ring-zinc-700 ${
                         errors.timeoutSec ? 'border-red-500 focus-visible:ring-red-500' : ''
                       }`}
                     />
@@ -301,7 +301,7 @@ export default function Settings() {
                     value={draft.concurrency}
                     disabled={formDisabled}
                     onChange={(e) => updateDraft({ concurrency: e.target.value })}
-                    className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
                       errors.concurrency ? 'border-red-500 focus-visible:ring-red-500' : ''
                     }`}
                   />
@@ -333,7 +333,7 @@ export default function Settings() {
                   disabled={formDisabled}
                   onChange={(e) => updateDraft({ publicBase: e.target.value })}
                   placeholder="例如: https://panel.example.com"
-                  className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                  className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
                     errors.publicBase ? 'border-red-500 focus-visible:ring-red-500' : ''
                   }`}
                 />
@@ -351,7 +351,7 @@ export default function Settings() {
                   disabled={formDisabled}
                   onChange={(e) => updateDraft({ listenAddr: e.target.value })}
                   placeholder="例如: :8080 或 127.0.0.1:8080"
-                  className="bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800"
+                  className="bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700"
                 />
                 <span className="text-[10px] text-zinc-500">本配置仅保存在设置文件中。修改后，您通常需要重启后端面板程序才会正式生效</span>
               </div>
@@ -381,7 +381,7 @@ export default function Settings() {
                     autoComplete="new-password"
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="留空表示不修改管理员登录密码"
-                    className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
                       errors.newPassword ? 'border-red-500 focus-visible:ring-red-500' : ''
                     }`}
                   />
@@ -400,7 +400,7 @@ export default function Settings() {
                     autoComplete="new-password"
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="请再次输入以确认新管理员密码"
-                    className={`bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800 ${
+                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
                       errors.confirmPassword ? 'border-red-500 focus-visible:ring-red-500' : ''
                     }`}
                   />
