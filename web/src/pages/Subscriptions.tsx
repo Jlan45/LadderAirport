@@ -521,7 +521,7 @@ export default function Subscriptions() {
             onClick={() => void load()}
             loading={loading}
             disabled={saving || pending.size > 0}
-            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5 h-9"
+            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5 h-9 cursor-pointer"
           >
             <RefreshCw className="h-4 w-4" /> 刷新
           </Button>
@@ -537,18 +537,18 @@ export default function Subscriptions() {
 
       {/* Primary Tabs */}
       <Tabs defaultValue="publish" className="w-full space-y-6">
-        <div className="border-b border-zinc-900 pb-2">
-          <TabsList className="bg-zinc-900/60 p-1 border border-zinc-800/80 rounded-lg">
+        <div>
+          <TabsList className="inline-flex h-10 items-center justify-center rounded-lg bg-zinc-950 p-1 border border-zinc-800 text-zinc-400">
             <TabsTrigger
               value="publish"
-              className="gap-2 text-xs font-semibold px-4 py-2 cursor-pointer data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100"
+              className="inline-flex items-center justify-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-md transition-all cursor-pointer data-[state=active]:bg-zinc-900 data-[state=active]:text-zinc-100 text-zinc-400 hover:text-zinc-200 data-[state=active]:shadow-xs"
             >
               <Radio className="h-4 w-4 text-cyan-400" />
               发布订阅 ({subscriptions.length})
             </TabsTrigger>
             <TabsTrigger
               value="sources"
-              className="gap-2 text-xs font-semibold px-4 py-2 cursor-pointer data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100"
+              className="inline-flex items-center justify-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-md transition-all cursor-pointer data-[state=active]:bg-zinc-900 data-[state=active]:text-zinc-100 text-zinc-400 hover:text-zinc-200 data-[state=active]:shadow-xs"
             >
               <Globe className="h-4 w-4 text-violet-400" />
               外部订阅源 ({sources.length})
@@ -565,7 +565,7 @@ export default function Subscriptions() {
                 支持编译出标准的 Clash (YAML) 与 sing-box (JSON) 订阅。客户端发起请求时动态包含在线节点。
               </p>
             </div>
-            <Button onClick={openCreateSubscription} className="gap-1.5 h-9">
+            <Button onClick={openCreateSubscription} className="gap-1.5 h-9 cursor-pointer">
               <Plus className="h-4 w-4" /> 新建订阅
             </Button>
           </div>
@@ -585,7 +585,7 @@ export default function Subscriptions() {
                     点击右上角“新建订阅”按钮，创建一个支持 Clash 或 sing-box 的公网订阅链接。
                   </p>
                 </div>
-                <Button onClick={openCreateSubscription} className="gap-1.5 mt-2">
+                <Button onClick={openCreateSubscription} className="gap-1.5 mt-2 cursor-pointer">
                   <Plus className="h-4 w-4" /> 创建第一个订阅
                 </Button>
               </CardContent>
@@ -600,8 +600,8 @@ export default function Subscriptions() {
                 const singboxScheme = `sing-box://import-remote?url=${encodeURIComponent(fullUrl)}`
 
                 const themeGlow = isClash
-                  ? 'border-cyan-950/50 bg-cyan-950/10 shadow-cyan-950/20'
-                  : 'border-violet-950/50 bg-violet-950/10 shadow-violet-950/20'
+                  ? 'border-cyan-500/30 bg-cyan-500/5 shadow-sm'
+                  : 'border-violet-500/30 bg-violet-500/5 shadow-sm'
 
                 return (
                   <Card
@@ -619,8 +619,8 @@ export default function Subscriptions() {
                               variant="outline"
                               className={
                                 isClash
-                                  ? 'border-cyan-800/80 bg-cyan-950/60 text-cyan-300 font-mono text-[11px]'
-                                  : 'border-violet-800/80 bg-violet-950/60 text-violet-300 font-mono text-[11px]'
+                                  ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-400 font-mono text-[11px]'
+                                  : 'border-violet-500/40 bg-violet-500/10 text-violet-400 font-mono text-[11px]'
                               }
                             >
                               {isClash ? 'Clash (YAML)' : 'sing-box (JSON)'}
@@ -642,8 +642,8 @@ export default function Subscriptions() {
                       {/* Subscription URL Box */}
                       <div className="space-y-1.5">
                         <span className="text-[11px] font-medium text-zinc-400 block">公网订阅地址</span>
-                        <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-950 border border-zinc-900">
-                          <code className="text-xs font-mono text-zinc-300 truncate flex-1 select-all px-1">
+                        <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-950 border border-zinc-800">
+                          <code className="text-xs font-mono text-zinc-200 truncate flex-1 select-all px-1">
                             {fullUrl}
                           </code>
                           <TooltipProvider>
@@ -706,7 +706,7 @@ export default function Subscriptions() {
                       <div className="grid grid-cols-2 gap-2 pt-3 border-t border-zinc-900/80 text-xs">
                         <div className="space-y-0.5">
                           <span className="text-[10px] text-zinc-500 block">本地节点范围</span>
-                          <span className="text-zinc-300 font-medium flex items-center gap-1">
+                          <span className="text-zinc-200 font-medium flex items-center gap-1">
                             <Server className="h-3 w-3 text-zinc-500" />
                             {sub.include_all_inbounds
                               ? `全网可接入 (${inbounds.length} 个)`
@@ -717,7 +717,7 @@ export default function Subscriptions() {
                         </div>
                         <div className="space-y-0.5">
                           <span className="text-[10px] text-zinc-500 block">关联外部订阅源</span>
-                          <span className="text-zinc-300 font-medium flex items-center gap-1">
+                          <span className="text-zinc-200 font-medium flex items-center gap-1">
                             <Layers className="h-3 w-3 text-zinc-500" />
                             {(sub.external_source_ids?.length ?? 0) > 0
                               ? `包含 ${sub.external_source_ids?.length ?? 0} 个外部源`
@@ -777,7 +777,7 @@ export default function Subscriptions() {
                 配置外部机场或提供者的订阅 URL，系统后台会定时抓取并解析节点，合并下发给指定订阅。
               </p>
             </div>
-            <Button onClick={openCreateSource} className="gap-1.5 h-9">
+            <Button onClick={openCreateSource} className="gap-1.5 h-9 cursor-pointer">
               <Plus className="h-4 w-4" /> 添加外部源
             </Button>
           </div>
@@ -797,7 +797,7 @@ export default function Subscriptions() {
                     添加外部订阅源链接后，面板可以自动抓取并将其中的节点合并到您发布的订阅中。
                   </p>
                 </div>
-                <Button onClick={openCreateSource} className="gap-1.5 mt-2">
+                <Button onClick={openCreateSource} className="gap-1.5 mt-2 cursor-pointer">
                   <Plus className="h-4 w-4" /> 添加第一个外部源
                 </Button>
               </CardContent>
@@ -909,9 +909,9 @@ export default function Subscriptions() {
 
       {/* Subscription Editor Dialog */}
       <Dialog open={subEditor.open} onOpenChange={(v) => !v && closeSubscriptionEditor()}>
-        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5">
+        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5 shadow-xl">
           <DialogHeader className="space-y-1">
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-zinc-100">
               <Rss className="h-5 w-5 text-cyan-400" />
               {subEditor.id ? '编辑订阅设置' : '创建新订阅'}
             </DialogTitle>
@@ -933,7 +933,7 @@ export default function Subscriptions() {
                 value={subEditor.name}
                 onChange={(e) => setSubEditor({ ...subEditor, name: e.target.value })}
                 placeholder="例：常用客户端订阅 / Clash 节点池"
-                className="bg-zinc-900 border-zinc-800 text-sm"
+                className="bg-zinc-900 border-zinc-800 text-sm text-zinc-100"
               />
             </div>
 
@@ -945,8 +945,8 @@ export default function Subscriptions() {
                   onClick={() => setSubEditor({ ...subEditor, format: 'clash' })}
                   className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
                     subEditor.format === 'clash'
-                      ? 'border-cyan-600 bg-cyan-950/40 text-cyan-200'
-                      : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700'
+                      ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
+                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700'
                   }`}
                 >
                   <div className="font-bold text-sm">Clash 格式</div>
@@ -958,8 +958,8 @@ export default function Subscriptions() {
                   onClick={() => setSubEditor({ ...subEditor, format: 'singbox' })}
                   className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
                     subEditor.format === 'singbox'
-                      ? 'border-violet-600 bg-violet-950/40 text-violet-200'
-                      : 'border-zinc-800 bg-zinc-900/50 text-zinc-400 hover:border-zinc-700'
+                      ? 'border-violet-500 bg-violet-500/10 text-violet-400'
+                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700'
                   }`}
                 >
                   <div className="font-bold text-sm">sing-box 格式</div>
@@ -1060,10 +1060,10 @@ export default function Subscriptions() {
           </div>
 
           <DialogFooter className="gap-2 pt-2">
-            <Button variant="outline" onClick={closeSubscriptionEditor} disabled={saving}>
+            <Button variant="outline" onClick={closeSubscriptionEditor} disabled={saving} className="border-zinc-800 cursor-pointer">
               取消
             </Button>
-            <Button onClick={() => void saveSubscription()} loading={saving}>
+            <Button onClick={() => void saveSubscription()} loading={saving} className="cursor-pointer">
               {subEditor.id ? '更新订阅' : '创建订阅'}
             </Button>
           </DialogFooter>
@@ -1072,9 +1072,9 @@ export default function Subscriptions() {
 
       {/* External Source Editor Dialog */}
       <Dialog open={sourceEditor.open} onOpenChange={(v) => !v && closeSourceEditor()}>
-        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5">
+        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5 shadow-xl">
           <DialogHeader className="space-y-1">
-            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-zinc-100">
               <Globe className="h-5 w-5 text-violet-400" />
               {sourceEditor.id ? '编辑外部订阅源' : '添加外部订阅源'}
             </DialogTitle>
@@ -1096,7 +1096,7 @@ export default function Subscriptions() {
                 value={sourceEditor.name}
                 onChange={(e) => setSourceEditor({ ...sourceEditor, name: e.target.value })}
                 placeholder="例：香港备用节点池 / 外部机场"
-                className="bg-zinc-900 border-zinc-800 text-sm"
+                className="bg-zinc-900 border-zinc-800 text-sm text-zinc-100"
               />
             </div>
 
@@ -1106,7 +1106,7 @@ export default function Subscriptions() {
                 value={sourceEditor.url}
                 onChange={(e) => setSourceEditor({ ...sourceEditor, url: e.target.value })}
                 placeholder="https://example.com/api/v1/client/subscribe?token=..."
-                className="bg-zinc-900 border-zinc-800 text-sm font-mono"
+                className="bg-zinc-900 border-zinc-800 text-sm font-mono text-zinc-100"
               />
             </div>
 
@@ -1117,7 +1117,7 @@ export default function Subscriptions() {
                 value={sourceEditor.interval}
                 onChange={(e) => setSourceEditor({ ...sourceEditor, interval: e.target.value })}
                 placeholder="86400 (默认 24 小时)"
-                className="bg-zinc-900 border-zinc-800 text-sm font-mono"
+                className="bg-zinc-900 border-zinc-800 text-sm font-mono text-zinc-100"
               />
               <span className="text-[10px] text-zinc-500 block">
                 常用提示：86400 秒 = 24 小时，43200 秒 = 12 小时。
@@ -1145,10 +1145,10 @@ export default function Subscriptions() {
           </div>
 
           <DialogFooter className="gap-2 pt-2">
-            <Button variant="outline" onClick={closeSourceEditor} disabled={saving}>
+            <Button variant="outline" onClick={closeSourceEditor} disabled={saving} className="border-zinc-800 cursor-pointer">
               取消
             </Button>
-            <Button onClick={() => void saveSource()} loading={saving}>
+            <Button onClick={() => void saveSource()} loading={saving} className="cursor-pointer">
               {sourceEditor.id ? '更新外部源' : '创建外部源'}
             </Button>
           </DialogFooter>
@@ -1165,7 +1165,7 @@ export default function Subscriptions() {
 
       {/* Text Preview Modal */}
       <Dialog open={textPreview !== null} onOpenChange={(v) => !v && setTextPreview(null)}>
-        <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4">
+        <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4 shadow-xl">
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-base font-bold text-zinc-100">
               {textPreview?.title}
@@ -1187,17 +1187,18 @@ export default function Subscriptions() {
                   toast.success('已复制预览内容')
                 }
               }}
+              className="border-zinc-800 cursor-pointer"
             >
               <Copy className="h-4 w-4 mr-2" /> 复制全部
             </Button>
-            <Button onClick={() => setTextPreview(null)}>关闭</Button>
+            <Button onClick={() => setTextPreview(null)} className="cursor-pointer">关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Source Preview Modal */}
       <Dialog open={sourcePreview !== null} onOpenChange={(v) => !v && setSourcePreview(null)}>
-        <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4">
+        <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4 shadow-xl">
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-base font-bold text-zinc-100">
               {sourcePreviewTitle}
@@ -1224,7 +1225,7 @@ export default function Subscriptions() {
           )}
 
           <DialogFooter>
-            <Button onClick={() => setSourcePreview(null)}>关闭</Button>
+            <Button onClick={() => setSourcePreview(null)} className="cursor-pointer">关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

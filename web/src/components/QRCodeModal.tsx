@@ -53,10 +53,10 @@ export function QRCodeModal({ open, onClose, title, url }: QRCodeModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5">
+      <DialogContent className="sm:max-w-md bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5 shadow-xl">
         <DialogHeader className="space-y-1 text-center sm:text-left">
-          <DialogTitle className="text-lg font-bold flex items-center gap-2">
-            <QrCode className="h-5 w-5 text-cyan-400" />
+          <DialogTitle className="text-lg font-bold flex items-center gap-2 text-zinc-100">
+            <QrCode className="h-5 w-5 text-cyan-500" />
             订阅二维码 · {title}
           </DialogTitle>
           <p className="text-xs text-zinc-400">
@@ -65,7 +65,7 @@ export function QRCodeModal({ open, onClose, title, url }: QRCodeModalProps) {
         </DialogHeader>
 
         <div className="flex flex-col items-center justify-center space-y-4 py-2">
-          <div className="p-3 bg-white rounded-xl shadow-lg border border-zinc-200 flex items-center justify-center">
+          <div className="p-3 bg-white rounded-xl shadow-md border border-zinc-200 flex items-center justify-center">
             {dataUrl ? (
               <img src={dataUrl} alt="Subscription QR Code" className="w-56 h-56 object-contain" />
             ) : (
@@ -76,12 +76,12 @@ export function QRCodeModal({ open, onClose, title, url }: QRCodeModalProps) {
           </div>
 
           <div className="w-full space-y-2">
-            <div className="p-2.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] font-mono text-zinc-300 break-all select-all text-center">
+            <div className="p-2.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] font-mono text-zinc-200 break-all select-all text-center">
               {url}
             </div>
             <Button
               onClick={() => void handleCopy()}
-              className="w-full gap-2 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-200"
+              className="w-full gap-2 bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-200 cursor-pointer"
             >
               {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
               {copied ? '已复制订阅链接' : '复制完整订阅链接'}
