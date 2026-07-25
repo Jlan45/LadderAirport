@@ -169,13 +169,13 @@ type Settings struct {
 	PublicBaseURL string `json:"public_base_url"`
 }
 
-// Subscription is a client-facing share link (Clash YAML or sing-box JSON).
+// Subscription is a client-facing share link.
 type Subscription struct {
 	ID                 string   `json:"id"`
 	Name               string   `json:"name"`
-	Format             string   `json:"format"`      // clash | singbox
-	Token              string   `json:"token"`       // URL secret for public /sub/{token}
-	InboundIDs         []string `json:"inbound_ids"` // selected IDs when IncludeAllInbounds is false
+	Format             string   `json:"format,omitempty"` // legacy format (optional)
+	Token              string   `json:"token"`            // URL secret for public /sub/{token}
+	InboundIDs         []string `json:"inbound_ids"`      // selected IDs when IncludeAllInbounds is false
 	IncludeAllInbounds bool     `json:"include_all_inbounds"`
 	Enabled            bool     `json:"enabled"`
 	CreatedAtUnix      int64    `json:"created_at_unix"`

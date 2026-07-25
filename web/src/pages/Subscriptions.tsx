@@ -84,7 +84,6 @@ type SubscriptionEditor = {
   open: boolean
   id: string | null
   name: string
-  format: 'clash' | 'singbox'
   enabled: boolean
   localMode: LocalMode
   inboundIds: Set<string>
@@ -107,7 +106,6 @@ const EMPTY_SUB_EDITOR: SubscriptionEditor = {
   open: false,
   id: null,
   name: '',
-  format: 'clash',
   enabled: true,
   localMode: 'all',
   inboundIds: new Set(),
@@ -135,7 +133,7 @@ export default function Subscriptions() {
   const [editorError, setEditorError] = useState('')
   const [subEditor, setSubEditor] = useState<SubscriptionEditor>(EMPTY_SUB_EDITOR)
   const [sourceEditor, setSourceEditor] = useState<SourceEditor>(EMPTY_SOURCE_EDITOR)
-  const [textPreview, setTextPreview] = useState<{ title: string; text: string } | null>(null)
+  const [textPreview, setTextPreview] = useState<{ subId: string; subName: string; format: string; text: string } | null>(null)
   const [sourcePreview, setSourcePreview] = useState<SourcePreview | null>(null)
   const [sourcePreviewTitle, setSourcePreviewTitle] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -236,7 +234,6 @@ export default function Subscriptions() {
       open: true,
       id: subscription.id,
       name: subscription.name,
-      format: subscription.format === 'singbox' ? 'singbox' : 'clash',
       enabled: subscription.enabled,
       localMode: includeAll ? 'all' : subscription.inbound_ids.length ? 'custom' : 'none',
       inboundIds: new Set(subscription.inbound_ids ?? []),
@@ -282,7 +279,6 @@ export default function Subscriptions() {
     setEditorError('')
     const body = {
       name,
-      format: subEditor.format,
       enabled: subEditor.enabled,
       include_all_inbounds: subEditor.localMode === 'all',
       inbound_ids:
@@ -353,19 +349,35 @@ export default function Subscriptions() {
     }
   }
 
-  async function onPreviewSubscription(subscription: Subscription) {
+  async function onPreviewSubscription(subscription: Subscription, targetFormat = 'v2ray') {
     const key = `subscription-preview:${subscription.id}`
     if (!beginOperation(key)) return
     try {
-      const res = await previewSubscription(subscription.id)
+      const res = await previewSubscription(subscription.id, targetFormat)
       setTextPreview({
-        title: `订阅内容预览 · ${subscription.name} (${subscription.format})`,
+        subId: subscription.id,
+        subName: subscription.name,
+        format: targetFormat,
         text: res,
       })
     } catch (err) {
       toast.error(errorText(err, '预览订阅失败'))
     } finally {
       endOperation(key)
+    }
+  }
+
+  async function switchPreviewFormat(format: string) {
+    if (!textPreview) return
+    try {
+      const res = await previewSubscription(textPreview.subId, format)
+      setTextPreview({
+        ...textPreview,
+        format,
+        text: res,
+      })
+    } catch (err) {
+      toast.error(errorText(err, '切换预览格式失败'))
     }
   }
 
@@ -594,19 +606,14 @@ export default function Subscriptions() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {subscriptions.map((sub) => {
                 const subPending = entityOperationPending('subscription', sub.id)
-                const isClash = sub.format === 'clash'
                 const fullUrl = getFullSubscriptionUrl(sub.url)
-                const clashScheme = `clash://install-config?url=${encodeURIComponent(fullUrl)}`
-                const singboxScheme = `sing-box://import-remote?url=${encodeURIComponent(fullUrl)}`
-
-                const themeGlow = isClash
-                  ? 'border-cyan-500/30 bg-cyan-500/5 shadow-sm'
-                  : 'border-violet-500/30 bg-violet-500/5 shadow-sm'
+                const clashScheme = `clash://install-config?url=${encodeURIComponent(fullUrl + '?flag=clash')}`
+                const singboxScheme = `sing-box://import-remote?url=${encodeURIComponent(fullUrl + '?flag=singbox')}`
 
                 return (
                   <Card
                     key={sub.id}
-                    className={`relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] ${themeGlow} border`}
+                    className="relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] border-cyan-500/30 bg-cyan-500/5 shadow-sm border"
                   >
                     <CardHeader className="p-5 pb-3">
                       <div className="flex items-start justify-between gap-3">
@@ -617,13 +624,9 @@ export default function Subscriptions() {
                             </CardTitle>
                             <Badge
                               variant="outline"
-                              className={
-                                isClash
-                                  ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-400 font-mono text-[11px]'
-                                  : 'border-violet-500/40 bg-violet-500/10 text-violet-400 font-mono text-[11px]'
-                              }
+                              className="border-cyan-500/40 bg-cyan-500/10 text-cyan-400 font-mono text-[11px]"
                             >
-                              {isClash ? 'Clash (YAML)' : 'sing-box (JSON)'}
+                              自适应 (Clash / sing-box / V2Ray)
                             </Badge>
                           </div>
                         </div>
@@ -681,13 +684,23 @@ export default function Subscriptions() {
                         </Button>
 
                         <a
-                          href={isClash ? clashScheme : singboxScheme}
+                          href={clashScheme}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 h-8 px-3 transition-colors gap-1.5 cursor-pointer"
                         >
-                          <ExternalLink className="h-3.5 w-3.5 text-emerald-400" />
-                          一键导入 {isClash ? 'Clash' : 'sing-box'}
+                          <ExternalLink className="h-3.5 w-3.5 text-cyan-400" />
+                          导入 Clash
+                        </a>
+
+                        <a
+                          href={singboxScheme}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 h-8 px-3 transition-colors gap-1.5 cursor-pointer"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 text-violet-400" />
+                          导入 sing-box
                         </a>
 
                         <Button
@@ -932,40 +945,9 @@ export default function Subscriptions() {
               <Input
                 value={subEditor.name}
                 onChange={(e) => setSubEditor({ ...subEditor, name: e.target.value })}
-                placeholder="例：常用客户端订阅 / Clash 节点池"
+                placeholder="例：常用客户端订阅 / 通用节点池"
                 className="bg-zinc-900 border-zinc-800 text-sm text-zinc-100"
               />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className="text-xs text-zinc-300">客户端文件格式</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSubEditor({ ...subEditor, format: 'clash' })}
-                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
-                    subEditor.format === 'clash'
-                      ? 'border-cyan-500 bg-cyan-500/10 text-cyan-400'
-                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700'
-                  }`}
-                >
-                  <div className="font-bold text-sm">Clash 格式</div>
-                  <div className="text-[11px] opacity-80 mt-0.5">标准 YAML 节点列表模版</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setSubEditor({ ...subEditor, format: 'singbox' })}
-                  className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
-                    subEditor.format === 'singbox'
-                      ? 'border-violet-500 bg-violet-500/10 text-violet-400'
-                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700'
-                  }`}
-                >
-                  <div className="font-bold text-sm">sing-box 格式</div>
-                  <div className="text-[11px] opacity-80 mt-0.5">标准 JSON Outbounds 配置模版</div>
-                </button>
-              </div>
             </div>
 
             <div className="space-y-2 pt-2 border-t border-zinc-900">
@@ -1168,9 +1150,27 @@ export default function Subscriptions() {
         <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4 shadow-xl">
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-base font-bold text-zinc-100">
-              {textPreview?.title}
+              订阅内容预览 · {textPreview?.subName}
             </DialogTitle>
           </DialogHeader>
+
+          <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
+            <span className="text-xs text-zinc-400 mr-1 font-medium">预览格式：</span>
+            {(['v2ray', 'clash', 'singbox'] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => void switchPreviewFormat(f)}
+                className={`px-3 py-1 rounded text-xs font-mono font-medium transition-all cursor-pointer ${
+                  textPreview?.format === f
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                    : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                {f === 'v2ray' ? 'V2Ray 链接' : f === 'clash' ? 'Clash YAML' : 'sing-box JSON'}
+              </button>
+            ))}
+          </div>
 
           <div className="relative">
             <pre className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-h-[60vh] overflow-y-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all leading-relaxed">

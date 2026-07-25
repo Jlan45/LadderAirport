@@ -47,10 +47,6 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(body.Format))
-	if format != "clash" && format != "singbox" {
-		writeError(w, http.StatusBadRequest, "format must be clash or singbox")
-		return
-	}
 	token, err := randomToken(16)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -124,12 +120,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		existing.Name = *body.Name
 	}
 	if body.Format != nil {
-		f := strings.ToLower(strings.TrimSpace(*body.Format))
-		if f != "clash" && f != "singbox" {
-			writeError(w, http.StatusBadRequest, "format must be clash or singbox")
-			return
-		}
-		existing.Format = f
+		existing.Format = strings.ToLower(strings.TrimSpace(*body.Format))
 	}
 	if body.InboundIDs != nil {
 		existing.InboundIDs = body.InboundIDs
@@ -183,6 +174,59 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func detectFormat(r *http.Request) string {
+	if r == nil {
+		return "v2ray"
+	}
+	q := r.URL.Query()
+	// 1. Explicit query parameter check: format, flag, target
+	for _, key := range []string{"format", "flag", "target"} {
+		if val := strings.ToLower(strings.TrimSpace(q.Get(key))); val != "" {
+			switch val {
+			case "clash", "mihomo", "clashmeta":
+				return "clash"
+			case "singbox", "sing-box":
+				return "singbox"
+			case "v2ray", "v2rayn", "v2rayng", "base64", "links":
+				return "v2ray"
+			}
+		}
+	}
+	// Check boolean flag presence in query string
+	if q.Has("clash") {
+		return "clash"
+	}
+	if q.Has("singbox") || q.Has("sing-box") {
+		return "singbox"
+	}
+	if q.Has("v2ray") {
+		return "v2ray"
+	}
+
+	// 2. User-Agent header inspection
+	ua := strings.ToLower(r.Header.Get("User-Agent"))
+	if ua != "" {
+		for _, kw := range []string{"clash", "mihomo", "stash", "openclash"} {
+			if strings.Contains(ua, kw) {
+				return "clash"
+			}
+		}
+		for _, kw := range []string{"sing-box", "singbox", "sbox", "sfi", "sfa", "sfo", "sfm"} {
+			if strings.Contains(ua, kw) {
+				return "singbox"
+			}
+		}
+		for _, kw := range []string{"v2ray", "v2rayn", "v2rayng", "shadowrocket", "quantumult", "surge", "nekobox", "passwall"} {
+			if strings.Contains(ua, kw) {
+				return "v2ray"
+			}
+		}
+	}
+
+	// 3. Fallback format
+	return "v2ray"
+}
+
 func (s *Server) handlePreviewSubscription(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	sub, err := s.Store.GetSubscription(id)
@@ -194,7 +238,8 @@ func (s *Server) handlePreviewSubscription(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	body, ctype, err := s.renderSubscription(r.Context(), sub)
+	format := detectFormat(r)
+	body, ctype, err := s.renderSubscription(r.Context(), sub, format)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -220,19 +265,20 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusForbidden, "subscription disabled")
 		return
 	}
-	body, ctype, err := s.renderSubscription(r.Context(), sub)
+	format := detectFormat(r)
+	body, ctype, err := s.renderSubscription(r.Context(), sub, format)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Profile-Update-Interval", "24")
-	w.Header().Set("Content-Disposition", contentDisposition(subFilename(sub)))
+	w.Header().Set("Content-Disposition", contentDisposition(subFilename(sub, format)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 }
 
-func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription) ([]byte, string, error) {
+func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription, format string) ([]byte, string, error) {
 	nodes, err := s.Store.ListNodes()
 	if err != nil {
 		return nil, "", err
@@ -271,15 +317,19 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		return nil, "", fmt.Errorf("no proxy endpoints (check node address, inbound attachments, and external sources)")
 	}
 
-	switch sub.Format {
+	switch format {
 	case "clash":
 		b, err := subscription.RenderClash(eps)
 		return b, "text/yaml; charset=utf-8", err
 	case "singbox":
 		b, err := subscription.RenderSingbox(eps)
 		return b, "application/json; charset=utf-8", err
+	case "v2ray":
+		b, err := subscription.RenderV2ray(eps)
+		return b, "text/plain; charset=utf-8", err
 	default:
-		return nil, "", fmt.Errorf("unknown format %q", sub.Format)
+		b, err := subscription.RenderV2ray(eps)
+		return b, "text/plain; charset=utf-8", err
 	}
 }
 
@@ -326,16 +376,18 @@ func (s *Server) subURL(r *http.Request, token string) string {
 	return base + "/sub/" + token
 }
 
-func subFilename(sub *store.Subscription) string {
+func subFilename(sub *store.Subscription, format string) string {
 	base := sanitizeFilename(sub.Name)
 	if base == "" {
 		base = "subscription"
 	}
-	switch sub.Format {
+	switch format {
 	case "clash":
 		return base + ".yaml"
 	case "singbox":
 		return base + ".json"
+	case "v2ray":
+		return base + ".txt"
 	default:
 		return base + ".txt"
 	}

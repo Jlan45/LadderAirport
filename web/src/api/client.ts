@@ -206,7 +206,7 @@ export interface Settings {
 export interface Subscription {
   id: string
   name: string
-  format: 'clash' | 'singbox' | string
+  format?: string
   token: string
   inbound_ids: string[]
   /** True includes every enabled local inbound; false allows an external-only subscription. */
@@ -612,7 +612,7 @@ export function listSubscriptions(): Promise<Subscription[]> {
 
 export function createSubscription(body: {
   name: string
-  format: string
+  format?: string
   inbound_ids?: string[]
   include_all_inbounds?: boolean
   external_source_ids?: string[]
@@ -640,8 +640,9 @@ export function deleteSubscription(id: string): Promise<void> {
   return request('DELETE', `/subscriptions/${id}`)
 }
 
-export async function previewSubscription(id: string): Promise<string> {
-  return requestText(`/subscriptions/${id}/preview`)
+export async function previewSubscription(id: string, format?: string): Promise<string> {
+  const query = format ? `?format=${encodeURIComponent(format)}` : ''
+  return requestText(`/subscriptions/${id}/preview${query}`)
 }
 
 // --- External subscription sources ---

@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -275,3 +276,24 @@ func TestRenderClashSourceGroups(t *testing.T) {
 		t.Fatal("proxy-providers must not appear")
 	}
 }
+
+func TestRenderV2ray(t *testing.T) {
+	eps := sampleEndpoints()
+	b, err := RenderV2ray(eps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if s == "" {
+		t.Fatal("empty v2ray output")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatalf("v2ray base64 decode failed: %v", err)
+	}
+	decStr := string(decoded)
+	if !strings.HasPrefix(decStr, "ss://") {
+		t.Fatalf("expected ss:// prefix in decoded string, got %q", decStr)
+	}
+}
+
