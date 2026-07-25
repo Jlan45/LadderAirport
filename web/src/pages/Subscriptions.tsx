@@ -613,7 +613,7 @@ export default function Subscriptions() {
                 return (
                   <Card
                     key={sub.id}
-                    className="relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] border-cyan-500/30 bg-cyan-500/5 shadow-sm border"
+                    className="relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-700/80 hover:bg-zinc-900/60 shadow-sm border"
                   >
                     <CardHeader className="p-5 pb-3">
                       <div className="flex items-start justify-between gap-3">
@@ -624,9 +624,9 @@ export default function Subscriptions() {
                             </CardTitle>
                             <Badge
                               variant="outline"
-                              className="border-cyan-500/40 bg-cyan-500/10 text-cyan-400 font-mono text-[11px]"
+                              className="border-indigo-500/30 bg-indigo-500/10 text-indigo-400 font-mono text-[11px]"
                             >
-                              自适应 (Clash / sing-box / V2Ray)
+                              通用分发 (Clash / sing-box / V2Ray)
                             </Badge>
                           </div>
                         </div>
@@ -680,7 +680,7 @@ export default function Subscriptions() {
                           onClick={() => setQrModal({ open: true, title: sub.name, url: fullUrl })}
                           className="h-8 text-xs border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 gap-1.5 cursor-pointer"
                         >
-                          <QrCode className="h-3.5 w-3.5 text-cyan-400" /> 扫码
+                          <QrCode className="h-3.5 w-3.5 text-emerald-400" /> 扫码
                         </Button>
 
                         <a
@@ -1163,7 +1163,11 @@ export default function Subscriptions() {
                 onClick={() => void switchPreviewFormat(f)}
                 className={`px-3 py-1 rounded text-xs font-mono font-medium transition-all cursor-pointer ${
                   textPreview?.format === f
-                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                    ? f === 'clash'
+                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                      : f === 'singbox'
+                        ? 'bg-violet-500/20 text-violet-400 border border-violet-500/40'
+                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                     : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'
                 }`}
               >
