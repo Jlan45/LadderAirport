@@ -4,12 +4,21 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
-// Default raw install script URL (main branch). Override via request field if needed.
-const defaultInstallScriptURL = "https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh"
-const defaultPKIMigrationScriptURL = "https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/migrate-agent-to-panel-pki.sh"
+const releaseDownloadBaseURL = "https://github.com/Jlan45/LadderAirport/releases"
+const defaultInstallScriptURL = releaseDownloadBaseURL + "/latest/download/install-agent.sh"
+const defaultPKIMigrationScriptURL = releaseDownloadBaseURL + "/latest/download/migrate-agent-to-panel-pki.sh"
+
+func releaseScriptURL(asset, version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" || version == "latest" {
+		return releaseDownloadBaseURL + "/latest/download/" + asset
+	}
+	return releaseDownloadBaseURL + "/download/" + url.PathEscape(version) + "/" + asset
+}
 
 func randomAgentToken() (string, error) {
 	b := make([]byte, 24)
@@ -35,7 +44,7 @@ type installCommandOpts struct {
 func buildInstallCommand(opts installCommandOpts) string {
 	scriptURL := opts.ScriptURL
 	if scriptURL == "" {
-		scriptURL = defaultInstallScriptURL
+		scriptURL = releaseScriptURL("install-agent.sh", opts.AgentVersion)
 	}
 	var b strings.Builder
 	b.WriteString("curl -fsSL ")
@@ -75,7 +84,7 @@ func buildInstallCommand(opts installCommandOpts) string {
 func buildPKIMigrationCommand(opts installCommandOpts) string {
 	var b strings.Builder
 	b.WriteString("curl -fsSL ")
-	b.WriteString(shellSingleQuote(defaultPKIMigrationScriptURL))
+	b.WriteString(shellSingleQuote(releaseScriptURL("migrate-agent-to-panel-pki.sh", opts.AgentVersion)))
 	b.WriteString(" | sudo env LADDER_PANEL=")
 	b.WriteString(shellSingleQuote(strings.TrimRight(strings.TrimSpace(opts.PanelBaseURL), "/")))
 	b.WriteString(" LADDER_NODE_ID=")
@@ -103,7 +112,7 @@ func buildPKIMigrationCommand(opts installCommandOpts) string {
 func buildUpgradeCommand(opts installCommandOpts) string {
 	scriptURL := opts.ScriptURL
 	if scriptURL == "" {
-		scriptURL = defaultInstallScriptURL
+		scriptURL = releaseScriptURL("install-agent.sh", opts.AgentVersion)
 	}
 	var b strings.Builder
 	b.WriteString("curl -fsSL ")

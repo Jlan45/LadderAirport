@@ -32,6 +32,18 @@ sudo env \
   ./scripts/migrate-agent-to-panel-pki.sh
 ```
 
+也可以从同一 Release 获取脚本和 Agent 二进制：
+
+```bash
+curl -fsSL https://github.com/Jlan45/LadderAirport/releases/download/vX.Y.Z/migrate-agent-to-panel-pki.sh \
+  | sudo env \
+      LADDER_VERSION=vX.Y.Z \
+      LADDER_PANEL='https://panel.example.com' \
+      LADDER_NODE_ID='<node-id>' \
+      LADDER_ENROLL_TOKEN='<one-time-token>' \
+      bash
+```
+
 ## NAT / 端口转发
 
 Panel 主动拨号 Agent gRPC。Agent 位于 NAT 后时，应通过 VPN、DNAT 或端口映射让 Panel 可达：

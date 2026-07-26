@@ -62,7 +62,7 @@ func TestBuildPKIMigrationCommand(t *testing.T) {
 		ReportAddress:   "192.0.2.10",
 	})
 	for _, want := range []string{
-		defaultPKIMigrationScriptURL,
+		"https://github.com/Jlan45/LadderAirport/releases/download/v0.9.0/migrate-agent-to-panel-pki.sh",
 		"LADDER_PANEL='https://panel.example.com'",
 		"LADDER_NODE_ID='node-1'",
 		"LADDER_ENROLL_TOKEN='one-time'",

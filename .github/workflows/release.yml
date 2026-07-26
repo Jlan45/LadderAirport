@@ -87,6 +87,11 @@ jobs:
               -ldflags="-s -w ${AGENT_LDFLAGS}" \
               -o ../dist/ladder-agent-${GOOS}-${GOARCH} ./cmd/ladder-agent)
           done
+          cp scripts/install-panel.sh dist/
+          cp scripts/install-agent.sh dist/
+          cp scripts/migrate-panel-to-management-pki.sh dist/
+          cp scripts/migrate-agent-to-panel-pki.sh dist/
+          chmod 0755 dist/*.sh
           cd dist
           sha256sum * > SHA256SUMS.txt
           ls -la
@@ -104,6 +109,10 @@ jobs:
             dist/panel-linux-arm64
             dist/ladder-agent-linux-amd64
             dist/ladder-agent-linux-arm64
+            dist/install-panel.sh
+            dist/install-agent.sh
+            dist/migrate-panel-to-management-pki.sh
+            dist/migrate-agent-to-panel-pki.sh
             dist/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

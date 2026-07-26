@@ -80,7 +80,9 @@ sudo env \
   ./scripts/migrate-agent-to-panel-pki.sh
 ```
 
-使用 Release 时可通过 `LADDER_VERSION=vX.Y.Z` 固定 Panel 和 Agent 版本。必须先完成 Panel 迁移，再逐节点迁移 Agent。
+Release 同时包含 Panel/Agent 二进制和两个迁移脚本。使用 Release 时，从
+`https://github.com/Jlan45/LadderAirport/releases/download/vX.Y.Z/` 下载脚本，并通过
+`LADDER_VERSION=vX.Y.Z` 固定 Panel 和 Agent 到同一个版本。必须先完成 Panel 迁移，再逐节点迁移 Agent。
 
 迁移令牌有效期为 15 分钟且只能使用一次。建议逐节点迁移并探测，不要把同一命令复制到其他节点。
 

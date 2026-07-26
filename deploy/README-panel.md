@@ -64,7 +64,7 @@ sudo LADDER_SESSION_SECRET='你的长随机串' LADDER_FROM=local ./scripts/inst
 不要用普通升级命令跨越到强制 Panel CA 版本。请在 Panel 服务器执行专用脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/migrate-panel-to-management-pki.sh \
+curl -fsSL https://github.com/Jlan45/LadderAirport/releases/download/vX.Y.Z/migrate-panel-to-management-pki.sh \
   | sudo env LADDER_VERSION=vX.Y.Z bash
 ```
 

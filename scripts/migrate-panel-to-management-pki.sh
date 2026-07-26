@@ -54,7 +54,7 @@ detect_arch() {
 download_panel() {
   local arch asset tag url dest api_json sums
   arch="$(detect_arch)"
-  asset="ladder-panel-linux-${arch}"
+  asset="panel-linux-${arch}"
   if [[ "${VERSION}" == "latest" ]]; then
     api_json="$(curl -fsSL "${API_BASE}/repos/${REPO}/releases/latest")" \
       || die "无法读取最新 Release"
