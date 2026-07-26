@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/ladderairport/panel/internal/inboundfill"
 	"github.com/ladderairport/panel/internal/store"
 )
 
@@ -152,6 +153,9 @@ func mapShadowsocks(in store.InboundConfig) (map[string]any, error) {
 	}
 	password, err := requireString(in.Params, "password")
 	if err != nil {
+		return nil, err
+	}
+	if err := inboundfill.ValidateShadowsocks2022Password(method, password); err != nil {
 		return nil, err
 	}
 	out := map[string]any{

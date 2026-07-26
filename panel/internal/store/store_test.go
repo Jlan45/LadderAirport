@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -290,6 +291,45 @@ func TestMigrateSubscriptionsToChainsOnce(t *testing.T) {
 	}
 	if err := s.MigrateSubscriptionsToChains(); err != nil {
 		t.Fatalf("second migration must be a no-op: %v", err)
+	}
+}
+
+func TestOpenRepairsInvalidShadowsocks2022Password(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repair.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound := &InboundConfig{
+		Name: "broken-ss2022", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{
+			"listen": "0.0.0.0", "port": 8388,
+			"method": "2022-blake3-aes-256-gcm", "password": "legacy_url-safe-_",
+		},
+	}
+	if err := s.CreateInbound(inbound); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen with repair: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	repaired, err := s.GetInbound(inbound.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, _ := repaired.Params["password"].(string)
+	decoded, err := base64.StdEncoding.DecodeString(password)
+	if err != nil {
+		t.Fatalf("repaired password is not standard Base64: %q: %v", password, err)
+	}
+	if len(decoded) != 32 {
+		t.Fatalf("repaired key size = %d, want 32", len(decoded))
 	}
 }
 

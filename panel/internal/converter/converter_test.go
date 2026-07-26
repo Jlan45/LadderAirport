@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ladderairport/panel/internal/store"
@@ -268,6 +269,20 @@ func TestConvertMissingRequired(t *testing.T) {
 	}
 	if _, err := Convert([]store.InboundConfig{in}, ConvertOptions{}); err == nil {
 		t.Fatal("expected missing password error")
+	}
+}
+
+func TestConvertRejectsInvalidShadowsocks2022PSK(t *testing.T) {
+	in := store.InboundConfig{
+		ID: "ss-2022", Name: "ss-2022", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{
+			"listen": "0.0.0.0", "port": float64(8388),
+			"method": "2022-blake3-aes-256-gcm", "password": "legacy_url-safe-_",
+		},
+	}
+	_, err := Convert([]store.InboundConfig{in}, ConvertOptions{})
+	if err == nil || !strings.Contains(err.Error(), "standard Base64") {
+		t.Fatalf("Convert error = %v, want standard Base64 validation", err)
 	}
 }
 

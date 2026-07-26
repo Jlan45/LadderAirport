@@ -1,6 +1,7 @@
 package inboundfill_test
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -26,6 +27,63 @@ func TestFillShadowsocksPassword(t *testing.T) {
 	}
 	if p2["password"] != "keep-me" {
 		t.Fatalf("got %v", p2["password"])
+	}
+}
+
+func TestFillShadowsocks2022Passwords(t *testing.T) {
+	methods := map[string]int{
+		"2022-blake3-aes-128-gcm":       16,
+		"2022-blake3-aes-256-gcm":       32,
+		"2022-blake3-chacha20-poly1305": 32,
+	}
+	for method, wantSize := range methods {
+		t.Run(method, func(t *testing.T) {
+			params, err := inboundfill.Fill("shadowsocks", map[string]any{
+				"method": method, "port": 8388,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			password := str(params, "password")
+			decoded, err := base64.StdEncoding.DecodeString(password)
+			if err != nil {
+				t.Fatalf("generated password is not standard Base64: %q: %v", password, err)
+			}
+			if len(decoded) != wantSize {
+				t.Fatalf("decoded key size = %d, want %d", len(decoded), wantSize)
+			}
+			if err := inboundfill.ValidateShadowsocks2022Password(method, password); err != nil {
+				t.Fatalf("generated password rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestRepairShadowsocks2022PasswordPreservesValidCredential(t *testing.T) {
+	valid := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	params := map[string]any{
+		"method": "2022-blake3-aes-256-gcm", "password": valid,
+	}
+	changed, err := inboundfill.RepairShadowsocks2022Password(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed || params["password"] != valid {
+		t.Fatalf("valid credential was changed: %+v", params)
+	}
+
+	params["password"] = "legacy_url-safe-_"
+	changed, err = inboundfill.RepairShadowsocks2022Password(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("invalid credential was not repaired")
+	}
+	if err := inboundfill.ValidateShadowsocks2022Password(
+		"2022-blake3-aes-256-gcm", str(params, "password"),
+	); err != nil {
+		t.Fatalf("repaired credential rejected: %v", err)
 	}
 }
 

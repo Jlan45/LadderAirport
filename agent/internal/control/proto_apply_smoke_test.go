@@ -56,9 +56,9 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
-// TestApplyTUICAnyTLSVMess verifies the three new panel protocols can Start
-// on a default-tagged Agent (with_quic,with_utls) against sing-box ≥1.12.
-func TestApplyTUICAnyTLSVMess(t *testing.T) {
+// TestApplyPanelProtocols verifies generated protocol shapes can Start on a
+// default-tagged Agent (with_quic,with_utls) against sing-box ≥1.12.
+func TestApplyPanelProtocols(t *testing.T) {
 	if testing.Short() {
 		t.Skip("short")
 	}
@@ -110,6 +110,42 @@ func TestApplyTUICAnyTLSVMess(t *testing.T) {
 					"tls": map[string]any{
 						"enabled": true, "certificate": []string{cert}, "key": []string{key},
 					},
+				}},
+				"outbounds": []map[string]any{{"type": "direct", "tag": "direct"}},
+			},
+		},
+		{
+			name: "shadowsocks-2022-aes128",
+			cfg: map[string]any{
+				"log": map[string]any{"level": "error", "disabled": true},
+				"inbounds": []map[string]any{{
+					"type": "shadowsocks", "tag": "in-ss2022-128", "listen": "127.0.0.1", "listen_port": 28004,
+					"network": "tcp", "method": "2022-blake3-aes-128-gcm",
+					"password": "AAECAwQFBgcICQoLDA0ODw==",
+				}},
+				"outbounds": []map[string]any{{"type": "direct", "tag": "direct"}},
+			},
+		},
+		{
+			name: "shadowsocks-2022-aes256",
+			cfg: map[string]any{
+				"log": map[string]any{"level": "error", "disabled": true},
+				"inbounds": []map[string]any{{
+					"type": "shadowsocks", "tag": "in-ss2022-256", "listen": "127.0.0.1", "listen_port": 28005,
+					"network": "tcp", "method": "2022-blake3-aes-256-gcm",
+					"password": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+				}},
+				"outbounds": []map[string]any{{"type": "direct", "tag": "direct"}},
+			},
+		},
+		{
+			name: "shadowsocks-2022-chacha20",
+			cfg: map[string]any{
+				"log": map[string]any{"level": "error", "disabled": true},
+				"inbounds": []map[string]any{{
+					"type": "shadowsocks", "tag": "in-ss2022-chacha", "listen": "127.0.0.1", "listen_port": 28006,
+					"network": "tcp", "method": "2022-blake3-chacha20-poly1305",
+					"password": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
 				}},
 				"outbounds": []map[string]any{{"type": "direct", "tag": "direct"}},
 			},

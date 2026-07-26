@@ -55,16 +55,75 @@ func Fill(protocol string, params map[string]any) (map[string]any, error) {
 }
 
 func fillShadowsocks(params map[string]any) (map[string]any, error) {
-	if err := ensurePassword(params); err != nil {
-		return nil, err
-	}
 	if empty(params, "method") {
 		params["method"] = "aes-256-gcm"
+	}
+	if _, ok := Shadowsocks2022KeySize(str(params, "method")); ok {
+		if _, err := RepairShadowsocks2022Password(params); err != nil {
+			return nil, err
+		}
+	} else if err := ensurePassword(params); err != nil {
+		return nil, err
 	}
 	if empty(params, "listen") {
 		params["listen"] = "0.0.0.0"
 	}
 	return params, nil
+}
+
+// Shadowsocks2022KeySize returns the PSK size required by a Shadowsocks 2022
+// method. These methods require a standard (padded) Base64-encoded key.
+func Shadowsocks2022KeySize(method string) (int, bool) {
+	switch strings.TrimSpace(method) {
+	case "2022-blake3-aes-128-gcm":
+		return 16, true
+	case "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305":
+		return 32, true
+	default:
+		return 0, false
+	}
+}
+
+// ValidateShadowsocks2022Password mirrors sing-shadowsocks validation before a
+// config reaches the Agent. Longer decoded keys are accepted because the
+// upstream implementation derives the method-sized key from them.
+func ValidateShadowsocks2022Password(method, password string) error {
+	keySize, ok := Shadowsocks2022KeySize(method)
+	if !ok {
+		return nil
+	}
+	if strings.TrimSpace(password) == "" {
+		return fmt.Errorf("%s requires a Base64 PSK", method)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(password)
+	if err != nil {
+		return fmt.Errorf("%s password must be standard Base64: %w", method, err)
+	}
+	if len(decoded) < keySize {
+		return fmt.Errorf("%s password decodes to %d bytes; need at least %d", method, len(decoded), keySize)
+	}
+	return nil
+}
+
+// RepairShadowsocks2022Password replaces only passwords that sing-shadowsocks
+// would reject. It preserves valid existing credentials to avoid disrupting
+// clients during startup migration.
+func RepairShadowsocks2022Password(params map[string]any) (bool, error) {
+	method := str(params, "method")
+	keySize, ok := Shadowsocks2022KeySize(method)
+	if !ok {
+		return false, nil
+	}
+	password := str(params, "password")
+	if ValidateShadowsocks2022Password(method, password) == nil {
+		return false, nil
+	}
+	key := make([]byte, keySize)
+	if _, err := rand.Read(key); err != nil {
+		return false, fmt.Errorf("generate %s PSK: %w", method, err)
+	}
+	params["password"] = base64.StdEncoding.EncodeToString(key)
+	return true, nil
 }
 
 func fillTrojan(params map[string]any) (map[string]any, error) {
