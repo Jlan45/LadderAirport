@@ -281,7 +281,7 @@ func TestConvertRejectsInvalidShadowsocks2022PSK(t *testing.T) {
 		},
 	}
 	_, err := Convert([]store.InboundConfig{in}, ConvertOptions{})
-	if err == nil || !strings.Contains(err.Error(), "standard Base64") {
+	if err == nil || !strings.Contains(err.Error(), "标准 Base64") {
 		t.Fatalf("Convert error = %v, want standard Base64 validation", err)
 	}
 }

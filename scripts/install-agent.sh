@@ -81,7 +81,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-die() { echo "ERROR: $*" >&2; exit 1; }
+die() { echo "错误：$*" >&2; exit 1; }
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "需要命令: $1"
@@ -356,7 +356,7 @@ with open(os.environ["PANEL_RESPONSE"], "r", encoding="utf-8") as f:
 for key, path in (("cert_pem", os.environ["PANEL_CERT"]), ("ca_bundle_pem", os.environ["PANEL_CA"])):
     value = data.get(key, "")
     if not value:
-        raise SystemExit("Panel response missing " + key)
+        raise SystemExit("Panel 响应缺少字段 " + key)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write(value)
@@ -495,7 +495,7 @@ ARCH="$(uname -m)"
 case "${ARCH}" in
   x86_64|amd64) ASSET="ladder-agent-linux-amd64" ;;
   aarch64|arm64) ASSET="ladder-agent-linux-arm64" ;;
-  *) echo "unsupported arch: ${ARCH}" >&2; exit 1 ;;
+  *) echo "不支持的架构：${ARCH}" >&2; exit 1 ;;
 esac
 STAGED="${UPGRADE_DIR}/${ASSET}"
 READY="${STAGED}.ready"
@@ -505,17 +505,17 @@ if [[ ! -f "${READY}" ]]; then
   exit 0
 fi
 if [[ ! -f "${STAGED}" ]]; then
-  logger -t "${LOG_TAG}" "ready marker present but staged binary missing: ${STAGED}"
+  logger -t "${LOG_TAG}" "存在升级就绪标记，但缺少待升级二进制：${STAGED}"
   rm -f "${READY}" || true
   exit 1
 fi
 if [[ ! -s "${STAGED}" ]]; then
-  logger -t "${LOG_TAG}" "staged binary empty"
+  logger -t "${LOG_TAG}" "待升级二进制为空"
   rm -f "${READY}" || true
   exit 1
 fi
 
-logger -t "${LOG_TAG}" "applying staged binary ${STAGED} -> ${INSTALL_BIN}"
+logger -t "${LOG_TAG}" "正在替换升级二进制 ${STAGED} -> ${INSTALL_BIN}"
 if [[ -x "${INSTALL_BIN}" ]]; then
   cp -a "${INSTALL_BIN}" "${INSTALL_BIN}.bak" || true
 fi
@@ -524,7 +524,7 @@ rm -f "${READY}"
 # Keep staged copy briefly for debug; remove partials
 rm -f "${STAGED}.partial" || true
 systemctl restart "${SERVICE_NAME}"
-logger -t "${LOG_TAG}" "upgrade applied; ${SERVICE_NAME} restarted"
+logger -t "${LOG_TAG}" "升级已应用，${SERVICE_NAME} 已重启"
 EOS
   chmod 0755 "${helper}"
 
@@ -616,12 +616,12 @@ do_install() {
     load_tls_from_env
     if [[ -f "${TLS_DIR}/ca.key" || -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" ||
       -z "${TLS_CLIENT_CA_PATH}" ]]; then
-      die "检测到旧 Agent；主安装脚本不执行兼容迁移，请使用 Panel 提供的一次性 PKI 迁移命令"
+      die "检测到不兼容的旧 Agent；请先用 LADDER_ACTION=uninstall LADDER_PURGE=1 全清卸载，再在 Panel 新建节点并执行新的安装命令"
     fi
   fi
   if [[ -z "${ENROLL_TOKEN}" ]]; then
     if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" || -f "${TLS_DIR}/ca.key" ]]; then
-      die "旧 Agent 不允许通过主安装脚本迁移；请执行 Panel 提供的一次性 PKI 迁移命令"
+      die "检测到不兼容的旧 Agent；请先全清卸载，再在 Panel 新建节点并执行新的安装命令"
     fi
     if [[ -z "${TOKEN}" && -f "${ENV_FILE}" ]]; then
       TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
@@ -716,9 +716,9 @@ do_upgrade() {
   fi
   load_tls_from_env
   if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" || -z "${PANEL_URL}" || -z "${NODE_ID}" ]]; then
-    die "检测到旧 Agent TLS；请先执行 Panel 提供的一次性 PKI 迁移命令"
+    die "检测到不兼容的旧 Agent TLS；请先用 LADDER_ACTION=uninstall LADDER_PURGE=1 全清卸载，再重新安装"
   fi
-  [[ ! -f "${TLS_DIR}/ca.key" ]] || die "检测到旧节点 CA 私钥；请先执行一次性 PKI 迁移命令"
+  [[ ! -f "${TLS_DIR}/ca.key" ]] || die "检测到旧节点 CA 私钥；请先全清卸载，再重新安装"
 
   echo "==> 升级 ladder-agent（保留 Panel PKI 身份）"
   ensure_user_and_dirs

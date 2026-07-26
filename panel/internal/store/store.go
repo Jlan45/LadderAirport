@@ -22,13 +22,13 @@ type Store struct {
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
+		return nil, fmt.Errorf("打开 SQLite 数据库失败：%w", err)
 	}
 	// Single-writer is typical for panel; keep it simple and reliable.
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+		return nil, fmt.Errorf("启用 SQLite 外键失败：%w", err)
 	}
 
 	s := &Store{db: db}
@@ -54,7 +54,7 @@ func Open(path string) (*Store, error) {
 func (s *Store) repairInvalidShadowsocks2022Passwords() error {
 	rows, err := s.db.Query(`SELECT id, params_json FROM inbounds WHERE protocol = 'shadowsocks'`)
 	if err != nil {
-		return fmt.Errorf("list Shadowsocks inbounds for PSK repair: %w", err)
+		return fmt.Errorf("查询需要修复 PSK 的 Shadowsocks 入站失败：%w", err)
 	}
 	type record struct {
 		id     string
@@ -65,17 +65,17 @@ func (s *Store) repairInvalidShadowsocks2022Passwords() error {
 		var id, paramsJSON string
 		if err := rows.Scan(&id, &paramsJSON); err != nil {
 			_ = rows.Close()
-			return fmt.Errorf("scan Shadowsocks inbound for PSK repair: %w", err)
+			return fmt.Errorf("读取待修复的 Shadowsocks 入站失败：%w", err)
 		}
 		params := map[string]any{}
 		if err := unmarshalJSON(paramsJSON, &params); err != nil {
 			_ = rows.Close()
-			return fmt.Errorf("decode Shadowsocks inbound %s for PSK repair: %w", id, err)
+			return fmt.Errorf("解析 Shadowsocks 入站 %s 以修复 PSK 失败：%w", id, err)
 		}
 		changed, err := inboundfill.RepairShadowsocks2022Password(params)
 		if err != nil {
 			_ = rows.Close()
-			return fmt.Errorf("repair Shadowsocks inbound %s PSK: %w", id, err)
+			return fmt.Errorf("修复 Shadowsocks 入站 %s 的 PSK 失败：%w", id, err)
 		}
 		if changed {
 			repairs = append(repairs, record{id: id, params: params})
@@ -83,7 +83,7 @@ func (s *Store) repairInvalidShadowsocks2022Passwords() error {
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return fmt.Errorf("list Shadowsocks inbounds for PSK repair: %w", err)
+		return fmt.Errorf("查询需要修复 PSK 的 Shadowsocks 入站失败：%w", err)
 	}
 	if err := rows.Close(); err != nil {
 		return err
@@ -91,13 +91,13 @@ func (s *Store) repairInvalidShadowsocks2022Passwords() error {
 	for _, repair := range repairs {
 		paramsJSON, err := marshalJSON(repair.params)
 		if err != nil {
-			return fmt.Errorf("encode repaired Shadowsocks inbound %s: %w", repair.id, err)
+			return fmt.Errorf("编码已修复的 Shadowsocks 入站 %s 失败：%w", repair.id, err)
 		}
 		if _, err := s.db.Exec(
 			`UPDATE inbounds SET params_json = ?, updated_at_unix = ? WHERE id = ?`,
 			paramsJSON, nowUnix(), repair.id,
 		); err != nil {
-			return fmt.Errorf("save repaired Shadowsocks inbound %s PSK: %w", repair.id, err)
+			return fmt.Errorf("保存已修复的 Shadowsocks 入站 %s PSK 失败：%w", repair.id, err)
 		}
 	}
 	return nil
@@ -278,7 +278,7 @@ func (s *Store) migrate() error {
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
-			return fmt.Errorf("migrate: %w", err)
+			return fmt.Errorf("数据库迁移失败：%w", err)
 		}
 	}
 	// Additive columns for fleet monitoring (safe to re-run).
@@ -300,9 +300,6 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN pki_ca_bundle_pem TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN pki_cert_serial TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN pki_not_after_unix INTEGER NOT NULL DEFAULT 0`,
-		// Existing rows require the standalone migration. CreateNode explicitly
-		// writes false for nodes created by the Panel-PKI implementation.
-		`ALTER TABLE nodes ADD COLUMN pki_migration_required INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
@@ -319,12 +316,12 @@ func (s *Store) migrate() error {
 	for _, stmt := range alters {
 		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
 	}
-	// These management-TLS columns belonged to the removed node-local CA
-	// implementation and are deliberately not retained.
-	for _, column := range []string{"tls_skip_verify", "ca_cert_pem"} {
+	// These columns belonged to removed management-TLS and one-time upgrade
+	// implementations and are deliberately not retained.
+	for _, column := range []string{"tls_skip_verify", "ca_cert_pem", "pki_migration_required"} {
 		if _, err := s.db.Exec(`ALTER TABLE nodes DROP COLUMN ` + column); err != nil &&
 			!strings.Contains(strings.ToLower(err.Error()), "no such column") {
-			return fmt.Errorf("drop legacy node column %s: %w", column, err)
+			return fmt.Errorf("删除旧节点字段 %s 失败：%w", column, err)
 		}
 	}
 	if _, err := s.db.Exec(`
@@ -334,7 +331,7 @@ func (s *Store) migrate() error {
 			ELSE 0
 		END
 		WHERE include_all_inbounds IS NULL`); err != nil {
-		return fmt.Errorf("migrate subscription local inbound mode: %w", err)
+		return fmt.Errorf("迁移订阅本地入站模式失败：%w", err)
 	}
 	return nil
 }
@@ -342,7 +339,7 @@ func (s *Store) migrate() error {
 func (s *Store) ensureDefaultSettings() error {
 	var n int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM settings WHERE id = 1`).Scan(&n); err != nil {
-		return fmt.Errorf("check settings: %w", err)
+		return fmt.Errorf("检查系统设置失败：%w", err)
 	}
 	if n > 0 {
 		return nil
@@ -351,7 +348,7 @@ func (s *Store) ensureDefaultSettings() error {
 		INSERT INTO settings (id, admin_password_hash, default_agent_token, grpc_timeout_sec, max_concurrency, listen_addr)
 		VALUES (1, '', '', 10, 10, ':8080')`)
 	if err != nil {
-		return fmt.Errorf("insert default settings: %w", err)
+		return fmt.Errorf("写入默认系统设置失败：%w", err)
 	}
 	return nil
 }
@@ -390,7 +387,7 @@ func boolToInt(b bool) int {
 
 func (s *Store) CreateNode(n *Node) error {
 	if n == nil {
-		return fmt.Errorf("node is nil")
+		return fmt.Errorf("节点不能为空")
 	}
 	if n.ID == "" {
 		n.ID = newID()
@@ -408,28 +405,28 @@ func (s *Store) CreateNode(n *Node) error {
 	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	labelsJSON, err := marshalJSON(n.Labels)
 	if err != nil {
-		return fmt.Errorf("marshal labels: %w", err)
+		return fmt.Errorf("编码标签失败：%w", err)
 	}
 	mappingsJSON, err := marshalJSON(n.PortMappings)
 	if err != nil {
-		return fmt.Errorf("marshal port_mappings: %w", err)
+		return fmt.Errorf("编码端口映射失败：%w", err)
 	}
 	capabilitiesJSON, err := marshalJSON(n.Capabilities)
 	if err != nil {
-		return fmt.Errorf("marshal capabilities: %w", err)
+		return fmt.Errorf("编码节点能力失败：%w", err)
 	}
 	_, err = s.db.Exec(`
 		INSERT INTO nodes (
 			id, name, address, grpc_port, token, labels_json,
-			pki_ca_bundle_pem, pki_cert_serial, pki_not_after_unix, pki_migration_required,
+			pki_ca_bundle_pem, pki_cert_serial, pki_not_after_unix,
 			status, last_seen_unix, config_hash,
 			runtime_state, agent_version, singbox_version,
 			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
 			metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
 			created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, n.PKICABundlePEM,
-		n.PKICertSerial, n.PKINotAfter, boolToInt(n.PKIMigrationRequired),
+		n.PKICertSerial, n.PKINotAfter,
 		n.Status, n.LastSeenUnix, n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
@@ -437,14 +434,14 @@ func (s *Store) CreateNode(n *Node) error {
 		n.CreatedAtUnix, n.UpdatedAtUnix,
 	)
 	if err != nil {
-		return fmt.Errorf("create node: %w", err)
+		return fmt.Errorf("创建节点失败：%w", err)
 	}
 	return nil
 }
 
 func (s *Store) UpdateNode(n *Node) error {
 	if n == nil || n.ID == "" {
-		return fmt.Errorf("node id required")
+		return fmt.Errorf("必须提供节点 ID")
 	}
 	n.UpdatedAtUnix = nowUnix()
 	if n.Labels == nil {
@@ -453,22 +450,22 @@ func (s *Store) UpdateNode(n *Node) error {
 	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	labelsJSON, err := marshalJSON(n.Labels)
 	if err != nil {
-		return fmt.Errorf("marshal labels: %w", err)
+		return fmt.Errorf("编码标签失败：%w", err)
 	}
 	mappingsJSON, err := marshalJSON(n.PortMappings)
 	if err != nil {
-		return fmt.Errorf("marshal port_mappings: %w", err)
+		return fmt.Errorf("编码端口映射失败：%w", err)
 	}
 	capabilitiesJSON, err := marshalJSON(n.Capabilities)
 	if err != nil {
-		return fmt.Errorf("marshal capabilities: %w", err)
+		return fmt.Errorf("编码节点能力失败：%w", err)
 	}
 	res, err := s.db.Exec(`
 		UPDATE nodes SET
 			name = ?, address = ?, grpc_port = ?, token = ?, labels_json = ?,
 			pki_ca_bundle_pem = ?,
 			status = ?, last_seen_unix = ?,
-			pki_cert_serial = ?, pki_not_after_unix = ?, pki_migration_required = ?,
+			pki_cert_serial = ?, pki_not_after_unix = ?,
 			config_hash = ?,
 			runtime_state = ?, agent_version = ?, singbox_version = ?,
 			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
@@ -478,7 +475,7 @@ func (s *Store) UpdateNode(n *Node) error {
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
 		n.PKICABundlePEM, n.Status, n.LastSeenUnix,
-		n.PKICertSerial, n.PKINotAfter, boolToInt(n.PKIMigrationRequired),
+		n.PKICertSerial, n.PKINotAfter,
 		n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
@@ -487,11 +484,11 @@ func (s *Store) UpdateNode(n *Node) error {
 		n.UpdatedAtUnix, n.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("update node: %w", err)
+		return fmt.Errorf("更新节点失败：%w", err)
 	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("node not found: %s", n.ID)
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("节点不存在：%s", n.ID)
 	}
 	return nil
 }
@@ -500,7 +497,7 @@ func (s *Store) UpdateNode(n *Node) error {
 // adjusts status atomically; metrics, versions and config hashes stay untouched.
 func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) error {
 	if id == "" {
-		return fmt.Errorf("node id required")
+		return fmt.Errorf("必须提供节点 ID")
 	}
 
 	sets := make([]string, 0, 12)
@@ -532,7 +529,7 @@ func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) e
 		labels := append([]string{}, (*update.Labels)...)
 		labelsJSON, err := marshalJSON(labels)
 		if err != nil {
-			return fmt.Errorf("marshal labels: %w", err)
+			return fmt.Errorf("编码标签失败：%w", err)
 		}
 		add("labels_json", labelsJSON)
 	}
@@ -542,7 +539,7 @@ func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) e
 	if update.PortMappings != nil {
 		mappingsJSON, err := marshalJSON(NormalizePortMappings(*update.PortMappings))
 		if err != nil {
-			return fmt.Errorf("marshal port_mappings: %w", err)
+			return fmt.Errorf("编码端口映射失败：%w", err)
 		}
 		add("port_mappings_json", mappingsJSON)
 	}
@@ -554,11 +551,11 @@ func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) e
 	args = append(args, id)
 	res, err := s.db.Exec(`UPDATE nodes SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
 	if err != nil {
-		return fmt.Errorf("update node operator fields: %w", err)
+		return fmt.Errorf("更新节点管理字段失败：%w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("node not found: %s", id)
+		return fmt.Errorf("节点不存在：%s", id)
 	}
 	return nil
 }
@@ -570,16 +567,41 @@ func (s *Store) DeleteNode(id string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	rows, err := tx.Query(`
+		SELECT DISTINCT c.name
+		FROM proxy_chain_hops h
+		JOIN proxy_chains c ON c.id = h.chain_id
+		WHERE h.node_id = ?
+		ORDER BY c.name`, id)
+	if err != nil {
+		return fmt.Errorf("检查节点的代理链引用失败：%w", err)
+	}
+	var chainNames []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("读取节点的代理链引用失败：%w", err)
+		}
+		chainNames = append(chainNames, name)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("关闭代理链引用查询失败：%w", err)
+	}
+	if len(chainNames) > 0 {
+		return fmt.Errorf("节点仍被代理链引用：%s；请先替换对应跳点或删除代理链", strings.Join(chainNames, "、"))
+	}
+
 	if _, err := tx.Exec(`DELETE FROM node_inbounds WHERE node_id = ?`, id); err != nil {
-		return fmt.Errorf("delete node_inbounds: %w", err)
+		return fmt.Errorf("删除节点入站关联失败：%w", err)
 	}
 	res, err := tx.Exec(`DELETE FROM nodes WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("delete node: %w", err)
+		return fmt.Errorf("删除节点失败：%w", err)
 	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("node not found: %s", id)
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("节点不存在：%s", id)
 	}
 	return tx.Commit()
 }
@@ -591,10 +613,9 @@ func scanNode(row interface {
 	var labelsJSON string
 	var mappingsJSON string
 	var capabilitiesJSON string
-	var pkiMigrationRequired int
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Address, &n.GRPCPort, &n.Token, &labelsJSON, &n.PKICABundlePEM,
-		&n.PKICertSerial, &n.PKINotAfter, &pkiMigrationRequired,
+		&n.PKICertSerial, &n.PKINotAfter,
 		&n.Status, &n.LastSeenUnix, &n.ConfigHash,
 		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
 		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
@@ -604,25 +625,24 @@ func scanNode(row interface {
 	if err != nil {
 		return nil, err
 	}
-	n.PKIMigrationRequired = pkiMigrationRequired != 0
 	n.Labels = []string{}
 	if err := unmarshalJSON(labelsJSON, &n.Labels); err != nil {
-		return nil, fmt.Errorf("unmarshal labels: %w", err)
+		return nil, fmt.Errorf("解析标签失败：%w", err)
 	}
 	n.PortMappings = []PortMapping{}
 	if err := unmarshalJSON(mappingsJSON, &n.PortMappings); err != nil {
-		return nil, fmt.Errorf("unmarshal port_mappings: %w", err)
+		return nil, fmt.Errorf("解析端口映射失败：%w", err)
 	}
 	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	n.Capabilities = []string{}
 	if err := unmarshalJSON(capabilitiesJSON, &n.Capabilities); err != nil {
-		return nil, fmt.Errorf("unmarshal capabilities: %w", err)
+		return nil, fmt.Errorf("解析节点能力失败：%w", err)
 	}
 	return &n, nil
 }
 
 const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, pki_ca_bundle_pem,
-	pki_cert_serial, pki_not_after_unix, pki_migration_required,
+	pki_cert_serial, pki_not_after_unix,
 	status, last_seen_unix, config_hash,
 	runtime_state, agent_version, singbox_version,
 	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
@@ -633,10 +653,10 @@ func (s *Store) GetNode(id string) (*Node, error) {
 	row := s.db.QueryRow(`SELECT `+nodeSelectCols+` FROM nodes WHERE id = ?`, id)
 	n, err := scanNode(row)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("node not found: %s", id)
+		return nil, fmt.Errorf("节点不存在：%s", id)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get node: %w", err)
+		return nil, fmt.Errorf("读取节点失败：%w", err)
 	}
 	return n, nil
 }
@@ -646,21 +666,21 @@ func (s *Store) GetNode(id string) (*Node, error) {
 func (s *Store) GetNodeByToken(token string) (*Node, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return nil, fmt.Errorf("token required")
+		return nil, fmt.Errorf("必须提供令牌")
 	}
 	rows, err := s.db.Query(`SELECT `+nodeSelectCols+` FROM nodes WHERE token = ?`, token)
 	if err != nil {
-		return nil, fmt.Errorf("get node by token: %w", err)
+		return nil, fmt.Errorf("按令牌查询节点失败：%w", err)
 	}
 	defer rows.Close()
 	var found *Node
 	for rows.Next() {
 		n, err := scanNode(rows)
 		if err != nil {
-			return nil, fmt.Errorf("get node by token scan: %w", err)
+			return nil, fmt.Errorf("读取令牌对应节点失败：%w", err)
 		}
 		if found != nil {
-			return nil, fmt.Errorf("multiple nodes share this token")
+			return nil, fmt.Errorf("多个节点使用了相同令牌")
 		}
 		found = n
 	}
@@ -668,7 +688,7 @@ func (s *Store) GetNodeByToken(token string) (*Node, error) {
 		return nil, err
 	}
 	if found == nil {
-		return nil, fmt.Errorf("node not found for token")
+		return nil, fmt.Errorf("未找到令牌对应的节点")
 	}
 	return found, nil
 }
@@ -676,7 +696,7 @@ func (s *Store) GetNodeByToken(token string) (*Node, error) {
 func (s *Store) ListNodes() ([]Node, error) {
 	rows, err := s.db.Query(`SELECT ` + nodeSelectCols + ` FROM nodes ORDER BY created_at_unix ASC`)
 	if err != nil {
-		return nil, fmt.Errorf("list nodes: %w", err)
+		return nil, fmt.Errorf("查询节点列表失败：%w", err)
 	}
 	defer rows.Close()
 
@@ -684,7 +704,7 @@ func (s *Store) ListNodes() ([]Node, error) {
 	for rows.Next() {
 		n, err := scanNode(rows)
 		if err != nil {
-			return nil, fmt.Errorf("list nodes scan: %w", err)
+			return nil, fmt.Errorf("读取节点列表失败：%w", err)
 		}
 		out = append(out, *n)
 	}
@@ -729,7 +749,7 @@ func (s *Store) ListNodesByLabels(labels []string) ([]Node, error) {
 
 func (s *Store) CreateInbound(in *InboundConfig) error {
 	if in == nil {
-		return fmt.Errorf("inbound is nil")
+		return fmt.Errorf("入站不能为空")
 	}
 	if in.ID == "" {
 		in.ID = newID()
@@ -746,7 +766,7 @@ func (s *Store) CreateInbound(in *InboundConfig) error {
 	}
 	paramsJSON, err := marshalJSON(in.Params)
 	if err != nil {
-		return fmt.Errorf("marshal params: %w", err)
+		return fmt.Errorf("编码入站参数失败：%w", err)
 	}
 	_, err = s.db.Exec(`
 		INSERT INTO inbounds (id, name, protocol, params_json, enabled, created_at_unix, updated_at_unix)
@@ -754,14 +774,14 @@ func (s *Store) CreateInbound(in *InboundConfig) error {
 		in.ID, in.Name, in.Protocol, paramsJSON, boolToInt(in.Enabled), in.CreatedAtUnix, in.UpdatedAtUnix,
 	)
 	if err != nil {
-		return fmt.Errorf("create inbound: %w", err)
+		return fmt.Errorf("创建入站失败：%w", err)
 	}
 	return nil
 }
 
 func (s *Store) UpdateInbound(in *InboundConfig) error {
 	if in == nil || in.ID == "" {
-		return fmt.Errorf("inbound id required")
+		return fmt.Errorf("必须提供入站 ID")
 	}
 	in.UpdatedAtUnix = nowUnix()
 	if in.Params == nil {
@@ -769,7 +789,7 @@ func (s *Store) UpdateInbound(in *InboundConfig) error {
 	}
 	paramsJSON, err := marshalJSON(in.Params)
 	if err != nil {
-		return fmt.Errorf("marshal params: %w", err)
+		return fmt.Errorf("编码入站参数失败：%w", err)
 	}
 	res, err := s.db.Exec(`
 		UPDATE inbounds SET name = ?, protocol = ?, params_json = ?, enabled = ?, updated_at_unix = ?
@@ -777,11 +797,11 @@ func (s *Store) UpdateInbound(in *InboundConfig) error {
 		in.Name, in.Protocol, paramsJSON, boolToInt(in.Enabled), in.UpdatedAtUnix, in.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("update inbound: %w", err)
+		return fmt.Errorf("更新入站失败：%w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("inbound not found: %s", in.ID)
+		return fmt.Errorf("入站不存在：%s", in.ID)
 	}
 	return nil
 }
@@ -794,15 +814,15 @@ func (s *Store) DeleteInbound(id string) error {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`DELETE FROM node_inbounds WHERE inbound_id = ?`, id); err != nil {
-		return fmt.Errorf("delete node_inbounds: %w", err)
+		return fmt.Errorf("删除节点入站关联失败：%w", err)
 	}
 	res, err := tx.Exec(`DELETE FROM inbounds WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("delete inbound: %w", err)
+		return fmt.Errorf("删除入站失败：%w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("inbound not found: %s", id)
+		return fmt.Errorf("入站不存在：%s", id)
 	}
 	return tx.Commit()
 }
@@ -820,7 +840,7 @@ func scanInbound(row interface {
 	in.Enabled = enabled != 0
 	in.Params = map[string]any{}
 	if err := unmarshalJSON(paramsJSON, &in.Params); err != nil {
-		return nil, fmt.Errorf("unmarshal params: %w", err)
+		return nil, fmt.Errorf("解析入站参数失败：%w", err)
 	}
 	return &in, nil
 }
@@ -831,10 +851,10 @@ func (s *Store) GetInbound(id string) (*InboundConfig, error) {
 	row := s.db.QueryRow(`SELECT `+inboundSelectCols+` FROM inbounds WHERE id = ?`, id)
 	in, err := scanInbound(row)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("inbound not found: %s", id)
+		return nil, fmt.Errorf("入站不存在：%s", id)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get inbound: %w", err)
+		return nil, fmt.Errorf("读取入站失败：%w", err)
 	}
 	return in, nil
 }
@@ -842,7 +862,7 @@ func (s *Store) GetInbound(id string) (*InboundConfig, error) {
 func (s *Store) ListInbounds() ([]InboundConfig, error) {
 	rows, err := s.db.Query(`SELECT ` + inboundSelectCols + ` FROM inbounds ORDER BY created_at_unix ASC`)
 	if err != nil {
-		return nil, fmt.Errorf("list inbounds: %w", err)
+		return nil, fmt.Errorf("查询入站列表失败：%w", err)
 	}
 	defer rows.Close()
 
@@ -850,7 +870,7 @@ func (s *Store) ListInbounds() ([]InboundConfig, error) {
 	for rows.Next() {
 		in, err := scanInbound(rows)
 		if err != nil {
-			return nil, fmt.Errorf("list inbounds scan: %w", err)
+			return nil, fmt.Errorf("读取入站列表失败：%w", err)
 		}
 		out = append(out, *in)
 	}
@@ -890,7 +910,7 @@ func (s *Store) SetNodeInboundBindings(nodeID string, bindings []NodeInboundBind
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.Exec(`DELETE FROM node_inbounds WHERE node_id = ?`, nodeID); err != nil {
-		return fmt.Errorf("clear node_inbounds: %w", err)
+		return fmt.Errorf("清空节点入站关联失败：%w", err)
 	}
 	seen := map[string]bool{}
 	for _, b := range bindings {
@@ -904,25 +924,25 @@ func (s *Store) SetNodeInboundBindings(nodeID string, bindings []NodeInboundBind
 			return err
 		}
 		if exists == 0 {
-			return fmt.Errorf("inbound not found: %s", iid)
+			return fmt.Errorf("入站不存在：%s", iid)
 		}
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM proxy_chain_hops WHERE node_id = ? AND inbound_id = ?`,
 			nodeID, iid).Scan(&exists); err != nil {
 			return err
 		}
 		if exists > 0 {
-			return fmt.Errorf("node/inbound is reserved by a proxy chain: %s/%s", nodeID, iid)
+			return fmt.Errorf("节点/入站已被代理链占用：%s/%s", nodeID, iid)
 		}
 		pubAddr := strings.TrimSpace(b.PublicAddress)
 		pubPort := b.PublicPort
 		if pubPort < 0 || pubPort > 65535 {
-			return fmt.Errorf("public_port out of range for inbound %s: %d", iid, pubPort)
+			return fmt.Errorf("入站 %s 的公网端口超出有效范围：%d", iid, pubPort)
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO node_inbounds (node_id, inbound_id, public_address, public_port) VALUES (?, ?, ?, ?)`,
 			nodeID, iid, pubAddr, pubPort,
 		); err != nil {
-			return fmt.Errorf("attach inbound: %w", err)
+			return fmt.Errorf("关联入站失败：%w", err)
 		}
 	}
 	return tx.Commit()
@@ -952,7 +972,7 @@ func (s *Store) ListNodeInboundAttachments(nodeID string) ([]NodeInboundAttachme
 		WHERE ni.node_id = ?
 		ORDER BY i.created_at_unix ASC`, nodeID)
 	if err != nil {
-		return nil, fmt.Errorf("list node inbound attachments: %w", err)
+		return nil, fmt.Errorf("查询节点入站关联失败：%w", err)
 	}
 	defer rows.Close()
 
@@ -966,12 +986,12 @@ func (s *Store) ListNodeInboundAttachments(nodeID string) ([]NodeInboundAttachme
 			&a.PublicAddress, &a.PublicPort,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("list node inbound attachments scan: %w", err)
+			return nil, fmt.Errorf("读取节点入站关联失败：%w", err)
 		}
 		a.Enabled = enabled != 0
 		a.Params = map[string]any{}
 		if err := unmarshalJSON(paramsJSON, &a.Params); err != nil {
-			return nil, fmt.Errorf("unmarshal inbound params: %w", err)
+			return nil, fmt.Errorf("解析入站参数失败：%w", err)
 		}
 		out = append(out, a)
 	}
@@ -989,7 +1009,7 @@ func (s *Store) CountInboundsByNode() (map[string]int, error) {
 	rows, err := s.db.Query(`
 		SELECT node_id, COUNT(*) FROM node_inbounds GROUP BY node_id`)
 	if err != nil {
-		return nil, fmt.Errorf("count inbounds by node: %w", err)
+		return nil, fmt.Errorf("统计节点入站数量失败：%w", err)
 	}
 	defer rows.Close()
 	out := map[string]int{}
@@ -1008,7 +1028,7 @@ func (s *Store) CountInboundsByNode() (map[string]int, error) {
 
 func (s *Store) CreateTask(t *Task) error {
 	if t == nil {
-		return fmt.Errorf("task is nil")
+		return fmt.Errorf("任务不能为空")
 	}
 	if t.ID == "" {
 		t.ID = newID()
@@ -1028,11 +1048,11 @@ func (s *Store) CreateTask(t *Task) error {
 	}
 	nodeIDsJSON, err := marshalJSON(t.NodeIDs)
 	if err != nil {
-		return fmt.Errorf("marshal node_ids: %w", err)
+		return fmt.Errorf("编码节点 ID 列表失败：%w", err)
 	}
 	resultsJSON, err := marshalJSON(t.Results)
 	if err != nil {
-		return fmt.Errorf("marshal results: %w", err)
+		return fmt.Errorf("编码任务结果失败：%w", err)
 	}
 	_, err = s.db.Exec(`
 		INSERT INTO tasks (id, type, status, node_ids_json, results_json, created_at_unix, updated_at_unix)
@@ -1040,14 +1060,14 @@ func (s *Store) CreateTask(t *Task) error {
 		t.ID, t.Type, t.Status, nodeIDsJSON, resultsJSON, t.CreatedAtUnix, t.UpdatedAtUnix,
 	)
 	if err != nil {
-		return fmt.Errorf("create task: %w", err)
+		return fmt.Errorf("创建任务失败：%w", err)
 	}
 	return nil
 }
 
 func (s *Store) UpdateTask(t *Task) error {
 	if t == nil || t.ID == "" {
-		return fmt.Errorf("task id required")
+		return fmt.Errorf("必须提供任务 ID")
 	}
 	t.UpdatedAtUnix = nowUnix()
 	if t.NodeIDs == nil {
@@ -1058,11 +1078,11 @@ func (s *Store) UpdateTask(t *Task) error {
 	}
 	nodeIDsJSON, err := marshalJSON(t.NodeIDs)
 	if err != nil {
-		return fmt.Errorf("marshal node_ids: %w", err)
+		return fmt.Errorf("编码节点 ID 列表失败：%w", err)
 	}
 	resultsJSON, err := marshalJSON(t.Results)
 	if err != nil {
-		return fmt.Errorf("marshal results: %w", err)
+		return fmt.Errorf("编码任务结果失败：%w", err)
 	}
 	res, err := s.db.Exec(`
 		UPDATE tasks SET type = ?, status = ?, node_ids_json = ?, results_json = ?, updated_at_unix = ?
@@ -1070,11 +1090,11 @@ func (s *Store) UpdateTask(t *Task) error {
 		t.Type, t.Status, nodeIDsJSON, resultsJSON, t.UpdatedAtUnix, t.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("update task: %w", err)
+		return fmt.Errorf("更新任务失败：%w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", t.ID)
+		return fmt.Errorf("任务不存在：%s", t.ID)
 	}
 	return nil
 }
@@ -1091,10 +1111,10 @@ func scanTask(row interface {
 	t.NodeIDs = []string{}
 	t.Results = []TaskNodeResult{}
 	if err := unmarshalJSON(nodeIDsJSON, &t.NodeIDs); err != nil {
-		return nil, fmt.Errorf("unmarshal node_ids: %w", err)
+		return nil, fmt.Errorf("解析节点 ID 列表失败：%w", err)
 	}
 	if err := unmarshalJSON(resultsJSON, &t.Results); err != nil {
-		return nil, fmt.Errorf("unmarshal results: %w", err)
+		return nil, fmt.Errorf("解析任务结果失败：%w", err)
 	}
 	return &t, nil
 }
@@ -1105,10 +1125,10 @@ func (s *Store) GetTask(id string) (*Task, error) {
 	row := s.db.QueryRow(`SELECT `+taskSelectCols+` FROM tasks WHERE id = ?`, id)
 	t, err := scanTask(row)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found: %s", id)
+		return nil, fmt.Errorf("任务不存在：%s", id)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get task: %w", err)
+		return nil, fmt.Errorf("读取任务失败：%w", err)
 	}
 	return t, nil
 }
@@ -1116,7 +1136,7 @@ func (s *Store) GetTask(id string) (*Task, error) {
 func (s *Store) ListTasks() ([]Task, error) {
 	rows, err := s.db.Query(`SELECT ` + taskSelectCols + ` FROM tasks ORDER BY created_at_unix DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("list tasks: %w", err)
+		return nil, fmt.Errorf("查询任务列表失败：%w", err)
 	}
 	defer rows.Close()
 
@@ -1124,7 +1144,7 @@ func (s *Store) ListTasks() ([]Task, error) {
 	for rows.Next() {
 		t, err := scanTask(rows)
 		if err != nil {
-			return nil, fmt.Errorf("list tasks scan: %w", err)
+			return nil, fmt.Errorf("读取任务列表失败：%w", err)
 		}
 		out = append(out, *t)
 	}
@@ -1152,7 +1172,7 @@ func (s *Store) GetSettings() (*Settings, error) {
 		&st.ChainProbeTimeoutSec, &migrated,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("get settings: %w", err)
+		return nil, fmt.Errorf("读取系统设置失败：%w", err)
 	}
 	st.ChainSubscriptionMigrated = migrated != 0
 	return &st, nil
@@ -1160,7 +1180,7 @@ func (s *Store) GetSettings() (*Settings, error) {
 
 func (s *Store) SaveSettings(st *Settings) error {
 	if st == nil {
-		return fmt.Errorf("settings is nil")
+		return fmt.Errorf("系统设置不能为空")
 	}
 	_, err := s.db.Exec(`
 		UPDATE settings SET
@@ -1180,7 +1200,7 @@ func (s *Store) SaveSettings(st *Settings) error {
 		st.ChainProbeTimeoutSec, boolToInt(st.ChainSubscriptionMigrated),
 	)
 	if err != nil {
-		return fmt.Errorf("save settings: %w", err)
+		return fmt.Errorf("保存系统设置失败：%w", err)
 	}
 	return nil
 }
@@ -1219,13 +1239,13 @@ func (s *Store) MigrateSubscriptionsToChains() error {
 
 func (s *Store) CreateSubscription(sub *Subscription) error {
 	if sub == nil {
-		return fmt.Errorf("subscription is nil")
+		return fmt.Errorf("订阅不能为空")
 	}
 	if sub.ID == "" {
 		sub.ID = newID()
 	}
 	if sub.Token == "" {
-		return fmt.Errorf("token required")
+		return fmt.Errorf("必须提供令牌")
 	}
 	now := nowUnix()
 	if sub.CreatedAtUnix == 0 {
@@ -1263,14 +1283,14 @@ func (s *Store) CreateSubscription(sub *Subscription) error {
 		boolToInt(sub.Enabled), sub.CreatedAtUnix, sub.UpdatedAtUnix,
 	)
 	if err != nil {
-		return fmt.Errorf("create subscription: %w", err)
+		return fmt.Errorf("创建订阅失败：%w", err)
 	}
 	return nil
 }
 
 func (s *Store) UpdateSubscription(sub *Subscription) error {
 	if sub == nil || sub.ID == "" {
-		return fmt.Errorf("subscription id required")
+		return fmt.Errorf("必须提供订阅 ID")
 	}
 	sub.UpdatedAtUnix = nowUnix()
 	if sub.InboundIDs == nil {
@@ -1304,11 +1324,11 @@ func (s *Store) UpdateSubscription(sub *Subscription) error {
 		boolToInt(sub.Enabled), sub.UpdatedAtUnix, sub.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("update subscription: %w", err)
+		return fmt.Errorf("更新订阅失败：%w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("subscription not found: %s", sub.ID)
+		return fmt.Errorf("订阅不存在：%s", sub.ID)
 	}
 	return nil
 }
@@ -1316,11 +1336,11 @@ func (s *Store) UpdateSubscription(sub *Subscription) error {
 func (s *Store) DeleteSubscription(id string) error {
 	res, err := s.db.Exec(`DELETE FROM subscriptions WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("delete subscription: %w", err)
+		return fmt.Errorf("删除订阅失败：%w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("subscription not found: %s", id)
+		return fmt.Errorf("订阅不存在：%s", id)
 	}
 	return nil
 }
@@ -1354,7 +1374,7 @@ func (s *Store) ListSubscriptions() ([]Subscription, error) {
 			enabled, created_at_unix, updated_at_unix
 		FROM subscriptions ORDER BY created_at_unix ASC`)
 	if err != nil {
-		return nil, fmt.Errorf("list subscriptions: %w", err)
+		return nil, fmt.Errorf("查询订阅列表失败：%w", err)
 	}
 	defer rows.Close()
 	var out []Subscription
@@ -1383,7 +1403,7 @@ func scanSubscription(row interface {
 		&enabled, &sub.CreatedAtUnix, &sub.UpdatedAtUnix,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("subscription not found")
+		return nil, fmt.Errorf("订阅不存在")
 	}
 	if err != nil {
 		return nil, err
@@ -1394,11 +1414,11 @@ func scanSubscription(row interface {
 	sub.IncludeAllChains = includeAllChains != 0
 	sub.InboundIDs = []string{}
 	if err := unmarshalJSON(idsJSON, &sub.InboundIDs); err != nil {
-		return nil, fmt.Errorf("unmarshal inbound_ids: %w", err)
+		return nil, fmt.Errorf("解析入站 ID 列表失败：%w", err)
 	}
 	sub.ChainIDs = []string{}
 	if err := unmarshalJSON(chainIDsJSON, &sub.ChainIDs); err != nil {
-		return nil, fmt.Errorf("unmarshal chain_ids: %w", err)
+		return nil, fmt.Errorf("解析代理链 ID 列表失败：%w", err)
 	}
 	if sub.InboundIDs == nil {
 		sub.InboundIDs = []string{}
@@ -1410,13 +1430,13 @@ func scanSubscription(row interface {
 
 func (s *Store) CreateExternalSource(src *ExternalSource) error {
 	if src == nil {
-		return fmt.Errorf("external source is nil")
+		return fmt.Errorf("外部源不能为空")
 	}
 	if strings.TrimSpace(src.Name) == "" {
-		return fmt.Errorf("name required")
+		return fmt.Errorf("必须提供名称")
 	}
 	if strings.TrimSpace(src.URL) == "" {
-		return fmt.Errorf("url required")
+		return fmt.Errorf("必须提供 URL")
 	}
 	if src.ID == "" {
 		src.ID = newID()
@@ -1444,14 +1464,14 @@ func (s *Store) CreateExternalSource(src *ExternalSource) error {
 		src.CachedBody, src.CachedProxyCount, src.CreatedAtUnix, src.UpdatedAtUnix,
 	)
 	if err != nil {
-		return fmt.Errorf("create external source: %w", err)
+		return fmt.Errorf("创建外部源失败：%w", err)
 	}
 	return nil
 }
 
 func (s *Store) UpdateExternalSource(src *ExternalSource) error {
 	if src == nil || src.ID == "" {
-		return fmt.Errorf("external source id required")
+		return fmt.Errorf("必须提供外部源 ID")
 	}
 	existing, err := s.GetExternalSource(src.ID)
 	if err != nil {
@@ -1493,11 +1513,11 @@ func (s *Store) UpdateExternalSource(src *ExternalSource) error {
 		src.CachedBody, src.CachedProxyCount, src.UpdatedAtUnix, src.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("update external source: %w", err)
+		return fmt.Errorf("更新外部源失败：%w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("external source not found: %s", src.ID)
+		return fmt.Errorf("外部源不存在：%s", src.ID)
 	}
 	return nil
 }
@@ -1506,11 +1526,11 @@ func (s *Store) DeleteExternalSource(id string) error {
 	_, _ = s.db.Exec(`DELETE FROM subscription_external_sources WHERE external_source_id = ?`, id)
 	res, err := s.db.Exec(`DELETE FROM external_sources WHERE id = ?`, id)
 	if err != nil {
-		return fmt.Errorf("delete external source: %w", err)
+		return fmt.Errorf("删除外部源失败：%w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("external source not found: %s", id)
+		return fmt.Errorf("外部源不存在：%s", id)
 	}
 	return nil
 }
@@ -1532,7 +1552,7 @@ func (s *Store) ListExternalSources() ([]ExternalSource, error) {
 			'' AS cached_body, cached_proxy_count, created_at_unix, updated_at_unix
 		FROM external_sources ORDER BY created_at_unix ASC`)
 	if err != nil {
-		return nil, fmt.Errorf("list external sources: %w", err)
+		return nil, fmt.Errorf("查询外部源列表失败：%w", err)
 	}
 	defer rows.Close()
 	var out []ExternalSource
@@ -1552,7 +1572,7 @@ func (s *Store) ListExternalSources() ([]ExternalSource, error) {
 // SaveExternalSourceCache writes fetch outcome + optional successful body.
 func (s *Store) SaveExternalSourceCache(id, body, contentType string, proxyCount int, fetchUnix, successUnix int64, lastErr string) error {
 	if id == "" {
-		return fmt.Errorf("external source id required")
+		return fmt.Errorf("必须提供外部源 ID")
 	}
 	res, err := s.db.Exec(`
 		UPDATE external_sources SET
@@ -1562,11 +1582,11 @@ func (s *Store) SaveExternalSourceCache(id, body, contentType string, proxyCount
 		fetchUnix, successUnix, lastErr, contentType, body, proxyCount, nowUnix(), id,
 	)
 	if err != nil {
-		return fmt.Errorf("save external source cache: %w", err)
+		return fmt.Errorf("保存外部源缓存失败：%w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("external source not found: %s", id)
+		return fmt.Errorf("外部源不存在：%s", id)
 	}
 	return nil
 }
@@ -1574,7 +1594,7 @@ func (s *Store) SaveExternalSourceCache(id, body, contentType string, proxyCount
 // SetSubscriptionExternalSources replaces attached external sources (order = index).
 func (s *Store) SetSubscriptionExternalSources(subID string, sourceIDs []string) error {
 	if subID == "" {
-		return fmt.Errorf("subscription id required")
+		return fmt.Errorf("必须提供订阅 ID")
 	}
 	if _, err := s.GetSubscription(subID); err != nil {
 		return err
@@ -1585,7 +1605,7 @@ func (s *Store) SetSubscriptionExternalSources(subID string, sourceIDs []string)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(`DELETE FROM subscription_external_sources WHERE subscription_id = ?`, subID); err != nil {
-		return fmt.Errorf("clear subscription external sources: %w", err)
+		return fmt.Errorf("清空订阅外部源关联失败：%w", err)
 	}
 	seen := map[string]bool{}
 	for i, sid := range sourceIDs {
@@ -1597,14 +1617,14 @@ func (s *Store) SetSubscriptionExternalSources(subID string, sourceIDs []string)
 		var one int
 		if err := tx.QueryRow(`SELECT 1 FROM external_sources WHERE id = ?`, sid).Scan(&one); err != nil {
 			if err == sql.ErrNoRows {
-				return fmt.Errorf("external source not found: %s", sid)
+				return fmt.Errorf("外部源不存在：%s", sid)
 			}
 			return err
 		}
 		if _, err := tx.Exec(`
 			INSERT INTO subscription_external_sources (subscription_id, external_source_id, sort_order)
 			VALUES (?, ?, ?)`, subID, sid, i); err != nil {
-			return fmt.Errorf("attach external source: %w", err)
+			return fmt.Errorf("关联外部源失败：%w", err)
 		}
 	}
 	return tx.Commit()
@@ -1615,7 +1635,7 @@ func (s *Store) ListExternalSourceIDsForSubscription(subID string) ([]string, er
 		SELECT external_source_id FROM subscription_external_sources
 		WHERE subscription_id = ? ORDER BY sort_order ASC, external_source_id ASC`, subID)
 	if err != nil {
-		return nil, fmt.Errorf("list subscription external source ids: %w", err)
+		return nil, fmt.Errorf("查询订阅外部源 ID 失败：%w", err)
 	}
 	defer rows.Close()
 	var out []string
@@ -1643,7 +1663,7 @@ func (s *Store) ListExternalSourcesForSubscription(subID string) ([]ExternalSour
 		WHERE j.subscription_id = ?
 		ORDER BY j.sort_order ASC, e.id ASC`, subID)
 	if err != nil {
-		return nil, fmt.Errorf("list subscription external sources: %w", err)
+		return nil, fmt.Errorf("查询订阅外部源失败：%w", err)
 	}
 	defer rows.Close()
 	var out []ExternalSource
@@ -1672,7 +1692,7 @@ func scanExternalSource(row interface {
 		&src.CachedBody, &src.CachedProxyCount, &src.CreatedAtUnix, &src.UpdatedAtUnix,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("external source not found")
+		return nil, fmt.Errorf("外部源不存在")
 	}
 	if err != nil {
 		return nil, err
@@ -1680,7 +1700,7 @@ func scanExternalSource(row interface {
 	src.Enabled = enabled != 0
 	src.Headers = map[string]string{}
 	if err := unmarshalJSON(headersJSON, &src.Headers); err != nil {
-		return nil, fmt.Errorf("unmarshal headers: %w", err)
+		return nil, fmt.Errorf("解析请求头失败：%w", err)
 	}
 	return &src, nil
 }
@@ -1689,14 +1709,14 @@ func scanExternalSource(row interface {
 
 func validateProxyChain(c *ProxyChain) error {
 	if c == nil {
-		return fmt.Errorf("proxy chain is nil")
+		return fmt.Errorf("代理链不能为空")
 	}
 	c.Name = strings.TrimSpace(c.Name)
 	if c.Name == "" {
-		return fmt.Errorf("proxy chain name required")
+		return fmt.Errorf("必须提供代理链名称")
 	}
 	if len(c.Hops) < 2 || len(c.Hops) > 8 {
-		return fmt.Errorf("proxy chain must contain 2 to 8 hops")
+		return fmt.Errorf("代理链必须包含 2 到 8 个跳点")
 	}
 	nodes := map[string]bool{}
 	for i := range c.Hops {
@@ -1704,14 +1724,14 @@ func validateProxyChain(c *ProxyChain) error {
 		h.Position = i
 		h.DialAddress = strings.TrimSpace(h.DialAddress)
 		if h.NodeID == "" || h.InboundID == "" {
-			return fmt.Errorf("hop %d requires node_id and inbound_id", i)
+			return fmt.Errorf("第 %d 跳必须提供 node_id 和 inbound_id", i+1)
 		}
 		if nodes[h.NodeID] {
-			return fmt.Errorf("node %s is repeated in proxy chain", h.NodeID)
+			return fmt.Errorf("节点 %s 在代理链中重复出现", h.NodeID)
 		}
 		nodes[h.NodeID] = true
 		if h.DialPort < 0 || h.DialPort > 65535 {
-			return fmt.Errorf("hop %d dial_port must be 0 or 1..65535", i)
+			return fmt.Errorf("第 %d 跳的 dial_port 必须为 0 或 1 到 65535", i+1)
 		}
 	}
 	return nil
@@ -1724,31 +1744,31 @@ func (s *Store) validateProxyChainRefs(tx *sql.Tx, c *ProxyChain) error {
 			return err
 		}
 		if exists == 0 {
-			return fmt.Errorf("hop %d node not found: %s", i, h.NodeID)
+			return fmt.Errorf("第 %d 跳的节点不存在：%s", i+1, h.NodeID)
 		}
 		var enabled int
 		if err := tx.QueryRow(`SELECT enabled FROM inbounds WHERE id = ?`, h.InboundID).Scan(&enabled); err != nil {
 			if err == sql.ErrNoRows {
-				return fmt.Errorf("hop %d inbound not found: %s", i, h.InboundID)
+				return fmt.Errorf("第 %d 跳的入站不存在：%s", i+1, h.InboundID)
 			}
 			return err
 		}
 		if enabled == 0 {
-			return fmt.Errorf("hop %d inbound is disabled: %s", i, h.InboundID)
+			return fmt.Errorf("第 %d 跳的入站已禁用：%s", i+1, h.InboundID)
 		}
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM node_inbounds WHERE node_id = ? AND inbound_id = ?`,
 			h.NodeID, h.InboundID).Scan(&exists); err != nil {
 			return err
 		}
 		if exists > 0 {
-			return fmt.Errorf("hop %d node/inbound is already a standalone binding", i)
+			return fmt.Errorf("第 %d 跳的节点/入站已经是独立绑定", i+1)
 		}
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM proxy_chain_hops WHERE node_id = ? AND inbound_id = ? AND chain_id <> ?`,
 			h.NodeID, h.InboundID, c.ID).Scan(&exists); err != nil {
 			return err
 		}
 		if exists > 0 {
-			return fmt.Errorf("hop %d node/inbound is already reserved by another chain", i)
+			return fmt.Errorf("第 %d 跳的节点/入站已被另一条代理链占用", i+1)
 		}
 	}
 	return nil
@@ -1772,7 +1792,7 @@ func (s *Store) ValidateProxyChain(c *ProxyChain) error {
 		return err
 	}
 	if exists > 0 {
-		return fmt.Errorf("proxy chain name already exists: %s", c.Name)
+		return fmt.Errorf("代理链名称已存在：%s", c.Name)
 	}
 	return nil
 }
@@ -1784,7 +1804,7 @@ func insertProxyChainHops(tx *sql.Tx, c *ProxyChain) error {
 				(chain_id, position, node_id, inbound_id, dial_address, dial_port, tls_skip_verify)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, i, h.NodeID, h.InboundID, h.DialAddress, h.DialPort, boolToInt(h.TLSSkipVerify)); err != nil {
-			return fmt.Errorf("insert proxy chain hop %d: %w", i, err)
+			return fmt.Errorf("保存代理链第 %d 跳失败：%w", i+1, err)
 		}
 	}
 	return nil
@@ -1814,7 +1834,7 @@ func (s *Store) CreateProxyChain(c *ProxyChain) error {
 		INSERT INTO proxy_chains
 			(id, name, enabled, state, failed_hop_index, created_at_unix, updated_at_unix)
 		VALUES (?, ?, 0, 'disabled', -1, ?, ?)`, c.ID, c.Name, now, now); err != nil {
-		return fmt.Errorf("create proxy chain: %w", err)
+		return fmt.Errorf("创建代理链失败：%w", err)
 	}
 	if err := insertProxyChainHops(tx, c); err != nil {
 		return err
@@ -1850,10 +1870,10 @@ func (s *Store) UpdateProxyChain(c *ProxyChain) error {
 	res, err := tx.Exec(`UPDATE proxy_chains SET name = ?, enabled = ?, state = ?, updated_at_unix = ? WHERE id = ?`,
 		c.Name, boolToInt(c.Enabled), firstNonEmptyString(c.State, existing.State), now, c.ID)
 	if err != nil {
-		return fmt.Errorf("update proxy chain: %w", err)
+		return fmt.Errorf("更新代理链失败：%w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("proxy chain not found: %s", c.ID)
+		return fmt.Errorf("代理链不存在：%s", c.ID)
 	}
 	c.CreatedAtUnix = existing.CreatedAtUnix
 	c.UpdatedAtUnix = now
@@ -1915,13 +1935,13 @@ func (s *Store) loadProxyChainHops(c *ProxyChain) error {
 func (s *Store) GetProxyChain(id string) (*ProxyChain, error) {
 	c, err := scanProxyChain(s.db.QueryRow(`SELECT `+proxyChainSelectCols+` FROM proxy_chains WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("proxy chain not found: %s", id)
+		return nil, fmt.Errorf("代理链不存在：%s", id)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get proxy chain: %w", err)
+		return nil, fmt.Errorf("读取代理链失败：%w", err)
 	}
 	if err := s.loadProxyChainHops(c); err != nil {
-		return nil, fmt.Errorf("load proxy chain hops: %w", err)
+		return nil, fmt.Errorf("加载代理链跳点失败：%w", err)
 	}
 	return c, nil
 }
@@ -1964,7 +1984,7 @@ func (s *Store) SetProxyChainRuntime(id string, enabled bool, state, deployErr s
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("proxy chain not found: %s", id)
+		return fmt.Errorf("代理链不存在：%s", id)
 	}
 	return nil
 }
@@ -1990,19 +2010,19 @@ func (s *Store) DeleteProxyChain(id string) error {
 	var enabled int
 	if err := s.db.QueryRow(`SELECT enabled FROM proxy_chains WHERE id = ?`, id).Scan(&enabled); err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("proxy chain not found: %s", id)
+			return fmt.Errorf("代理链不存在：%s", id)
 		}
 		return err
 	}
 	if enabled != 0 {
-		return fmt.Errorf("disable proxy chain before deleting it")
+		return fmt.Errorf("删除代理链前请先将其禁用")
 	}
 	res, err := s.db.Exec(`DELETE FROM proxy_chains WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("proxy chain not found: %s", id)
+		return fmt.Errorf("代理链不存在：%s", id)
 	}
 	return nil
 }
@@ -2026,7 +2046,7 @@ func (s *Store) InboundUsedByAnyChain(inboundID string) (bool, error) {
 
 func (s *Store) SaveSnapshot(snap *ConfigSnapshot) error {
 	if snap == nil {
-		return fmt.Errorf("snapshot is nil")
+		return fmt.Errorf("配置快照不能为空")
 	}
 	if snap.ID == "" {
 		snap.ID = newID()
@@ -2040,7 +2060,7 @@ func (s *Store) SaveSnapshot(snap *ConfigSnapshot) error {
 		snap.ID, snap.NodeID, snap.ConfigJSON, snap.ConfigHash, snap.TaskID, snap.CreatedAtUnix,
 	)
 	if err != nil {
-		return fmt.Errorf("save snapshot: %w", err)
+		return fmt.Errorf("保存配置快照失败：%w", err)
 	}
 	return nil
 }
@@ -2056,10 +2076,10 @@ func (s *Store) LatestSnapshot(nodeID string) (*ConfigSnapshot, error) {
 		&snap.ID, &snap.NodeID, &snap.ConfigJSON, &snap.ConfigHash, &snap.TaskID, &snap.CreatedAtUnix,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("snapshot not found for node: %s", nodeID)
+		return nil, fmt.Errorf("未找到节点 %s 的配置快照", nodeID)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("latest snapshot: %w", err)
+		return nil, fmt.Errorf("读取最新配置快照失败：%w", err)
 	}
 	return &snap, nil
 }

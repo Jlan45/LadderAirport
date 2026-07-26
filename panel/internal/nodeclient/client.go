@@ -44,7 +44,7 @@ type Client struct {
 // Agent URI identity and bound certificate serial must all be present.
 func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 	if cfg.Address == "" {
-		return nil, fmt.Errorf("address required")
+		return nil, fmt.Errorf("必须提供地址")
 	}
 
 	creds, err := transportCredentials(cfg)
@@ -70,7 +70,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 
 	conn, err := grpc.NewClient(cfg.Address, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("grpc dial %s: %w", cfg.Address, err)
+		return nil, fmt.Errorf("连接 gRPC 地址 %s 失败：%w", cfg.Address, err)
 	}
 
 	return &Client{
@@ -89,13 +89,13 @@ func NewWithAPI(api agentv1.AgentControlClient, token string) *Client {
 
 func transportCredentials(cfg DialConfig) (credentials.TransportCredentials, error) {
 	if len(cfg.CACertPEM) == 0 {
-		return nil, fmt.Errorf("management CA bundle required")
+		return nil, fmt.Errorf("必须提供管理 CA 证书包")
 	}
 	if cfg.ClientCertificate == nil {
-		return nil, fmt.Errorf("Panel client certificate required")
+		return nil, fmt.Errorf("必须提供 Panel 客户端证书")
 	}
 	if cfg.ExpectedPeerURI == "" || cfg.ExpectedSerial == "" {
-		return nil, fmt.Errorf("Agent certificate identity and serial required")
+		return nil, fmt.Errorf("必须提供 Agent 证书身份和序列号")
 	}
 
 	tlsCfg := &tls.Config{
@@ -111,17 +111,17 @@ func transportCredentials(cfg DialConfig) (credentials.TransportCredentials, err
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(cfg.CACertPEM) {
-		return nil, fmt.Errorf("failed to parse CA certificate PEM")
+		return nil, fmt.Errorf("解析 CA 证书 PEM 失败")
 	}
 	tlsCfg.RootCAs = pool
 	tlsCfg.VerifyConnection = func(state tls.ConnectionState) error {
 		if len(state.PeerCertificates) == 0 {
-			return fmt.Errorf("agent did not present a certificate")
+			return fmt.Errorf("Agent 未提供证书")
 		}
 		leaf := state.PeerCertificates[0]
 		got := fmt.Sprintf("%032x", leaf.SerialNumber)
 		if got != cfg.ExpectedSerial {
-			return fmt.Errorf("agent certificate serial mismatch")
+			return fmt.Errorf("Agent 证书序列号不匹配")
 		}
 		found := false
 		for _, uri := range leaf.URIs {
@@ -131,7 +131,7 @@ func transportCredentials(cfg DialConfig) (credentials.TransportCredentials, err
 			}
 		}
 		if !found {
-			return fmt.Errorf("agent certificate identity mismatch")
+			return fmt.Errorf("Agent 证书身份不匹配")
 		}
 		return nil
 	}

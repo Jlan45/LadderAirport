@@ -43,11 +43,11 @@ type createSubBody struct {
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
 	var body createSubBody
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if strings.TrimSpace(body.Name) == "" {
-		writeError(w, http.StatusBadRequest, "name required")
+		writeError(w, http.StatusBadRequest, "必须提供名称")
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(body.Format))
@@ -97,7 +97,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 			// Association replacement is transactional. Remove the just-created
 			// subscription as well so a 400 response never leaves a hidden row behind.
 			if cleanupErr := s.Store.DeleteSubscription(sub.ID); cleanupErr != nil {
-				writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v (cleanup: %v)", err, cleanupErr))
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v（清理失败：%v）", err, cleanupErr))
 				return
 			}
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -131,7 +131,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		Rotate             bool     `json:"rotate_token"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	before := *existing
@@ -183,7 +183,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	if body.ExternalSourceIDs != nil {
 		if err := s.Store.SetSubscriptionExternalSources(id, body.ExternalSourceIDs); err != nil {
 			if rollbackErr := s.Store.UpdateSubscription(&before); rollbackErr != nil {
-				writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v (rollback: %v)", err, rollbackErr))
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("%v（回滚失败：%v）", err, rollbackErr))
 				return
 			}
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -286,16 +286,16 @@ func (s *Server) handlePreviewSubscription(w http.ResponseWriter, r *http.Reques
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if token == "" {
-		writeError(w, http.StatusNotFound, "not found")
+		writeError(w, http.StatusNotFound, "订阅不存在")
 		return
 	}
 	sub, err := s.Store.GetSubscriptionByToken(token)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
+		writeError(w, http.StatusNotFound, "订阅不存在")
 		return
 	}
 	if !sub.Enabled {
-		writeError(w, http.StatusForbidden, "subscription disabled")
+		writeError(w, http.StatusForbidden, "订阅已禁用")
 		return
 	}
 	format := detectFormat(r)
@@ -370,7 +370,7 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 	}
 	eps := subscription.MergeEndpointsContext(ctx, local, external)
 	if len(eps) == 0 {
-		return nil, "", fmt.Errorf("no proxy endpoints (check node address, inbound attachments, and external sources)")
+		return nil, "", fmt.Errorf("没有可用的代理端点，请检查节点地址、入站关联和外部源")
 	}
 
 	switch format {

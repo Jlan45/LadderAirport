@@ -53,7 +53,7 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.CertPath == "" || cfg.KeyPath == "" || cfg.CAPath == "" ||
 		strings.TrimSpace(cfg.PanelURL) == "" || strings.TrimSpace(cfg.NodeID) == "" ||
 		strings.TrimSpace(cfg.Token) == "" {
-		return nil, fmt.Errorf("Panel URL, node ID, token, certificate, key and CA paths required")
+		return nil, fmt.Errorf("必须提供 Panel URL、节点 ID、令牌、证书、私钥和 CA 路径")
 	}
 	if err := ParsePanelURL(cfg.PanelURL); err != nil {
 		return nil, err
@@ -69,7 +69,7 @@ func (m *Manager) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.cert == nil {
-		return nil, fmt.Errorf("management certificate unavailable")
+		return nil, fmt.Errorf("管理证书不可用")
 	}
 	return m.cert, nil
 }
@@ -85,7 +85,7 @@ func (m *Manager) Leaf() *x509.Certificate {
 
 func (m *Manager) Run(ctx context.Context) {
 	if strings.TrimSpace(m.cfg.PanelURL) == "" || strings.TrimSpace(m.cfg.NodeID) == "" {
-		log.Printf("management PKI renewal disabled: panel URL or node ID missing")
+		log.Printf("管理 PKI 续签已禁用：缺少 Panel URL 或节点 ID")
 		return
 	}
 	m.renewIfNeeded(ctx)
@@ -112,10 +112,10 @@ func (m *Manager) renewIfNeeded(ctx context.Context) {
 	renewCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := m.Renew(renewCtx); err != nil {
-		log.Printf("management certificate renewal failed: %v", err)
+		log.Printf("管理证书续签失败：%v", err)
 		return
 	}
-	log.Printf("management certificate renewed; expires=%s", m.Leaf().NotAfter.Format(time.RFC3339))
+	log.Printf("管理证书已续签，到期时间=%s", m.Leaf().NotAfter.Format(time.RFC3339))
 }
 
 func (m *Manager) Renew(ctx context.Context) error {
@@ -145,7 +145,7 @@ func (m *Manager) Renew(ctx context.Context) error {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("request Panel certificate: %w", err)
+		return fmt.Errorf("向 Panel 申请证书失败：%w", err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
@@ -153,14 +153,14 @@ func (m *Manager) Renew(ctx context.Context) error {
 		return err
 	}
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("Panel certificate HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return fmt.Errorf("Panel 证书接口返回 HTTP %d：%s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	var issued issueResponse
 	if err := json.Unmarshal(raw, &issued); err != nil {
-		return fmt.Errorf("decode Panel certificate: %w", err)
+		return fmt.Errorf("解析 Panel 证书响应失败：%w", err)
 	}
 	if issued.CertPEM == "" || issued.CABundlePEM == "" {
-		return fmt.Errorf("Panel returned incomplete certificate material")
+		return fmt.Errorf("Panel 返回的证书材料不完整")
 	}
 	keyPEM, err := os.ReadFile(m.cfg.KeyPath)
 	if err != nil {
@@ -168,10 +168,10 @@ func (m *Manager) Renew(ctx context.Context) error {
 	}
 	pair, err := tls.X509KeyPair([]byte(issued.CertPEM), keyPEM)
 	if err != nil {
-		return fmt.Errorf("validate issued certificate: %w", err)
+		return fmt.Errorf("校验签发证书失败：%w", err)
 	}
 	if err := validateAgentCertificate(&pair, []byte(issued.CABundlePEM), m.cfg.NodeID, time.Now()); err != nil {
-		return fmt.Errorf("validate issued certificate: %w", err)
+		return fmt.Errorf("校验签发证书失败：%w", err)
 	}
 	if err := atomicWrite(m.cfg.CertPath, []byte(issued.CertPEM), 0o640); err != nil {
 		return err
@@ -187,17 +187,17 @@ func (m *Manager) Renew(ctx context.Context) error {
 func (m *Manager) reload() error {
 	pair, err := tls.LoadX509KeyPair(m.cfg.CertPath, m.cfg.KeyPath)
 	if err != nil {
-		return fmt.Errorf("load management certificate: %w", err)
+		return fmt.Errorf("加载管理证书失败：%w", err)
 	}
 	if len(pair.Certificate) == 0 {
-		return fmt.Errorf("management certificate chain empty")
+		return fmt.Errorf("管理证书链为空")
 	}
 	caPEM, err := os.ReadFile(m.cfg.CAPath)
 	if err != nil {
 		return err
 	}
 	if err := validateAgentCertificate(&pair, caPEM, m.cfg.NodeID, time.Now()); err != nil {
-		return fmt.Errorf("validate management certificate: %w", err)
+		return fmt.Errorf("校验管理证书失败：%w", err)
 	}
 	m.mu.Lock()
 	m.cert = &pair
@@ -207,7 +207,7 @@ func (m *Manager) reload() error {
 
 func validateAgentCertificate(pair *tls.Certificate, caPEM []byte, nodeID string, now time.Time) error {
 	if pair == nil || len(pair.Certificate) == 0 {
-		return fmt.Errorf("management certificate chain empty")
+		return fmt.Errorf("管理证书链为空")
 	}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
@@ -215,7 +215,7 @@ func validateAgentCertificate(pair *tls.Certificate, caPEM []byte, nodeID string
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(caPEM) {
-		return fmt.Errorf("invalid management CA bundle")
+		return fmt.Errorf("管理 CA 证书包无效")
 	}
 	intermediates := x509.NewCertPool()
 	for _, raw := range pair.Certificate[1:] {
@@ -231,7 +231,7 @@ func validateAgentCertificate(pair *tls.Certificate, caPEM []byte, nodeID string
 		CurrentTime:   now,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}); err != nil {
-		return fmt.Errorf("verify management certificate chain: %w", err)
+		return fmt.Errorf("验证管理证书链失败：%w", err)
 	}
 	want := "spiffe://ladderairport/agent/" + nodeID
 	for _, uri := range leaf.URIs {
@@ -240,7 +240,7 @@ func validateAgentCertificate(pair *tls.Certificate, caPEM []byte, nodeID string
 			return nil
 		}
 	}
-	return fmt.Errorf("unexpected Agent certificate identity")
+	return fmt.Errorf("Agent 证书身份不符合预期")
 }
 
 func (m *Manager) createCSR() ([]byte, error) {
@@ -308,7 +308,7 @@ func loadECDSAKey(path string) (*ecdsa.PrivateKey, error) {
 	}
 	block, _ := pem.Decode(data)
 	if block == nil {
-		return nil, fmt.Errorf("invalid private key PEM")
+		return nil, fmt.Errorf("私钥 PEM 无效")
 	}
 	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
 		if ec, ok := key.(*ecdsa.PrivateKey); ok {
@@ -318,7 +318,7 @@ func loadECDSAKey(path string) (*ecdsa.PrivateKey, error) {
 	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
 		return key, nil
 	}
-	return nil, fmt.Errorf("management private key must be ECDSA")
+	return nil, fmt.Errorf("管理私钥必须使用 ECDSA")
 }
 
 func ClientCAPool(path string) (*x509.CertPool, error) {
@@ -328,14 +328,14 @@ func ClientCAPool(path string) (*x509.CertPool, error) {
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(data) {
-		return nil, fmt.Errorf("invalid client CA bundle")
+		return nil, fmt.Errorf("客户端 CA 证书包无效")
 	}
 	return pool, nil
 }
 
 func VerifyPanelIdentity(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	if len(rawCerts) == 0 {
-		return fmt.Errorf("Panel client certificate required")
+		return fmt.Errorf("必须提供 Panel 客户端证书")
 	}
 	leaf, err := x509.ParseCertificate(rawCerts[0])
 	if err != nil {
@@ -347,7 +347,7 @@ func VerifyPanelIdentity(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("unexpected management client identity")
+	return fmt.Errorf("管理客户端身份不符合预期")
 }
 
 func ParsePanelURL(value string) error {
@@ -356,7 +356,7 @@ func ParsePanelURL(value string) error {
 	}
 	u, err := url.Parse(value)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("invalid Panel URL")
+		return fmt.Errorf("Panel URL 无效")
 	}
 	return nil
 }

@@ -12,7 +12,7 @@ import (
 func listHostInterfaces() ([]*agentv1.NetworkInterface, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		return nil, fmt.Errorf("list interfaces: %w", err)
+		return nil, fmt.Errorf("获取网卡列表失败：%w", err)
 	}
 	out := make([]*agentv1.NetworkInterface, 0, len(ifaces))
 	for _, iface := range ifaces {

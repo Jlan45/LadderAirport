@@ -106,19 +106,19 @@ func (r *BoxRuntime) applyLocked(ctx context.Context, configJSON string, hash st
 		// Best-effort restore of previous config when reload fails mid-way.
 		if prevJSON != "" && prevJSON != configJSON {
 			if restErr := r.startInstanceFromJSONLocked(prevJSON, prevHash); restErr != nil {
-				r.setLastError(fmt.Sprintf("start failed: %v; restore also failed: %v", err, restErr))
-				return fmt.Errorf("start box: %w (restore failed: %v)", err, restErr)
+				r.setLastError(fmt.Sprintf("启动失败：%v；恢复旧配置也失败：%v", err, restErr))
+				return fmt.Errorf("启动代理实例失败：%w（恢复旧配置也失败：%v）", err, restErr)
 			}
-			r.setLastError("start failed, restored previous config: " + err.Error())
-			return fmt.Errorf("start box: %w (previous config restored)", err)
+			r.setLastError("启动失败，已恢复旧配置：" + err.Error())
+			return fmt.Errorf("启动代理实例失败：%w（已恢复旧配置）", err)
 		}
 		r.setLastError(err.Error())
-		return fmt.Errorf("start box: %w", err)
+		return fmt.Errorf("启动代理实例失败：%w", err)
 	}
 
 	if r.dataDir != "" {
 		if err := r.writeCurrent(r.dataDir, configJSON); err != nil {
-			r.setLastError("box running; failed to write current.json: " + err.Error())
+			r.setLastError("代理实例正在运行，但写入 current.json 失败：" + err.Error())
 		}
 	}
 
@@ -179,7 +179,7 @@ func (r *BoxRuntime) startInstanceLocked(opts option.Options, configJSON, hash s
 	})
 	if err != nil {
 		cancel()
-		return fmt.Errorf("create box: %w", err)
+		return fmt.Errorf("创建代理实例失败：%w", err)
 	}
 
 	tracker := newTrafficTracker()
@@ -229,7 +229,7 @@ func (r *BoxRuntime) Start(ctx context.Context) error {
 	r.mu.Unlock()
 
 	if cfg == "" {
-		return fmt.Errorf("no config to start; Apply a config first")
+		return fmt.Errorf("没有可启动的配置，请先下发配置")
 	}
 	// Re-apply under same lock (idempotent if already mid-start elsewhere).
 	return r.applyLocked(ctx, cfg, hash)
@@ -289,7 +289,7 @@ func (r *BoxRuntime) Metrics(_ context.Context) Metrics {
 func (r *BoxRuntime) ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (uint32, error) {
 	parsed, err := url.Parse(targetURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return 0, fmt.Errorf("probe URL must be absolute http/https")
+		return 0, fmt.Errorf("探测 URL 必须是完整的 HTTP/HTTPS 地址")
 	}
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
@@ -298,11 +298,11 @@ func (r *BoxRuntime) ProbeOutbound(ctx context.Context, outboundTag, targetURL s
 	state := r.state
 	r.mu.Unlock()
 	if instance == nil || state != StateRunning {
-		return 0, fmt.Errorf("sing-box is not running")
+		return 0, fmt.Errorf("sing-box 尚未运行")
 	}
 	outbound, ok := instance.Outbound().Outbound(outboundTag)
 	if !ok {
-		return 0, fmt.Errorf("outbound not found: %s", outboundTag)
+		return 0, fmt.Errorf("未找到出站：%s", outboundTag)
 	}
 	delay, err := urltest.URLTest(ctx, targetURL, outbound)
 	if err != nil {
@@ -322,7 +322,7 @@ func (r *BoxRuntime) parseOptions(configJSON string) (option.Options, error) {
 	ctx := include.Context(context.Background())
 	opts, err := json.UnmarshalExtendedContext[option.Options](ctx, []byte(configJSON))
 	if err != nil {
-		return option.Options{}, fmt.Errorf("parse config: %w", err)
+		return option.Options{}, fmt.Errorf("解析配置失败：%w", err)
 	}
 	return opts, nil
 }

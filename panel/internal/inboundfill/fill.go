@@ -93,14 +93,14 @@ func ValidateShadowsocks2022Password(method, password string) error {
 		return nil
 	}
 	if strings.TrimSpace(password) == "" {
-		return fmt.Errorf("%s requires a Base64 PSK", method)
+		return fmt.Errorf("%s 必须使用 Base64 PSK", method)
 	}
 	decoded, err := base64.StdEncoding.DecodeString(password)
 	if err != nil {
-		return fmt.Errorf("%s password must be standard Base64: %w", method, err)
+		return fmt.Errorf("%s 密码必须是标准 Base64：%w", method, err)
 	}
 	if len(decoded) < keySize {
-		return fmt.Errorf("%s password decodes to %d bytes; need at least %d", method, len(decoded), keySize)
+		return fmt.Errorf("%s 密码解码后为 %d 字节，至少需要 %d 字节", method, len(decoded), keySize)
 	}
 	return nil
 }
@@ -120,7 +120,7 @@ func RepairShadowsocks2022Password(params map[string]any) (bool, error) {
 	}
 	key := make([]byte, keySize)
 	if _, err := rand.Read(key); err != nil {
-		return false, fmt.Errorf("generate %s PSK: %w", method, err)
+		return false, fmt.Errorf("生成 %s PSK 失败：%w", method, err)
 	}
 	params["password"] = base64.StdEncoding.EncodeToString(key)
 	return true, nil
@@ -175,7 +175,7 @@ func fillVLESS(params map[string]any) (map[string]any, error) {
 	case "none":
 		// no secrets
 	default:
-		return nil, fmt.Errorf("invalid tls_mode %q", mode)
+		return nil, fmt.Errorf("tls_mode %q 无效", mode)
 	}
 	return params, nil
 }
@@ -234,7 +234,7 @@ func fillVMess(params map[string]any) (map[string]any, error) {
 	case "none":
 		// no TLS material
 	default:
-		return nil, fmt.Errorf("invalid tls_mode %q", mode)
+		return nil, fmt.Errorf("tls_mode %q 无效", mode)
 	}
 	return params, nil
 }
@@ -245,7 +245,7 @@ func ensurePassword(params map[string]any) error {
 	}
 	b := make([]byte, 18)
 	if _, err := rand.Read(b); err != nil {
-		return fmt.Errorf("generate password: %w", err)
+		return fmt.Errorf("生成密码失败：%w", err)
 	}
 	params["password"] = base64.RawURLEncoding.EncodeToString(b)
 	return nil
@@ -278,7 +278,7 @@ func ensureReality(params map[string]any) error {
 	if empty(params, "short_id") {
 		b := make([]byte, 8)
 		if _, err := rand.Read(b); err != nil {
-			return fmt.Errorf("generate short_id: %w", err)
+			return fmt.Errorf("生成 short_id 失败：%w", err)
 		}
 		params["short_id"] = hex.EncodeToString(b)
 	}
@@ -300,7 +300,7 @@ func ensureReality(params map[string]any) error {
 func generateRealityPrivateKey() (string, error) {
 	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
-		return "", fmt.Errorf("reality keypair: %w", err)
+		return "", fmt.Errorf("生成 Reality 密钥对失败：%w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(priv.Bytes()), nil
 }
@@ -308,7 +308,7 @@ func generateRealityPrivateKey() (string, error) {
 func generateSelfSigned(cn string) (certPEM, keyPEM string, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return "", "", fmt.Errorf("tls key: %w", err)
+		return "", "", fmt.Errorf("生成 TLS 私钥失败：%w", err)
 	}
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
@@ -325,7 +325,7 @@ func generateSelfSigned(cn string) (certPEM, keyPEM string, err error) {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
-		return "", "", fmt.Errorf("tls cert: %w", err)
+		return "", "", fmt.Errorf("生成 TLS 证书失败：%w", err)
 	}
 	certPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 	keyBytes, err := x509.MarshalECPrivateKey(key)

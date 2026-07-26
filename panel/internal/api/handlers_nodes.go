@@ -41,7 +41,6 @@ type nodeInstallResponse struct {
 	Node             store.Node `json:"node"`
 	Token            string     `json:"token"`
 	InstallCommand   string     `json:"install_command"`
-	MigrationCommand string     `json:"migration_command,omitempty"`
 	UpgradeCommand   string     `json:"upgrade_command,omitempty"`
 	UninstallCommand string     `json:"uninstall_command,omitempty"`
 	Steps            []string   `json:"steps"`
@@ -64,12 +63,12 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	var req nodeCreateRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name required")
+		writeError(w, http.StatusBadRequest, "必须提供名称")
 		return
 	}
 	n := store.Node{
@@ -105,16 +104,16 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 	var req nodeBootstrapRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name required")
+		writeError(w, http.StatusBadRequest, "必须提供名称")
 		return
 	}
 	if s.PKI == nil {
-		writeError(w, http.StatusServiceUnavailable, "management PKI unavailable")
+		writeError(w, http.StatusServiceUnavailable, "管理 PKI 不可用")
 		return
 	}
 	panelBase := ""
@@ -122,7 +121,7 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		panelBase = panelBaseFromSettings(st.PublicBaseURL)
 	}
 	if panelBase == "" {
-		writeError(w, http.StatusBadRequest, "configure Public Base URL before creating nodes")
+		writeError(w, http.StatusBadRequest, "创建节点前请先配置 Public Base URL")
 		return
 	}
 	token := strings.TrimSpace(req.Token)
@@ -130,7 +129,7 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		var err error
 		token, err = randomAgentToken()
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "generate token: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "生成令牌失败："+err.Error())
 			return
 		}
 	}
@@ -210,7 +209,7 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if s.PKI == nil {
-		writeError(w, http.StatusServiceUnavailable, "management PKI unavailable")
+		writeError(w, http.StatusServiceUnavailable, "管理 PKI 不可用")
 		return
 	}
 	q := r.URL.Query()
@@ -223,19 +222,18 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		panelBase = panelBaseFromSettings(v)
 	}
 	if panelBase == "" {
-		writeError(w, http.StatusBadRequest, "configure Public Base URL before generating commands")
+		writeError(w, http.StatusBadRequest, "生成命令前请先配置 Public Base URL")
 		return
 	}
 	scriptURL := q.Get("script_url")
 	cmd := ""
-	migrationCommand := ""
-	if n.PKICertSerial == "" || n.PKIMigrationRequired {
+	if n.PKICertSerial == "" {
 		enrollmentToken, tokenErr := s.Store.CreatePKIEnrollmentToken(n.ID, 15*time.Minute)
 		if tokenErr != nil {
 			writeError(w, http.StatusInternalServerError, tokenErr.Error())
 			return
 		}
-		opts := installCommandOpts{
+		cmd = buildInstallCommand(installCommandOpts{
 			ScriptURL:       scriptURL,
 			EnrollmentToken: enrollmentToken,
 			AgentVersion:    version,
@@ -243,12 +241,7 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 			NodeID:          n.ID,
 			GRPCPort:        n.GRPCPort,
 			ReportAddress:   n.Address,
-		}
-		if n.PKIMigrationRequired {
-			migrationCommand = buildPKIMigrationCommand(opts)
-		} else {
-			cmd = buildInstallCommand(opts)
-		}
+		})
 	}
 	rec, _, _ := resolveRecommendedAgentVersion()
 	upgradeVer := strings.TrimSpace(version)
@@ -259,7 +252,6 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		Node:                    *n,
 		Token:                   n.Token,
 		InstallCommand:          cmd,
-		MigrationCommand:        migrationCommand,
 		UpgradeCommand:          buildUpgradeCommand(installCommandOpts{ScriptURL: scriptURL, AgentVersion: upgradeVer}),
 		UninstallCommand:        buildUninstallCommand(installCommandOpts{ScriptURL: scriptURL}, false),
 		Steps:                   installSteps(n.Address, n.GRPCPort),
@@ -282,13 +274,13 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	}
 	var body store.NodeOperatorUpdate
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if body.Name != nil {
 		name := strings.TrimSpace(*body.Name)
 		if name == "" {
-			writeError(w, http.StatusBadRequest, "name must not be empty")
+			writeError(w, http.StatusBadRequest, "名称不能为空")
 			return
 		}
 		body.Name = &name
@@ -299,7 +291,7 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.GRPCPort != nil {
 		if *body.GRPCPort < 1 || *body.GRPCPort > 65535 {
-			writeError(w, http.StatusBadRequest, "grpc_port must be between 1 and 65535")
+			writeError(w, http.StatusBadRequest, "grpc_port 必须在 1 到 65535 之间")
 			return
 		}
 	}
@@ -388,7 +380,7 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	var body setNodeInboundsBody
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	bindings := body.Bindings
@@ -551,7 +543,7 @@ func (s *Server) runSingleNodeTask(w http.ResponseWriter, r *http.Request, taskT
 		return
 	}
 	if s.Runner == nil {
-		writeError(w, http.StatusServiceUnavailable, "runner not configured")
+		writeError(w, http.StatusServiceUnavailable, "批处理执行器尚未配置")
 		return
 	}
 	task := &store.Task{
@@ -594,7 +586,7 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		node.Status = "unreachable"
 		_ = s.Store.UpdateNode(node)
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("dial: %v", err))
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -657,7 +649,7 @@ func (s *Server) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
 
 	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("dial: %v", err))
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -693,7 +685,7 @@ func (s *Server) handleNodeInterfaces(w http.ResponseWriter, r *http.Request) {
 
 	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("dial: %v", err))
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -747,7 +739,7 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 	if t := r.URL.Query().Get("tail"); t != "" {
 		n, err := strconv.Atoi(t)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid tail")
+			writeError(w, http.StatusBadRequest, "日志行数参数 tail 无效")
 			return
 		}
 		tail = int32(n)
@@ -755,14 +747,14 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming not supported")
+		writeError(w, http.StatusInternalServerError, "服务器不支持流式响应")
 		return
 	}
 
 	ctx := r.Context()
 	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("dial: %v", err))
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -828,7 +820,7 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 			return
 		}
 	}
@@ -851,7 +843,7 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 
 	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
 	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("dial: %v", err))
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -862,7 +854,7 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if resp == nil {
-		writeError(w, http.StatusBadGateway, "empty upgrade response")
+		writeError(w, http.StatusBadGateway, "Agent 返回了空的升级响应")
 		return
 	}
 	statusCode := http.StatusOK
@@ -873,7 +865,7 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 	if msg := resp.GetMessage(); msg != "" {
 		node.LastError = ""
 		if !resp.GetOk() {
-			node.LastError = "upgrade: " + msg
+			node.LastError = "升级失败：" + msg
 		}
 		_ = s.Store.UpdateNode(node)
 	}

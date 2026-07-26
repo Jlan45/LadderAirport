@@ -56,19 +56,8 @@ sudo LADDER_SESSION_SECRET='你的长随机串' LADDER_FROM=local ./scripts/inst
 2. 默认管理员密码 **`admin`** → 立刻在「设置」修改
 3. 「设置」填写 **Public Base URL**（如 `https://panel.example.com`）
    - 用于生成完整订阅 URL
-   - 用于「添加节点并生成安装命令」完成一次性 PKI 注册
+   - 用于「添加节点并生成安装命令」完成 PKI 注册
 4. 再装 Agent：见 [README-agent.md](README-agent.md)
-
-## 从旧管理 TLS 一次性迁移
-
-不要用普通升级命令跨越到强制 Panel CA 版本。请在 Panel 服务器执行专用脚本：
-
-```bash
-curl -fsSL https://github.com/Jlan45/LadderAirport/releases/download/vX.Y.Z/migrate-panel-to-management-pki.sh \
-  | sudo env LADDER_VERSION=vX.Y.Z bash
-```
-
-脚本会在停止服务后创建仅限本次执行的数据库/二进制回滚，运行新 Panel 的一次性迁移模式并初始化管理 CA。成功后临时回滚和旧二进制会被删除。随后在节点详情逐台执行 Agent 专用迁移命令。
 
 ```bash
 systemctl status ladder-panel

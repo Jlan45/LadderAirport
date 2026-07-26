@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	FetchTimeout  = 15 * time.Second
-	MaxBodyBytes  = 4 << 20 // 4 MiB
-	MaxRedirects  = 3
-	defaultUA     = "LadderAirport-Panel/1.0"
+	FetchTimeout = 15 * time.Second
+	MaxBodyBytes = 4 << 20 // 4 MiB
+	MaxRedirects = 3
+	defaultUA    = "LadderAirport-Panel/1.0"
 )
 
 // FetchURL downloads a subscription body with SSRF protections.
@@ -28,7 +28,7 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 		Timeout: FetchTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= MaxRedirects {
-				return fmt.Errorf("too many redirects")
+				return fmt.Errorf("重定向次数过多")
 			}
 			if err := validatePublicURL(req.URL); err != nil {
 				return err
@@ -51,7 +51,7 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 				d := net.Dialer{Timeout: FetchTimeout}
 				for _, ipa := range ips {
 					if isBlockedIP(ipa.IP) {
-						lastErr = fmt.Errorf("blocked address %s", ipa.IP)
+						lastErr = fmt.Errorf("地址 %s 已被安全策略拦截", ipa.IP)
 						continue
 					}
 					addr := ipa.IP.String()
@@ -69,7 +69,7 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 					return conn, nil
 				}
 				if lastErr == nil {
-					lastErr = fmt.Errorf("no safe addresses for %s", host)
+					lastErr = fmt.Errorf("主机 %s 没有可安全访问的地址", host)
 				}
 				return nil, lastErr
 			},
@@ -94,19 +94,19 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch: %w", err)
+		return nil, fmt.Errorf("获取外部内容失败：%w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("fetch: HTTP %s", resp.Status)
+		return nil, fmt.Errorf("获取外部内容失败：HTTP %s", resp.Status)
 	}
 	limited := io.LimitReader(resp.Body, MaxBodyBytes+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		return nil, fmt.Errorf("fetch read: %w", err)
+		return nil, fmt.Errorf("读取外部内容失败：%w", err)
 	}
 	if len(body) > MaxBodyBytes {
-		return nil, fmt.Errorf("fetch: body exceeds %d bytes", MaxBodyBytes)
+		return nil, fmt.Errorf("外部内容超过 %d 字节限制", MaxBodyBytes)
 	}
 	return body, nil
 }
@@ -114,11 +114,11 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 func parsePublicHTTPURL(raw string) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil, fmt.Errorf("url required")
+		return nil, fmt.Errorf("必须提供 URL")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
+		return nil, fmt.Errorf("URL 无效：%w", err)
 	}
 	if err := validatePublicURL(u); err != nil {
 		return nil, err
@@ -128,26 +128,26 @@ func parsePublicHTTPURL(raw string) (*url.URL, error) {
 
 func validatePublicURL(u *url.URL) error {
 	if u == nil {
-		return fmt.Errorf("nil url")
+		return fmt.Errorf("URL 不能为空")
 	}
 	scheme := strings.ToLower(u.Scheme)
 	if scheme != "http" && scheme != "https" {
-		return fmt.Errorf("unsupported scheme %q", u.Scheme)
+		return fmt.Errorf("不支持 URL 方案 %q", u.Scheme)
 	}
 	host := u.Hostname()
 	if host == "" {
-		return fmt.Errorf("missing host")
+		return fmt.Errorf("URL 缺少主机名")
 	}
 	// Block obvious local hostnames without DNS.
 	lower := strings.ToLower(host)
 	if lower == "localhost" || strings.HasSuffix(lower, ".localhost") ||
 		lower == "metadata.google.internal" {
-		return fmt.Errorf("blocked host %q", host)
+		return fmt.Errorf("主机 %q 已被安全策略拦截", host)
 	}
 	// If host is a literal IP, check immediately.
 	if ip := net.ParseIP(host); ip != nil {
 		if isBlockedIP(ip) {
-			return fmt.Errorf("blocked address %s", ip)
+			return fmt.Errorf("地址 %s 已被安全策略拦截", ip)
 		}
 	}
 	return nil

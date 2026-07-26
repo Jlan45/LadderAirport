@@ -35,12 +35,12 @@ type Meta struct {
 const githubLatestReleaseURL = "https://api.github.com/repos/Jlan45/LadderAirport/releases/latest"
 
 var (
-	releaseCacheMu     sync.Mutex
-	releaseCacheTag    string
-	releaseCacheAt     time.Time
-	releaseCacheTTL    = 15 * time.Minute
-	releaseHTTPClient  = &http.Client{Timeout: 4 * time.Second}
-	releaseRepoAPIURL  = githubLatestReleaseURL // overridable in tests
+	releaseCacheMu    sync.Mutex
+	releaseCacheTag   string
+	releaseCacheAt    time.Time
+	releaseCacheTTL   = 15 * time.Minute
+	releaseHTTPClient = &http.Client{Timeout: 4 * time.Second}
+	releaseRepoAPIURL = githubLatestReleaseURL // overridable in tests
 )
 
 // handleGetMeta returns version / upgrade hints for the SPA.
@@ -99,7 +99,7 @@ func fetchLatestReleaseTag() (string, error) {
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("github releases: HTTP %d", resp.StatusCode)
+		return "", fmt.Errorf("获取 GitHub Releases 失败：HTTP %d", resp.StatusCode)
 	}
 	var parsed struct {
 		TagName string `json:"tag_name"`
@@ -109,7 +109,7 @@ func fetchLatestReleaseTag() (string, error) {
 	}
 	tag := strings.TrimSpace(parsed.TagName)
 	if tag == "" {
-		return "", fmt.Errorf("empty tag_name")
+		return "", fmt.Errorf("Release 的 tag_name 为空")
 	}
 	return tag, nil
 }

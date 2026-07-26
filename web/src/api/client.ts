@@ -100,7 +100,6 @@ export interface Node {
   labels: string[]
   pki_cert_serial?: string
   pki_not_after_unix?: number
-  pki_migration_required?: boolean
   /** Host NIC for sing-box direct bind_interface; empty = OS default route. */
   egress_interface?: string
   status: string
@@ -357,7 +356,6 @@ export interface NodeInstallInfo {
   node: Node
   token: string
   install_command: string
-  migration_command?: string
   upgrade_command?: string
   uninstall_command?: string
   steps: string[]

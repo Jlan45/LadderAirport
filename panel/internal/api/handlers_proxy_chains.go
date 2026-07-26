@@ -47,7 +47,7 @@ func (s *Server) handleGetProxyChain(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateProxyChain(w http.ResponseWriter, r *http.Request) {
 	var chain store.ProxyChain
 	if err := decodeJSON(r, &chain); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if err := s.Store.CreateProxyChain(&chain); err != nil {
@@ -67,7 +67,7 @@ func (s *Server) handleUpdateProxyChain(w http.ResponseWriter, r *http.Request) 
 	}
 	var candidate store.ProxyChain
 	if err := decodeJSON(r, &candidate); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	candidate.ID = id
@@ -145,7 +145,7 @@ func (s *Server) handleProbeProxyChain(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePreviewProxyChain(w http.ResponseWriter, r *http.Request) {
 	var candidate store.ProxyChain
 	if err := decodeJSON(r, &candidate); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	configs, err := s.chainService().Preview(candidate)

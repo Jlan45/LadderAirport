@@ -31,15 +31,15 @@ type createInboundBody struct {
 func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 	var body createInboundBody
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if body.Name == "" || body.Protocol == "" {
-		writeError(w, http.StatusBadRequest, "name and protocol required")
+		writeError(w, http.StatusBadRequest, "必须提供名称和协议")
 		return
 	}
 	if _, ok := templates.Get(body.Protocol); !ok {
-		writeError(w, http.StatusBadRequest, "unknown protocol")
+		writeError(w, http.StatusBadRequest, "未知协议")
 		return
 	}
 	// Auto-generate passwords, UUIDs, TLS PEMs, Reality keys when omitted.
@@ -83,7 +83,7 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		Enabled  *bool          `json:"enabled"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if body.Protocol != nil || body.Params != nil || body.Enabled != nil {
@@ -93,7 +93,7 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if used {
-			writeError(w, http.StatusConflict, "inbound is used by an enabled proxy chain; disable the chain before editing protocol parameters")
+			writeError(w, http.StatusConflict, "该入站正被已启用的代理链使用，请先禁用代理链再修改协议参数")
 			return
 		}
 	}
@@ -104,7 +104,7 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		existing.Protocol = *body.Protocol
 	}
 	if _, ok := templates.Get(existing.Protocol); !ok {
-		writeError(w, http.StatusBadRequest, "unknown protocol")
+		writeError(w, http.StatusBadRequest, "未知协议")
 		return
 	}
 	if body.Params != nil {
@@ -148,7 +148,7 @@ func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	} else if used {
-		writeError(w, http.StatusConflict, "inbound is referenced by a proxy chain")
+		writeError(w, http.StatusConflict, "该入站仍被代理链引用")
 		return
 	}
 	if err := s.Store.DeleteInbound(id); err != nil {

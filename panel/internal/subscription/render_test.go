@@ -174,7 +174,7 @@ func TestRenderNewProtocols(t *testing.T) {
 		{
 			Name: "n-vmess", Server: "1.1.1.1", Port: 10086, Protocol: "vmess",
 			Params: map[string]any{
-				"uuid": "bf000d23-0752-40b4-affe-68f7707a9661",
+				"uuid":     "bf000d23-0752-40b4-affe-68f7707a9661",
 				"alter_id": float64(0), "tls_mode": "tls", "server_name": "v.example.com",
 			},
 		},
@@ -200,7 +200,6 @@ func TestRenderNewProtocols(t *testing.T) {
 		}
 	}
 }
-
 
 func TestCollectEndpointsPerInboundNAT(t *testing.T) {
 	nodes := []store.Node{{
@@ -296,4 +295,3 @@ func TestRenderV2ray(t *testing.T) {
 		t.Fatalf("expected ss:// prefix in decoded string, got %q", decStr)
 	}
 }
-

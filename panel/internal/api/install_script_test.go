@@ -52,30 +52,6 @@ func TestBuildInstallCommandWithEnroll(t *testing.T) {
 	}
 }
 
-func TestBuildPKIMigrationCommand(t *testing.T) {
-	cmd := buildPKIMigrationCommand(installCommandOpts{
-		EnrollmentToken: "one-time",
-		AgentVersion:    "v0.9.0",
-		PanelBaseURL:    "https://panel.example.com/",
-		NodeID:          "node-1",
-		GRPCPort:        50051,
-		ReportAddress:   "192.0.2.10",
-	})
-	for _, want := range []string{
-		"https://github.com/Jlan45/LadderAirport/releases/download/v0.9.0/migrate-agent-to-panel-pki.sh",
-		"LADDER_PANEL='https://panel.example.com'",
-		"LADDER_NODE_ID='node-1'",
-		"LADDER_ENROLL_TOKEN='one-time'",
-		"LADDER_VERSION='v0.9.0'",
-		"LADDER_GRPC_PORT=50051",
-		"LADDER_REPORT_ADDRESS='192.0.2.10'",
-	} {
-		if !strings.Contains(cmd, want) {
-			t.Fatalf("missing %q: %s", want, cmd)
-		}
-	}
-}
-
 func TestRandomAgentToken(t *testing.T) {
 	a, err := randomAgentToken()
 	if err != nil || len(a) < 32 {

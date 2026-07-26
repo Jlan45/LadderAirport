@@ -96,10 +96,10 @@ func TestRealityPublicKeyParam(t *testing.T) {
 	ep := ProxyEndpoint{
 		Name: "r", Server: "1.1.1.1", Port: 443, Protocol: "vless",
 		Params: map[string]any{
-			"uuid": "11111111-1111-1111-1111-111111111111",
-			"tls_mode": "reality",
-			"public_key": "abcd",
-			"short_id": "01",
+			"uuid":        "11111111-1111-1111-1111-111111111111",
+			"tls_mode":    "reality",
+			"public_key":  "abcd",
+			"short_id":    "01",
 			"server_name": "www.microsoft.com",
 		},
 	}
@@ -142,7 +142,6 @@ func TestVLESSShareLinkReality(t *testing.T) {
 		t.Fatalf("%+v", eps[0].Params)
 	}
 }
-
 
 func TestDetectAndParseDropsZeroServer(t *testing.T) {
 	raw := []byte(`

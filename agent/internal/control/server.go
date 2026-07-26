@@ -43,7 +43,7 @@ func (s *Server) Ping(context.Context, *agentv1.PingRequest) (*agentv1.PingRespo
 
 func (s *Server) ProbeOutbound(ctx context.Context, req *agentv1.ProbeOutboundRequest) (*agentv1.ProbeOutboundResponse, error) {
 	if req == nil || strings.TrimSpace(req.GetOutboundTag()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "outbound_tag required")
+		return nil, status.Error(codes.InvalidArgument, "必须提供 outbound_tag")
 	}
 	targetURL := strings.TrimSpace(req.GetUrl())
 	if targetURL == "" {
@@ -56,13 +56,13 @@ func (s *Server) ProbeOutbound(ctx context.Context, req *agentv1.ProbeOutboundRe
 	return &agentv1.ProbeOutboundResponse{
 		Ok:      true,
 		DelayMs: delay,
-		Message: "ok",
+		Message: "正常",
 	}, nil
 }
 
 func (s *Server) ApplyConfig(ctx context.Context, req *agentv1.ApplyConfigRequest) (*agentv1.ApplyConfigResponse, error) {
 	if req == nil {
-		return nil, status.Error(codes.InvalidArgument, "nil request")
+		return nil, status.Error(codes.InvalidArgument, "请求不能为空")
 	}
 	if err := s.rt.Apply(ctx, req.GetConfigJson(), req.GetConfigHash()); err != nil {
 		return &agentv1.ApplyConfigResponse{
@@ -72,7 +72,7 @@ func (s *Server) ApplyConfig(ctx context.Context, req *agentv1.ApplyConfigReques
 	}
 	return &agentv1.ApplyConfigResponse{
 		Ok:          true,
-		Message:     "applied",
+		Message:     "配置已下发",
 		AppliedHash: req.GetConfigHash(),
 	}, nil
 }
@@ -81,14 +81,14 @@ func (s *Server) Start(ctx context.Context, _ *agentv1.StartRequest) (*agentv1.S
 	if err := s.rt.Start(ctx); err != nil {
 		return &agentv1.StartResponse{Ok: false, Message: err.Error()}, nil
 	}
-	return &agentv1.StartResponse{Ok: true, Message: "started"}, nil
+	return &agentv1.StartResponse{Ok: true, Message: "已启动"}, nil
 }
 
 func (s *Server) Stop(ctx context.Context, _ *agentv1.StopRequest) (*agentv1.StopResponse, error) {
 	if err := s.rt.Stop(ctx); err != nil {
 		return &agentv1.StopResponse{Ok: false, Message: err.Error()}, nil
 	}
-	return &agentv1.StopResponse{Ok: true, Message: "stopped"}, nil
+	return &agentv1.StopResponse{Ok: true, Message: "已停止"}, nil
 }
 
 func (s *Server) GetStatus(ctx context.Context, _ *agentv1.GetStatusRequest) (*agentv1.GetStatusResponse, error) {
@@ -115,7 +115,7 @@ func (s *Server) GetMetrics(ctx context.Context, _ *agentv1.GetMetricsRequest) (
 func (s *Server) ListInterfaces(context.Context, *agentv1.ListInterfacesRequest) (*agentv1.ListInterfacesResponse, error) {
 	ifaces, err := listHostInterfaces()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "list interfaces: %v", err)
+		return nil, status.Errorf(codes.Internal, "获取网卡列表失败：%v", err)
 	}
 	return &agentv1.ListInterfacesResponse{Interfaces: ifaces}, nil
 }

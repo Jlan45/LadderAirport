@@ -17,33 +17,6 @@ Agent 管理面只支持 Panel CA 签发的双向 TLS，不支持明文、节点
 
 指定版本时，可在 Panel 生成命令时填写版本，或在命令的 `sudo env` 后增加 `LADDER_VERSION=v0.9.0`。
 
-## 旧节点一次性迁移
-
-在旧节点详情复制「一次性 PKI 迁移命令」并以 root 执行。迁移脚本会在旧服务仍运行时完成 CSR 签发和新二进制准备，切换后连续检查服务状态；失败会在本次执行内恢复旧服务，成功后会删除临时回滚、旧 CA 私钥、旧 unit 残留和旧二进制备份。
-
-迁移成功后旧管理面实现不再可用，也不应再次运行旧安装脚本。若要使用本地预构建的新 Agent：
-
-```bash
-sudo env \
-  LADDER_PANEL='https://panel.example.com' \
-  LADDER_NODE_ID='<node-id>' \
-  LADDER_ENROLL_TOKEN='<one-time-token>' \
-  LADDER_AGENT_BINARY=/path/to/ladder-agent \
-  ./scripts/migrate-agent-to-panel-pki.sh
-```
-
-也可以从同一 Release 获取脚本和 Agent 二进制：
-
-```bash
-curl -fsSL https://github.com/Jlan45/LadderAirport/releases/download/vX.Y.Z/migrate-agent-to-panel-pki.sh \
-  | sudo env \
-      LADDER_VERSION=vX.Y.Z \
-      LADDER_PANEL='https://panel.example.com' \
-      LADDER_NODE_ID='<node-id>' \
-      LADDER_ENROLL_TOKEN='<one-time-token>' \
-      bash
-```
-
 ## NAT / 端口转发
 
 Panel 主动拨号 Agent gRPC。Agent 位于 NAT 后时，应通过 VPN、DNAT 或端口映射让 Panel 可达：
@@ -68,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
   | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.9.0 bash
 ```
 
-普通升级只替换二进制并保留 Panel PKI 身份。若检测到旧节点 CA 或缺少 mTLS 参数，升级会拒绝执行并提示使用一次性迁移脚本。
+普通升级只替换二进制并保留 Panel PKI 身份。若检测到节点自签 CA 或缺少 mTLS 参数，升级会拒绝执行；请先全清卸载该 Agent，再在 Panel 新建节点并执行新的安装命令。
 
 ## 常用命令
 

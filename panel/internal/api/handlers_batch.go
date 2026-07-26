@@ -26,7 +26,7 @@ func (s *Server) handleBatchStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runBatchTask(w http.ResponseWriter, r *http.Request, taskType string) {
 	var req batchRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	nodeIDs, err := s.resolveBatchTargets(req)
@@ -35,11 +35,11 @@ func (s *Server) runBatchTask(w http.ResponseWriter, r *http.Request, taskType s
 		return
 	}
 	if len(nodeIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "no nodes matched node_ids or labels")
+		writeError(w, http.StatusBadRequest, "没有节点匹配 node_ids 或标签")
 		return
 	}
 	if s.Runner == nil {
-		writeError(w, http.StatusServiceUnavailable, "runner not configured")
+		writeError(w, http.StatusServiceUnavailable, "批处理执行器尚未配置")
 		return
 	}
 	task := &store.Task{

@@ -20,20 +20,20 @@ func AppendBearerToken(ctx context.Context, token string) context.Context {
 func ValidateIncomingBearer(ctx context.Context, expected string) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return status.Error(codes.Unauthenticated, "missing metadata")
+		return status.Error(codes.Unauthenticated, "缺少请求元数据")
 	}
 	vals := md.Get(MDAuthorization)
 	if len(vals) == 0 {
-		return status.Error(codes.Unauthenticated, "missing authorization")
+		return status.Error(codes.Unauthenticated, "缺少身份认证信息")
 	}
 	raw := vals[0]
 	const prefix = "Bearer "
 	if !strings.HasPrefix(raw, prefix) {
-		return status.Error(codes.Unauthenticated, "invalid authorization scheme")
+		return status.Error(codes.Unauthenticated, "身份认证方案无效")
 	}
 	got := strings.TrimPrefix(raw, prefix)
 	if subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
-		return status.Error(codes.Unauthenticated, "invalid token")
+		return status.Error(codes.Unauthenticated, "令牌无效")
 	}
 	return nil
 }

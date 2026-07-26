@@ -80,7 +80,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-die() { echo "ERROR: $*" >&2; exit 1; }
+die() { echo "错误：$*" >&2; exit 1; }
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "需要命令: $1"

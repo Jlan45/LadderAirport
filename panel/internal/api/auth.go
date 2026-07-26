@@ -40,7 +40,7 @@ func EnsureAdminPassword(s *store.Store) error {
 	if err := s.SaveSettings(st); err != nil {
 		return err
 	}
-	log.Printf("WARNING: admin password was empty; default password %q has been set — change it in settings", defaultAdminPass)
+	log.Printf("警告：管理员密码为空，已设置默认密码 %q，请立即在系统设置中修改", defaultAdminPass)
 	return nil
 }
 
@@ -124,16 +124,16 @@ type loginRequest struct {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		writeError(w, http.StatusMethodNotAllowed, "不允许使用该请求方法")
 		return
 	}
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if req.Password == "" {
-		writeError(w, http.StatusBadRequest, "password required")
+		writeError(w, http.StatusBadRequest, "必须提供密码")
 		return
 	}
 	st, err := s.Store.GetSettings()
@@ -142,12 +142,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.AdminPasswordHash == "" || !CheckPassword(st.AdminPasswordHash, req.Password) {
-		writeError(w, http.StatusUnauthorized, "invalid password")
+		writeError(w, http.StatusUnauthorized, "密码错误")
 		return
 	}
 	token, err := s.issueSessionToken()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to issue session")
+		writeError(w, http.StatusInternalServerError, "创建登录会话失败")
 		return
 	}
 	s.setSessionCookie(w, token)

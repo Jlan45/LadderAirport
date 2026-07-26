@@ -27,7 +27,6 @@ func TestIssueAgentCertificateBindsNode(t *testing.T) {
 	defer st.Close()
 	node := &store.Node{
 		Name: "edge", Token: "node-secret", GRPCPort: 50051, Status: "pending",
-		PKIMigrationRequired: true,
 	}
 	if err := st.CreateNode(node); err != nil {
 		t.Fatal(err)
@@ -85,36 +84,12 @@ func TestIssueAgentCertificateBindsNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.PKICertSerial != issued.Serial || got.PKICABundlePEM == "" || !got.PKIMigrationRequired {
+	if got.PKICertSerial != issued.Serial || got.PKICABundlePEM == "" {
 		t.Fatalf("node not bound to issued certificate: %+v", got)
 	}
 	if got.Address != "edge.example.test" {
 		t.Fatalf("address = %q", got.Address)
 	}
-	completeBody, _ := json.Marshal(map[string]string{"node_id": node.ID, "serial": issued.Serial})
-	completeReq, _ := http.NewRequest(
-		http.MethodPost,
-		server.URL+"/api/v1/pki/agent-migrations/complete",
-		bytes.NewReader(completeBody),
-	)
-	completeReq.Header.Set("Authorization", "Bearer node-secret")
-	completeReq.Header.Set("Content-Type", "application/json")
-	completeResp, err := http.DefaultClient.Do(completeReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	completeResp.Body.Close()
-	if completeResp.StatusCode != http.StatusNoContent {
-		t.Fatalf("complete migration status = %d", completeResp.StatusCode)
-	}
-	got, err = st.GetNode(node.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.PKIMigrationRequired {
-		t.Fatalf("migration marker not cleared: %+v", got)
-	}
-
 	replay, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/pki/agent-certificates", bytes.NewReader(body))
 	replay.Header.Set("Authorization", "Bearer "+enrollmentToken)
 	replay.Header.Set("Content-Type", "application/json")

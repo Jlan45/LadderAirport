@@ -159,7 +159,6 @@ func TestDedupeMultiAOrderIndependentSamePort(t *testing.T) {
 	}
 }
 
-
 func TestFilterPlaceholderServers(t *testing.T) {
 	eps := []ProxyEndpoint{
 		{Name: "notice", Server: "0.0.0.0", Port: 443, Protocol: "trojan"},

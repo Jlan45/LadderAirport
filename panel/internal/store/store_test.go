@@ -19,7 +19,7 @@ func openTestStore(t *testing.T) *Store {
 	return s
 }
 
-func TestLegacyNodeRequiresStandalonePKIMigration(t *testing.T) {
+func TestRemovedNodeTLSColumnsAreDropped(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy-node.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -35,6 +35,7 @@ func TestLegacyNodeRequiresStandalonePKIMigration(t *testing.T) {
 			labels_json TEXT NOT NULL DEFAULT '[]',
 			tls_skip_verify INTEGER NOT NULL DEFAULT 0,
 			ca_cert_pem TEXT NOT NULL DEFAULT '',
+			pki_migration_required INTEGER NOT NULL DEFAULT 1,
 			status TEXT NOT NULL DEFAULT '',
 			last_seen_unix INTEGER NOT NULL DEFAULT 0,
 			config_hash TEXT NOT NULL DEFAULT '',
@@ -43,7 +44,7 @@ func TestLegacyNodeRequiresStandalonePKIMigration(t *testing.T) {
 		);
 		INSERT INTO nodes VALUES (
 			'legacy-node', 'legacy', '192.0.2.10', 50051, 'token', '[]',
-			1, 'old-local-ca', 'online', 1, '', 1, 1
+			1, 'old-local-ca', 1, 'online', 1, '', 1, 1
 		);
 	`)
 	if err != nil {
@@ -63,9 +64,6 @@ func TestLegacyNodeRequiresStandalonePKIMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !n.PKIMigrationRequired {
-		t.Fatalf("legacy node was not marked for standalone migration: %+v", n)
-	}
 	if n.PKICABundlePEM != "" || n.PKICertSerial != "" {
 		t.Fatalf("legacy management trust leaked into Panel PKI fields: %+v", n)
 	}
@@ -81,8 +79,8 @@ func TestLegacyNodeRequiresStandalonePKIMigration(t *testing.T) {
 		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
 			t.Fatal(err)
 		}
-		if name == "tls_skip_verify" || name == "ca_cert_pem" {
-			t.Fatalf("legacy management TLS column was not removed: %s", name)
+		if name == "tls_skip_verify" || name == "ca_cert_pem" || name == "pki_migration_required" {
+			t.Fatalf("removed node TLS column was not dropped: %s", name)
 		}
 	}
 }
@@ -174,9 +172,6 @@ func TestCreateAndListNodes(t *testing.T) {
 	got := nodes[0]
 	if got.ID != n.ID || got.Name != "node-a" || got.Address != "10.0.0.1" || got.GRPCPort != 9090 {
 		t.Fatalf("unexpected node: %+v", got)
-	}
-	if got.PKIMigrationRequired {
-		t.Fatalf("new Panel-PKI node incorrectly requires legacy migration: %+v", got)
 	}
 	if len(got.Labels) != 2 || got.Labels[0] != "edge" || got.Labels[1] != "prod" {
 		t.Fatalf("unexpected labels: %v", got.Labels)
@@ -301,9 +296,13 @@ func TestProxyChainOwnsBindingsAndPreservesOrder(t *testing.T) {
 		got.Hops[1].DialAddress != "edge.internal" || got.Hops[1].DialPort != 18443 {
 		t.Fatalf("hop order/overrides not preserved: %+v", got.Hops)
 	}
+	if err := s.DeleteNode(nodes[0].ID); err == nil ||
+		!strings.Contains(err.Error(), "节点仍被代理链引用：entry-to-exit") {
+		t.Fatalf("删除代理链跳点节点时应返回明确的中文错误，实际为 %v", err)
+	}
 
 	if err := s.SetNodeInbounds(nodes[0].ID, []string{inbounds[0].ID}); err == nil ||
-		!strings.Contains(err.Error(), "reserved by a proxy chain") {
+		!strings.Contains(err.Error(), "已被代理链占用") {
 		t.Fatalf("standalone binding should be blocked, got %v", err)
 	}
 	conflict := &ProxyChain{
@@ -314,7 +313,7 @@ func TestProxyChainOwnsBindingsAndPreservesOrder(t *testing.T) {
 		},
 	}
 	if err := s.CreateProxyChain(conflict); err == nil ||
-		!strings.Contains(err.Error(), "reserved by another chain") {
+		!strings.Contains(err.Error(), "已被另一条代理链占用") {
 		t.Fatalf("overlapping chain should be blocked, got %v", err)
 	}
 }

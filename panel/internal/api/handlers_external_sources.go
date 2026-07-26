@@ -27,17 +27,17 @@ type createExternalSourceBody struct {
 func (s *Server) handleCreateExternalSource(w http.ResponseWriter, r *http.Request) {
 	var body createExternalSourceBody
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	name := strings.TrimSpace(body.Name)
 	rawURL := strings.TrimSpace(body.URL)
 	if name == "" {
-		writeError(w, http.StatusBadRequest, "name required")
+		writeError(w, http.StatusBadRequest, "必须提供名称")
 		return
 	}
 	if rawURL == "" {
-		writeError(w, http.StatusBadRequest, "url required")
+		writeError(w, http.StatusBadRequest, "必须提供 URL")
 		return
 	}
 	enabled := true
@@ -92,7 +92,7 @@ func (s *Server) handleUpdateExternalSource(w http.ResponseWriter, r *http.Reque
 		RefreshIntervalSec *int              `json:"refresh_interval_sec"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) != "" {
@@ -147,7 +147,7 @@ func (s *Server) handleRefreshExternalSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if s.Aggregator == nil {
-		writeError(w, http.StatusServiceUnavailable, "aggregator not configured")
+		writeError(w, http.StatusServiceUnavailable, "订阅聚合器尚未配置")
 		return
 	}
 	if err := s.Aggregator.RefreshSource(r.Context(), id); err != nil {
@@ -184,7 +184,7 @@ func (s *Server) handlePreviewExternalSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if s.Aggregator == nil {
-		writeError(w, http.StatusServiceUnavailable, "aggregator not configured")
+		writeError(w, http.StatusServiceUnavailable, "订阅聚合器尚未配置")
 		return
 	}
 	eps, warnings := s.Aggregator.EndpointsForSources(r.Context(), []store.ExternalSource{*src})

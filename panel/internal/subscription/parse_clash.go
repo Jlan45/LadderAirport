@@ -12,15 +12,15 @@ import (
 func parseClashYAML(raw []byte) ([]ProxyEndpoint, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("clash yaml: %w", err)
+		return nil, fmt.Errorf("解析 Clash YAML 失败：%w", err)
 	}
 	rawProxies, ok := doc["proxies"]
 	if !ok {
-		return nil, fmt.Errorf("clash yaml: missing proxies")
+		return nil, fmt.Errorf("Clash YAML 缺少 proxies")
 	}
 	list, ok := rawProxies.([]any)
 	if !ok {
-		return nil, fmt.Errorf("clash yaml: proxies is not a list")
+		return nil, fmt.Errorf("Clash YAML 的 proxies 不是列表")
 	}
 	var out []ProxyEndpoint
 	for _, item := range list {
@@ -36,7 +36,7 @@ func parseClashYAML(raw []byte) ([]ProxyEndpoint, error) {
 		out = append(out, ep)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("clash yaml: no supported proxies")
+		return nil, fmt.Errorf("Clash YAML 中没有受支持的代理")
 	}
 	return out, nil
 }
@@ -46,10 +46,10 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 	server := anyToString(m["server"])
 	port, ok := anyToInt(m["port"])
 	if !ok || port < 1 || port > 65535 {
-		return ProxyEndpoint{}, fmt.Errorf("bad port")
+		return ProxyEndpoint{}, fmt.Errorf("端口无效")
 	}
 	if server == "" {
-		return ProxyEndpoint{}, fmt.Errorf("missing server")
+		return ProxyEndpoint{}, fmt.Errorf("缺少服务器地址")
 	}
 	if name == "" {
 		name = fmt.Sprintf("%s-%d", server, port)
@@ -64,7 +64,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		cipher := firstNonEmpty(anyToString(m["cipher"]), anyToString(m["method"]))
 		password := anyToString(m["password"])
 		if cipher == "" || password == "" {
-			return ProxyEndpoint{}, fmt.Errorf("ss missing cipher/password")
+			return ProxyEndpoint{}, fmt.Errorf("Shadowsocks 缺少加密方法或密码")
 		}
 		params["method"] = cipher
 		params["password"] = password
@@ -75,7 +75,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		protocol = "trojan"
 		password := anyToString(m["password"])
 		if password == "" {
-			return ProxyEndpoint{}, fmt.Errorf("trojan missing password")
+			return ProxyEndpoint{}, fmt.Errorf("Trojan 缺少密码")
 		}
 		params["password"] = password
 		if sn := firstNonEmpty(anyToString(m["sni"]), anyToString(m["servername"])); sn != "" {
@@ -85,7 +85,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		protocol = "vless"
 		uid := firstNonEmpty(anyToString(m["uuid"]), anyToString(m["id"]))
 		if uid == "" {
-			return ProxyEndpoint{}, fmt.Errorf("vless missing uuid")
+			return ProxyEndpoint{}, fmt.Errorf("VLESS 缺少 UUID")
 		}
 		params["uuid"] = uid
 		if flow := anyToString(m["flow"]); flow != "" {
@@ -112,7 +112,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		protocol = "hysteria2"
 		password := firstNonEmpty(anyToString(m["password"]), anyToString(m["auth"]))
 		if password == "" {
-			return ProxyEndpoint{}, fmt.Errorf("hysteria2 missing password")
+			return ProxyEndpoint{}, fmt.Errorf("Hysteria2 缺少密码")
 		}
 		params["password"] = password
 		if sn := firstNonEmpty(anyToString(m["sni"]), anyToString(m["servername"])); sn != "" {
@@ -129,7 +129,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		uid := anyToString(m["uuid"])
 		password := anyToString(m["password"])
 		if uid == "" || password == "" {
-			return ProxyEndpoint{}, fmt.Errorf("tuic missing uuid/password")
+			return ProxyEndpoint{}, fmt.Errorf("TUIC 缺少 UUID 或密码")
 		}
 		params["uuid"] = uid
 		params["password"] = password
@@ -143,7 +143,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		protocol = "anytls"
 		password := anyToString(m["password"])
 		if password == "" {
-			return ProxyEndpoint{}, fmt.Errorf("anytls missing password")
+			return ProxyEndpoint{}, fmt.Errorf("AnyTLS 缺少密码")
 		}
 		params["password"] = password
 		if sn := firstNonEmpty(anyToString(m["sni"]), anyToString(m["servername"])); sn != "" {
@@ -153,7 +153,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		protocol = "vmess"
 		uid := firstNonEmpty(anyToString(m["uuid"]), anyToString(m["id"]))
 		if uid == "" {
-			return ProxyEndpoint{}, fmt.Errorf("vmess missing uuid")
+			return ProxyEndpoint{}, fmt.Errorf("VMess 缺少 UUID")
 		}
 		params["uuid"] = uid
 		if aid, ok := anyToInt(m["alterId"]); ok {
@@ -170,7 +170,7 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 			params["server_name"] = sn
 		}
 	default:
-		return ProxyEndpoint{}, fmt.Errorf("unsupported type %q", typ)
+		return ProxyEndpoint{}, fmt.Errorf("不支持类型 %q", typ)
 	}
 
 	return ProxyEndpoint{

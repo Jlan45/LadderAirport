@@ -74,7 +74,7 @@ func TestStageAgentUpgradeSHAMismatch(t *testing.T) {
 		UpgradeDir:  t.TempDir(),
 		HTTPClient:  srv.Client(),
 	})
-	if err == nil || !strings.Contains(err.Error(), "sha256 mismatch") {
+	if err == nil || !strings.Contains(err.Error(), "SHA256 校验不匹配") {
 		t.Fatalf("expected sha mismatch, got %v", err)
 	}
 }

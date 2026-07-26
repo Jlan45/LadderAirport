@@ -40,7 +40,7 @@ func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error
 		}
 	}
 	if len(enabled) == 0 && !opts.AllowEmpty {
-		return nil, fmt.Errorf("no enabled inbounds")
+		return nil, fmt.Errorf("没有已启用的入站")
 	}
 
 	seenPorts := map[string]string{} // "listen:port" -> name/id
@@ -49,13 +49,13 @@ func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error
 	for _, in := range enabled {
 		mapped, err := mapInbound(in)
 		if err != nil {
-			return nil, fmt.Errorf("inbound %q (%s): %w", in.Name, in.ID, err)
+			return nil, fmt.Errorf("入站 %q（%s）：%w", in.Name, in.ID, err)
 		}
 		listen, _ := mapped["listen"].(string)
 		port, _ := asInt(mapped["listen_port"])
 		key := fmt.Sprintf("%s:%d", listen, port)
 		if prev, ok := seenPorts[key]; ok {
-			return nil, fmt.Errorf("port conflict on %s (between %s and %s)", key, prev, label(in))
+			return nil, fmt.Errorf("端口 %s 冲突（%s 与 %s）", key, prev, label(in))
 		}
 		seenPorts[key] = label(in)
 		inboundTags[in.ID] = inboundTag(in)
@@ -76,17 +76,17 @@ func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error
 	for _, route := range opts.ChainRoutes {
 		tag, ok := inboundTags[route.InboundID]
 		if !ok {
-			return nil, fmt.Errorf("chain route inbound not enabled: %s", route.InboundID)
+			return nil, fmt.Errorf("代理链路由入站未启用：%s", route.InboundID)
 		}
 		if route.Outbound == nil {
-			return nil, fmt.Errorf("chain route outbound missing for inbound %s", route.InboundID)
+			return nil, fmt.Errorf("入站 %s 缺少代理链路由出站", route.InboundID)
 		}
 		outboundTag, _ := route.Outbound["tag"].(string)
 		if strings.TrimSpace(outboundTag) == "" {
-			return nil, fmt.Errorf("chain route outbound tag required for inbound %s", route.InboundID)
+			return nil, fmt.Errorf("入站 %s 的代理链路由必须提供出站标签", route.InboundID)
 		}
 		if outboundTags[outboundTag] {
-			return nil, fmt.Errorf("duplicate outbound tag %q", outboundTag)
+			return nil, fmt.Errorf("出站标签 %q 重复", outboundTag)
 		}
 		outboundTags[outboundTag] = true
 		outbounds = append(outbounds, route.Outbound)
@@ -120,7 +120,7 @@ func label(in store.InboundConfig) string {
 
 func mapInbound(in store.InboundConfig) (map[string]any, error) {
 	if in.Params == nil {
-		return nil, fmt.Errorf("missing params")
+		return nil, fmt.Errorf("缺少参数")
 	}
 	switch in.Protocol {
 	case "shadowsocks":
@@ -138,7 +138,7 @@ func mapInbound(in store.InboundConfig) (map[string]any, error) {
 	case "vmess":
 		return mapVMess(in)
 	default:
-		return nil, fmt.Errorf("unsupported protocol %q", in.Protocol)
+		return nil, fmt.Errorf("不支持协议 %q", in.Protocol)
 	}
 }
 
@@ -207,7 +207,7 @@ func mapVLESS(in store.InboundConfig) (map[string]any, error) {
 		return nil, err
 	}
 	if _, err := uuid.Parse(uid); err != nil {
-		return nil, fmt.Errorf("invalid UUID: %w", err)
+		return nil, fmt.Errorf("UUID 无效：%w", err)
 	}
 	user := map[string]any{
 		"name": "default",
@@ -247,7 +247,7 @@ func mapVLESS(in store.InboundConfig) (map[string]any, error) {
 			priv = optionalString(in.Params, "public_key")
 		}
 		if priv == "" {
-			return nil, fmt.Errorf("missing required field private_key")
+			return nil, fmt.Errorf("缺少必填字段 private_key")
 		}
 		shortID, err := requireString(in.Params, "short_id")
 		if err != nil {
@@ -265,7 +265,7 @@ func mapVLESS(in store.InboundConfig) (map[string]any, error) {
 		if v, ok := in.Params["handshake_server_port"]; ok && v != nil && fmt.Sprint(v) != "" {
 			p, err := asInt(v)
 			if err != nil {
-				return nil, fmt.Errorf("invalid handshake_server_port: %w", err)
+				return nil, fmt.Errorf("handshake_server_port 无效：%w", err)
 			}
 			hsPort = p
 		}
@@ -283,7 +283,7 @@ func mapVLESS(in store.InboundConfig) (map[string]any, error) {
 			},
 		}
 	default:
-		return nil, fmt.Errorf("invalid tls_mode %q", tlsMode)
+		return nil, fmt.Errorf("tls_mode %q 无效", tlsMode)
 	}
 	return out, nil
 }
@@ -314,7 +314,7 @@ func mapHysteria2(in store.InboundConfig) (map[string]any, error) {
 	if v, ok := in.Params["up_mbps"]; ok && v != nil && fmt.Sprint(v) != "" {
 		n, err := asInt(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid up_mbps: %w", err)
+			return nil, fmt.Errorf("up_mbps 无效：%w", err)
 		}
 		if n > 0 {
 			out["up_mbps"] = n
@@ -323,7 +323,7 @@ func mapHysteria2(in store.InboundConfig) (map[string]any, error) {
 	if v, ok := in.Params["down_mbps"]; ok && v != nil && fmt.Sprint(v) != "" {
 		n, err := asInt(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid down_mbps: %w", err)
+			return nil, fmt.Errorf("down_mbps 无效：%w", err)
 		}
 		if n > 0 {
 			out["down_mbps"] = n
@@ -342,7 +342,7 @@ func mapTUIC(in store.InboundConfig) (map[string]any, error) {
 		return nil, err
 	}
 	if _, err := uuid.Parse(uid); err != nil {
-		return nil, fmt.Errorf("invalid UUID: %w", err)
+		return nil, fmt.Errorf("UUID 无效：%w", err)
 	}
 	password, err := requireString(in.Params, "password")
 	if err != nil {
@@ -370,7 +370,7 @@ func mapTUIC(in store.InboundConfig) (map[string]any, error) {
 		case "cubic", "new_reno", "bbr":
 			out["congestion_control"] = cc
 		default:
-			return nil, fmt.Errorf("invalid congestion_control %q", cc)
+			return nil, fmt.Errorf("congestion_control %q 无效", cc)
 		}
 	}
 	if v, ok := in.Params["zero_rtt_handshake"]; ok && v != nil {
@@ -419,16 +419,16 @@ func mapVMess(in store.InboundConfig) (map[string]any, error) {
 		return nil, err
 	}
 	if _, err := uuid.Parse(uid); err != nil {
-		return nil, fmt.Errorf("invalid UUID: %w", err)
+		return nil, fmt.Errorf("UUID 无效：%w", err)
 	}
 	alterID := 0
 	if v, ok := in.Params["alter_id"]; ok && v != nil && fmt.Sprint(v) != "" {
 		n, err := asInt(v)
 		if err != nil {
-			return nil, fmt.Errorf("invalid alter_id: %w", err)
+			return nil, fmt.Errorf("alter_id 无效：%w", err)
 		}
 		if n < 0 {
-			return nil, fmt.Errorf("alter_id must be >= 0")
+			return nil, fmt.Errorf("alter_id 必须大于或等于 0")
 		}
 		alterID = n
 	}
@@ -460,7 +460,7 @@ func mapVMess(in store.InboundConfig) (map[string]any, error) {
 		}
 		out["tls"] = tls
 	default:
-		return nil, fmt.Errorf("invalid tls_mode %q", tlsMode)
+		return nil, fmt.Errorf("tls_mode %q 无效", tlsMode)
 	}
 	return out, nil
 }
@@ -505,7 +505,7 @@ func buildTLS(params map[string]any, required bool) (map[string]any, error) {
 		}, nil
 	}
 	if required {
-		return nil, fmt.Errorf("missing TLS material (tls_cert_pem/tls_key_pem or tls_cert_path/tls_key_path)")
+		return nil, fmt.Errorf("缺少 TLS 材料（tls_cert_pem/tls_key_pem 或 tls_cert_path/tls_key_path）")
 	}
 	return map[string]any{"enabled": false}, nil
 }
@@ -516,14 +516,14 @@ func requireListenPort(params map[string]any) (listen string, port int, err erro
 		listen = "0.0.0.0"
 	}
 	if _, ok := params["port"]; !ok || params["port"] == nil {
-		return "", 0, fmt.Errorf("missing required field port")
+		return "", 0, fmt.Errorf("缺少必填字段 port")
 	}
 	port, err = asInt(params["port"])
 	if err != nil {
-		return "", 0, fmt.Errorf("invalid port: %w", err)
+		return "", 0, fmt.Errorf("端口无效：%w", err)
 	}
 	if port < 1 || port > 65535 {
-		return "", 0, fmt.Errorf("port out of range: %d", port)
+		return "", 0, fmt.Errorf("端口超出有效范围：%d", port)
 	}
 	return listen, port, nil
 }
@@ -531,14 +531,14 @@ func requireListenPort(params map[string]any) (listen string, port int, err erro
 func requireString(params map[string]any, key string) (string, error) {
 	v, ok := params[key]
 	if !ok || v == nil {
-		return "", fmt.Errorf("missing required field %s", key)
+		return "", fmt.Errorf("缺少必填字段 %s", key)
 	}
 	s, ok := v.(string)
 	if !ok {
-		return "", fmt.Errorf("field %s must be a string", key)
+		return "", fmt.Errorf("字段 %s 必须是字符串", key)
 	}
 	if strings.TrimSpace(s) == "" {
-		return "", fmt.Errorf("missing required field %s", key)
+		return "", fmt.Errorf("缺少必填字段 %s", key)
 	}
 	return s, nil
 }
@@ -573,7 +573,7 @@ func asInt(v any) (int, error) {
 	case string:
 		return strconv.Atoi(strings.TrimSpace(n))
 	default:
-		return 0, fmt.Errorf("cannot convert %T to int", v)
+		return 0, fmt.Errorf("无法将 %T 转换为整数", v)
 	}
 }
 

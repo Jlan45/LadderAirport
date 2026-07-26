@@ -562,7 +562,7 @@ func TestFleetFlow(t *testing.T) {
 	rpc := &mockRPC{applyOK: true, startOK: true, stopOK: true}
 	live := &mockLive{pingOK: true, metricsOK: true}
 
-	ts, client, st := newTestServer(t,
+	ts, client, _ := newTestServer(t,
 		func(_ context.Context, n store.Node, _ string) (batch.NodeRPC, error) {
 			return rpc, nil
 		},
@@ -630,29 +630,6 @@ func TestFleetFlow(t *testing.T) {
 	}
 	if install, _ := inst["install_command"].(string); install == "" {
 		t.Fatalf("install-command body = %v", inst)
-	}
-	if migration, _ := inst["migration_command"].(string); migration != "" {
-		t.Fatalf("new node must not receive migration command: %v", inst)
-	}
-
-	legacyNode, err := st.GetNode(nodeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyNode.PKIMigrationRequired = true
-	if err := st.UpdateNode(legacyNode); err != nil {
-		t.Fatal(err)
-	}
-	resp, inst = doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+nodeID+"/install-command", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("legacy install-command status = %d", resp.StatusCode)
-	}
-	migration, _ := inst["migration_command"].(string)
-	if migration == "" || !strings.Contains(migration, "migrate-agent-to-panel-pki.sh") {
-		t.Fatalf("migration command missing: %v", inst)
-	}
-	if install, _ := inst["install_command"].(string); install != "" {
-		t.Fatalf("legacy node must only receive migration command: %v", inst)
 	}
 
 	// Create inbound (shadowsocks).

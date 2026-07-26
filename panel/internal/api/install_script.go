@@ -10,7 +10,6 @@ import (
 
 const releaseDownloadBaseURL = "https://github.com/Jlan45/LadderAirport/releases"
 const defaultInstallScriptURL = releaseDownloadBaseURL + "/latest/download/install-agent.sh"
-const defaultPKIMigrationScriptURL = releaseDownloadBaseURL + "/latest/download/migrate-agent-to-panel-pki.sh"
 
 func releaseScriptURL(asset, version string) string {
 	version = strings.TrimSpace(version)
@@ -76,32 +75,6 @@ func buildInstallCommand(opts installCommandOpts) string {
 	if opts.Listen != "" {
 		b.WriteString(" LADDER_LISTEN=")
 		b.WriteString(shellSingleQuote(opts.Listen))
-	}
-	b.WriteString(" bash")
-	return b.String()
-}
-
-func buildPKIMigrationCommand(opts installCommandOpts) string {
-	var b strings.Builder
-	b.WriteString("curl -fsSL ")
-	b.WriteString(shellSingleQuote(releaseScriptURL("migrate-agent-to-panel-pki.sh", opts.AgentVersion)))
-	b.WriteString(" | sudo env LADDER_PANEL=")
-	b.WriteString(shellSingleQuote(strings.TrimRight(strings.TrimSpace(opts.PanelBaseURL), "/")))
-	b.WriteString(" LADDER_NODE_ID=")
-	b.WriteString(shellSingleQuote(opts.NodeID))
-	b.WriteString(" LADDER_ENROLL_TOKEN=")
-	b.WriteString(shellSingleQuote(opts.EnrollmentToken))
-	if opts.AgentVersion != "" && opts.AgentVersion != "latest" {
-		b.WriteString(" LADDER_VERSION=")
-		b.WriteString(shellSingleQuote(opts.AgentVersion))
-	}
-	if opts.GRPCPort > 0 {
-		b.WriteString(" LADDER_GRPC_PORT=")
-		b.WriteString(fmt.Sprintf("%d", opts.GRPCPort))
-	}
-	if opts.ReportAddress != "" {
-		b.WriteString(" LADDER_REPORT_ADDRESS=")
-		b.WriteString(shellSingleQuote(opts.ReportAddress))
 	}
 	b.WriteString(" bash")
 	return b.String()

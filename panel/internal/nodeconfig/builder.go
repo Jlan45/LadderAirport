@@ -35,7 +35,7 @@ func (b *Builder) Build(nodeID string) (Result, error) {
 // it to SQLite.
 func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Result, error) {
 	if b == nil || b.Store == nil {
-		return Result{}, fmt.Errorf("node config builder not configured")
+		return Result{}, fmt.Errorf("节点配置构建器尚未配置")
 	}
 	node, err := b.Store.GetNode(nodeID)
 	if err != nil {
@@ -60,13 +60,13 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 			}
 			in, err := b.Store.GetInbound(hop.InboundID)
 			if err != nil {
-				return Result{}, fmt.Errorf("chain %q hop %d: %w", chain.Name, i, err)
+				return Result{}, fmt.Errorf("代理链 %q 第 %d 跳：%w", chain.Name, i+1, err)
 			}
 			if !in.Enabled {
-				return Result{}, fmt.Errorf("chain %q hop %d inbound is disabled", chain.Name, i)
+				return Result{}, fmt.Errorf("代理链 %q 第 %d 跳的入站已禁用", chain.Name, i+1)
 			}
 			if byID[in.ID] {
-				return Result{}, fmt.Errorf("chain %q hop %d conflicts with standalone inbound %s", chain.Name, i, in.ID)
+				return Result{}, fmt.Errorf("代理链 %q 第 %d 跳与独立入站 %s 冲突", chain.Name, i+1, in.ID)
 			}
 			byID[in.ID] = true
 			inbounds = append(inbounds, *in)
@@ -79,7 +79,7 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 			}
 			outbound, err := subscription.SingboxOutbound(ep)
 			if err != nil {
-				return Result{}, fmt.Errorf("chain %q hop %d outbound: %w", chain.Name, i, err)
+				return Result{}, fmt.Errorf("代理链 %q 第 %d 跳的出站配置失败：%w", chain.Name, i+1, err)
 			}
 			outbound["tag"] = ChainOutboundTag(chain.ID, i)
 			if iface := strings.TrimSpace(node.EgressInterface); iface != "" {
@@ -123,7 +123,7 @@ func ChainOutboundTag(chainID string, position int) string {
 // ResolveHopEndpoint resolves the address and credentials used to reach a hop.
 func (b *Builder) ResolveHopEndpoint(chain store.ProxyChain, position int) (subscription.ProxyEndpoint, error) {
 	if position < 0 || position >= len(chain.Hops) {
-		return subscription.ProxyEndpoint{}, fmt.Errorf("chain %q hop out of range: %d", chain.Name, position)
+		return subscription.ProxyEndpoint{}, fmt.Errorf("代理链 %q 的跳点位置超出范围：%d", chain.Name, position+1)
 	}
 	hop := chain.Hops[position]
 	node, err := b.Store.GetNode(hop.NodeID)
@@ -142,13 +142,13 @@ func (b *Builder) ResolveHopEndpoint(chain store.ProxyChain, position int) (subs
 		address = strings.TrimSpace(node.Address)
 	}
 	if address == "" {
-		return subscription.ProxyEndpoint{}, fmt.Errorf("chain %q hop %d has no dial address", chain.Name, position)
+		return subscription.ProxyEndpoint{}, fmt.Errorf("代理链 %q 第 %d 跳没有拨号地址", chain.Name, position+1)
 	}
 	port := hop.DialPort
 	if port == 0 {
 		listenPort, err := paramInt(in.Params, "port")
 		if err != nil || listenPort < 1 || listenPort > 65535 {
-			return subscription.ProxyEndpoint{}, fmt.Errorf("chain %q hop %d has invalid inbound port", chain.Name, position)
+			return subscription.ProxyEndpoint{}, fmt.Errorf("代理链 %q 第 %d 跳的入站端口无效", chain.Name, position+1)
 		}
 		port = store.MapPublicPort(node.PortMappings, listenPort)
 	}
@@ -168,7 +168,7 @@ func (b *Builder) ResolveHopEndpoint(chain store.ProxyChain, position int) (subs
 func paramInt(params map[string]any, key string) (int, error) {
 	value, ok := params[key]
 	if !ok {
-		return 0, fmt.Errorf("missing %s", key)
+		return 0, fmt.Errorf("缺少 %s", key)
 	}
 	switch n := value.(type) {
 	case int:
@@ -181,6 +181,6 @@ func paramInt(params map[string]any, key string) (int, error) {
 		v, err := n.Int64()
 		return int(v), err
 	default:
-		return 0, fmt.Errorf("invalid %s", key)
+		return 0, fmt.Errorf("%s 无效", key)
 	}
 }

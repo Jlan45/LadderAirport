@@ -29,7 +29,7 @@ func parseShareLinks(raw []byte) ([]ProxyEndpoint, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("share links: no supported proxies")
+		return nil, fmt.Errorf("分享链接中没有受支持的代理")
 	}
 	return out, nil
 }
@@ -37,11 +37,11 @@ func parseShareLinks(raw []byte) ([]ProxyEndpoint, error) {
 func parseOneShareURI(raw string) (ProxyEndpoint, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ProxyEndpoint{}, fmt.Errorf("empty")
+		return ProxyEndpoint{}, fmt.Errorf("链接为空")
 	}
 	scheme, _, ok := strings.Cut(raw, "://")
 	if !ok {
-		return ProxyEndpoint{}, fmt.Errorf("no scheme")
+		return ProxyEndpoint{}, fmt.Errorf("链接缺少协议方案")
 	}
 	switch strings.ToLower(scheme) {
 	case "ss":
@@ -59,7 +59,7 @@ func parseOneShareURI(raw string) (ProxyEndpoint, error) {
 	case "anytls":
 		return parseAnyTLSURI(raw)
 	default:
-		return ProxyEndpoint{}, fmt.Errorf("unsupported scheme %q", scheme)
+		return ProxyEndpoint{}, fmt.Errorf("不支持链接方案 %q", scheme)
 	}
 }
 
@@ -101,13 +101,13 @@ func parseSSURI(raw string) (ProxyEndpoint, error) {
 		}
 		decoded, ok := decodeBase64Loose(body)
 		if !ok {
-			return ProxyEndpoint{}, fmt.Errorf("ss: bad base64")
+			return ProxyEndpoint{}, fmt.Errorf("Shadowsocks Base64 无效")
 		}
 		// method:password@host:port
 		s := string(decoded)
 		at := strings.LastIndex(s, "@")
 		if at < 0 {
-			return ProxyEndpoint{}, fmt.Errorf("ss: bad legacy body")
+			return ProxyEndpoint{}, fmt.Errorf("Shadowsocks 旧格式内容无效")
 		}
 		method, password, _ = strings.Cut(s[:at], ":")
 		hostport := s[at+1:]
@@ -119,7 +119,7 @@ func parseSSURI(raw string) (ProxyEndpoint, error) {
 		port, _ = strconv.Atoi(p)
 	}
 	if method == "" || password == "" || host == "" || port < 1 {
-		return ProxyEndpoint{}, fmt.Errorf("ss: incomplete")
+		return ProxyEndpoint{}, fmt.Errorf("Shadowsocks 链接不完整")
 	}
 	if name == "" {
 		name = fmt.Sprintf("ss-%s-%d", host, port)
@@ -145,20 +145,20 @@ func parseVMessURI(raw string) (ProxyEndpoint, error) {
 	}
 	decoded, ok := decodeBase64Loose(body)
 	if !ok {
-		return ProxyEndpoint{}, fmt.Errorf("vmess: bad base64")
+		return ProxyEndpoint{}, fmt.Errorf("VMess Base64 无效")
 	}
 	var m map[string]any
 	if err := json.Unmarshal(decoded, &m); err != nil {
-		return ProxyEndpoint{}, fmt.Errorf("vmess json: %w", err)
+		return ProxyEndpoint{}, fmt.Errorf("解析 VMess JSON 失败：%w", err)
 	}
 	host := anyToString(m["add"])
 	port, ok := anyToInt(m["port"])
 	if !ok || host == "" || port < 1 {
-		return ProxyEndpoint{}, fmt.Errorf("vmess: missing host/port")
+		return ProxyEndpoint{}, fmt.Errorf("VMess 缺少服务器地址或端口")
 	}
 	uid := anyToString(m["id"])
 	if uid == "" {
-		return ProxyEndpoint{}, fmt.Errorf("vmess: missing id")
+		return ProxyEndpoint{}, fmt.Errorf("VMess 缺少 ID")
 	}
 	name := firstNonEmpty(anyToString(m["ps"]), fmt.Sprintf("vmess-%s-%d", host, port))
 	params := map[string]any{"uuid": uid}
@@ -195,7 +195,7 @@ func parseVLESSURI(raw string) (ProxyEndpoint, error) {
 	host := u.Hostname()
 	port, _ := strconv.Atoi(u.Port())
 	if uid == "" || host == "" || port < 1 {
-		return ProxyEndpoint{}, fmt.Errorf("vless: incomplete")
+		return ProxyEndpoint{}, fmt.Errorf("VLESS 链接不完整")
 	}
 	q := u.Query()
 	params := map[string]any{"uuid": uid}
@@ -248,7 +248,7 @@ func parseTrojanURI(raw string) (ProxyEndpoint, error) {
 	host := u.Hostname()
 	port, _ := strconv.Atoi(u.Port())
 	if password == "" || host == "" || port < 1 {
-		return ProxyEndpoint{}, fmt.Errorf("trojan: incomplete")
+		return ProxyEndpoint{}, fmt.Errorf("Trojan 链接不完整")
 	}
 	params := map[string]any{"password": password}
 	if sn := firstNonEmpty(u.Query().Get("sni"), u.Query().Get("peer")); sn != "" {
@@ -280,7 +280,7 @@ func parseHysteria2URI(raw string) (ProxyEndpoint, error) {
 	host := u.Hostname()
 	port, _ := strconv.Atoi(u.Port())
 	if password == "" || host == "" || port < 1 {
-		return ProxyEndpoint{}, fmt.Errorf("hysteria2: incomplete")
+		return ProxyEndpoint{}, fmt.Errorf("Hysteria2 链接不完整")
 	}
 	params := map[string]any{"password": password}
 	if sn := u.Query().Get("sni"); sn != "" {
@@ -313,7 +313,7 @@ func parseTUICURI(raw string) (ProxyEndpoint, error) {
 	host := u.Hostname()
 	port, _ := strconv.Atoi(u.Port())
 	if uid == "" || password == "" || host == "" || port < 1 {
-		return ProxyEndpoint{}, fmt.Errorf("tuic: incomplete")
+		return ProxyEndpoint{}, fmt.Errorf("TUIC 链接不完整")
 	}
 	params := map[string]any{"uuid": uid, "password": password}
 	q := u.Query()
@@ -348,7 +348,7 @@ func parseAnyTLSURI(raw string) (ProxyEndpoint, error) {
 	host := u.Hostname()
 	port, _ := strconv.Atoi(u.Port())
 	if password == "" || host == "" || port < 1 {
-		return ProxyEndpoint{}, fmt.Errorf("anytls: incomplete")
+		return ProxyEndpoint{}, fmt.Errorf("AnyTLS 链接不完整")
 	}
 	params := map[string]any{"password": password}
 	if sn := u.Query().Get("sni"); sn != "" {

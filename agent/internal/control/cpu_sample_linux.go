@@ -20,17 +20,17 @@ func processCPUTimeLinux() (time.Duration, error) {
 	// comm may contain spaces/parentheses — find last ')'
 	i := strings.LastIndex(s, ")")
 	if i < 0 || i+2 >= len(s) {
-		return 0, fmt.Errorf("parse /proc/self/stat")
+		return 0, fmt.Errorf("解析 /proc/self/stat 失败")
 	}
 	fields := strings.Fields(s[i+2:])
 	// fields[0] is state; utime=fields[11], stime=fields[12] (0-based after comm)
 	if len(fields) < 13 {
-		return 0, fmt.Errorf("short /proc/self/stat")
+		return 0, fmt.Errorf("/proc/self/stat 字段不完整")
 	}
 	utime, err1 := strconv.ParseUint(fields[11], 10, 64)
 	stime, err2 := strconv.ParseUint(fields[12], 10, 64)
 	if err1 != nil || err2 != nil {
-		return 0, fmt.Errorf("parse cpu ticks")
+		return 0, fmt.Errorf("解析 CPU 时钟计数失败")
 	}
 	// USER_HZ is typically 100 on Linux
 	const userHz = 100

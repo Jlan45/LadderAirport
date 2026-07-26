@@ -46,7 +46,7 @@ func renderOneShareURI(ep ProxyEndpoint) (string, error) {
 	case "anytls":
 		return renderAnyTLSURI(ep)
 	default:
-		return "", fmt.Errorf("unsupported protocol %q", ep.Protocol)
+		return "", fmt.Errorf("不支持协议 %q", ep.Protocol)
 	}
 }
 
@@ -61,7 +61,7 @@ func renderSSURI(ep ProxyEndpoint) (string, error) {
 	method, _ := paramString(ep.Params, "method")
 	password, _ := paramString(ep.Params, "password")
 	if method == "" || password == "" {
-		return "", fmt.Errorf("ss: missing method or password")
+		return "", fmt.Errorf("Shadowsocks 缺少加密方法或密码")
 	}
 	userInfo := base64.RawURLEncoding.EncodeToString([]byte(method + ":" + password))
 	hp := formatHostPort(ep.Server, ep.Port)
@@ -71,7 +71,7 @@ func renderSSURI(ep ProxyEndpoint) (string, error) {
 func renderVMessURI(ep ProxyEndpoint) (string, error) {
 	uid, _ := paramString(ep.Params, "uuid")
 	if uid == "" {
-		return "", fmt.Errorf("vmess: missing uuid")
+		return "", fmt.Errorf("VMess 缺少 UUID")
 	}
 	alterID := 0
 	if n, err := paramInt(ep.Params, "alter_id"); err == nil && n >= 0 {
@@ -109,7 +109,7 @@ func renderVMessURI(ep ProxyEndpoint) (string, error) {
 func renderVLESSURI(ep ProxyEndpoint) (string, error) {
 	uid, _ := paramString(ep.Params, "uuid")
 	if uid == "" {
-		return "", fmt.Errorf("vless: missing uuid")
+		return "", fmt.Errorf("VLESS 缺少 UUID")
 	}
 	q := url.Values{}
 	q.Set("type", "tcp")
@@ -144,7 +144,7 @@ func renderVLESSURI(ep ProxyEndpoint) (string, error) {
 func renderTrojanURI(ep ProxyEndpoint) (string, error) {
 	password, _ := paramString(ep.Params, "password")
 	if password == "" {
-		return "", fmt.Errorf("trojan: missing password")
+		return "", fmt.Errorf("Trojan 缺少密码")
 	}
 	q := url.Values{}
 	if sni := paramStringMust(ep.Params, "server_name"); sni != "" {
@@ -162,7 +162,7 @@ func renderTrojanURI(ep ProxyEndpoint) (string, error) {
 func renderHysteria2URI(ep ProxyEndpoint) (string, error) {
 	password, _ := paramString(ep.Params, "password")
 	if password == "" {
-		return "", fmt.Errorf("hysteria2: missing password")
+		return "", fmt.Errorf("Hysteria2 缺少密码")
 	}
 	q := url.Values{}
 	if sni := paramStringMust(ep.Params, "server_name"); sni != "" {
@@ -181,7 +181,7 @@ func renderTUICURI(ep ProxyEndpoint) (string, error) {
 	uid, _ := paramString(ep.Params, "uuid")
 	password, _ := paramString(ep.Params, "password")
 	if uid == "" || password == "" {
-		return "", fmt.Errorf("tuic: missing uuid or password")
+		return "", fmt.Errorf("TUIC 缺少 UUID 或密码")
 	}
 	q := url.Values{}
 	if sni := paramStringMust(ep.Params, "server_name"); sni != "" {
@@ -202,7 +202,7 @@ func renderTUICURI(ep ProxyEndpoint) (string, error) {
 func renderAnyTLSURI(ep ProxyEndpoint) (string, error) {
 	password, _ := paramString(ep.Params, "password")
 	if password == "" {
-		return "", fmt.Errorf("anytls: missing password")
+		return "", fmt.Errorf("AnyTLS 缺少密码")
 	}
 	q := url.Values{}
 	if sni := paramStringMust(ep.Params, "server_name"); sni != "" {

@@ -20,9 +20,8 @@ type Node struct {
 	PKICABundlePEM string   `json:"-"`
 	// PKICertSerial binds Panel dialing to the currently active Panel-issued
 	// Agent server certificate.
-	PKICertSerial        string `json:"pki_cert_serial,omitempty"`
-	PKINotAfter          int64  `json:"pki_not_after_unix,omitempty"`
-	PKIMigrationRequired bool   `json:"pki_migration_required,omitempty"`
+	PKICertSerial string `json:"pki_cert_serial,omitempty"`
+	PKINotAfter   int64  `json:"pki_not_after_unix,omitempty"`
 	// PublicAddress is the client-facing host for subscriptions (Clash/sing-box server).
 	// Empty means fall back to Address. Host only — client ports come from inbound params
 	// or PortMappings when listen/public ports differ.

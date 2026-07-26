@@ -50,14 +50,14 @@ type UpgradeResult struct {
 // replaces its own executable (no root / NoNewPrivileges).
 func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult, error) {
 	if runtime.GOOS != "linux" {
-		return nil, fmt.Errorf("remote upgrade is only supported on linux (got %s)", runtime.GOOS)
+		return nil, fmt.Errorf("远程升级仅支持 Linux，当前系统为 %s", runtime.GOOS)
 	}
 	dir := strings.TrimSpace(req.UpgradeDir)
 	if dir == "" {
 		dir = DefaultUpgradeDir
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create upgrade dir: %w", err)
+		return nil, fmt.Errorf("创建升级目录失败：%w", err)
 	}
 
 	client := req.HTTPClient
@@ -111,13 +111,13 @@ func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult,
 	if want := strings.TrimSpace(strings.ToLower(req.SHA256)); want != "" {
 		if sum != want {
 			_ = os.Remove(tmpPath)
-			return nil, fmt.Errorf("sha256 mismatch: got %s want %s", sum, want)
+			return nil, fmt.Errorf("SHA256 校验不匹配：实际 %s，预期 %s", sum, want)
 		}
 	} else if resolvedVersion != "" && resolvedVersion != "latest" {
 		// Best-effort: verify against SHA256SUMS.txt when present.
 		if err := verifyAgainstReleaseSums(ctx, client, repo, resolvedVersion, asset, sum); err != nil {
 			// Soft-fail only when sums file missing; hard-fail on mismatch.
-			if !strings.Contains(err.Error(), "no checksum file") {
+			if !strings.Contains(err.Error(), "未找到校验文件") {
 				_ = os.Remove(tmpPath)
 				return nil, err
 			}
@@ -126,12 +126,12 @@ func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult,
 
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
 		_ = os.Remove(tmpPath)
-		return nil, fmt.Errorf("chmod staged binary: %w", err)
+		return nil, fmt.Errorf("设置待升级二进制权限失败：%w", err)
 	}
 	// Atomic-ish rename into place.
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
-		return nil, fmt.Errorf("stage binary: %w", err)
+		return nil, fmt.Errorf("暂存升级二进制失败：%w", err)
 	}
 
 	meta := map[string]any{
@@ -148,14 +148,14 @@ func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult,
 	// Marker file triggers the systemd path unit (PathExists).
 	marker := fmt.Sprintf("version=%s\nsha256=%s\nsource=%s\n", resolvedVersion, sum, url)
 	if err := os.WriteFile(readyPath, []byte(marker), 0o644); err != nil {
-		return nil, fmt.Errorf("write ready marker: %w", err)
+		return nil, fmt.Errorf("写入升级就绪标记失败：%w", err)
 	}
 
 	return &UpgradeResult{
 		Version:     resolvedVersion,
 		StagedPath:  finalPath,
 		DownloadURL: url,
-		Message:     "staged; waiting for upgrade helper to apply and restart",
+		Message:     "升级文件已暂存，正在等待升级助手替换并重启",
 	}, nil
 }
 
@@ -173,7 +173,7 @@ func resolveReleaseURL(ctx context.Context, client *http.Client, repo, version s
 		req.Header.Set("User-Agent", "LadderAirport-Agent")
 		resp, err := client.Do(req)
 		if err != nil {
-			return "", "", fmt.Errorf("fetch latest release: %w", err)
+			return "", "", fmt.Errorf("获取最新 Release 失败：%w", err)
 		}
 		defer resp.Body.Close()
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
@@ -181,7 +181,7 @@ func resolveReleaseURL(ctx context.Context, client *http.Client, repo, version s
 			return "", "", err
 		}
 		if resp.StatusCode != http.StatusOK {
-			return "", "", fmt.Errorf("github latest release: HTTP %d", resp.StatusCode)
+			return "", "", fmt.Errorf("获取 GitHub 最新 Release 失败：HTTP %d", resp.StatusCode)
 		}
 		var parsed struct {
 			TagName string `json:"tag_name"`
@@ -200,7 +200,7 @@ func resolveReleaseURL(ctx context.Context, client *http.Client, repo, version s
 			}
 		}
 		if tag == "" {
-			return "", "", fmt.Errorf("latest release has no tag_name")
+			return "", "", fmt.Errorf("最新 Release 缺少 tag_name")
 		}
 		return fmt.Sprintf("%s/%s/releases/download/%s/%s", githubReleaseBase, repo, tag, asset), tag, nil
 	}
@@ -217,11 +217,11 @@ func downloadFile(ctx context.Context, client *http.Client, url, dest string) er
 	req.Header.Set("User-Agent", "LadderAirport-Agent")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("download %s: %w", url, err)
+		return fmt.Errorf("下载 %s 失败：%w", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
+		return fmt.Errorf("下载 %s 失败：HTTP %d", url, resp.StatusCode)
 	}
 	f, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {
@@ -229,7 +229,7 @@ func downloadFile(ctx context.Context, client *http.Client, url, dest string) er
 	}
 	defer f.Close()
 	if _, err := io.Copy(f, io.LimitReader(resp.Body, 256<<20)); err != nil {
-		return fmt.Errorf("write download: %w", err)
+		return fmt.Errorf("写入下载文件失败：%w", err)
 	}
 	return f.Close()
 }
@@ -256,14 +256,14 @@ func verifyAgainstReleaseSums(ctx context.Context, client *http.Client, repo, ta
 	req.Header.Set("User-Agent", "LadderAirport-Agent")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("no checksum file: %w", err)
+		return fmt.Errorf("未找到校验文件：%w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("no checksum file")
+		return fmt.Errorf("未找到校验文件")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("checksum file HTTP %d", resp.StatusCode)
+		return fmt.Errorf("获取校验文件失败：HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -287,10 +287,10 @@ func verifyAgainstReleaseSums(ctx context.Context, client *http.Client, repo, ta
 		}
 	}
 	if want == "" {
-		return fmt.Errorf("no checksum file entry for %s", asset)
+		return fmt.Errorf("校验文件中没有 %s 的记录", asset)
 	}
 	if want != got {
-		return fmt.Errorf("sha256 mismatch vs release sums: got %s want %s", got, want)
+		return fmt.Errorf("SHA256 与 Release 校验值不匹配：实际 %s，预期 %s", got, want)
 	}
 	return nil
 }

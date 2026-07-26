@@ -67,7 +67,7 @@ wait_http() {
     fi
     sleep 0.25
   done
-  echo "ERROR: timed out waiting for ${url}" >&2
+  echo "错误：等待 ${url} 超时" >&2
   return 1
 }
 
@@ -82,7 +82,7 @@ wait_tcp() {
     fi
     sleep 0.25
   done
-  echo "ERROR: timed out waiting for ${host}:${port}" >&2
+  echo "错误：等待 ${host}:${port} 超时" >&2
   return 1
 }
 
@@ -117,11 +117,11 @@ wait_http "${PANEL_URL}/api/v1/auth/login"
 echo "==> embedded SPA (single binary web)"
 SPA_CODE="$(curl -s -o "${TMPDIR}/index.html" -w '%{http_code}' -b "${COOKIE_JAR}" "${PANEL_URL}/")"
 if [[ "${SPA_CODE}" != "200" ]]; then
-  echo "ERROR: GET / returned HTTP ${SPA_CODE} (want 200 for embedded SPA)" >&2
+  echo "错误：GET / 返回 HTTP ${SPA_CODE}（内嵌前端应返回 200）" >&2
   exit 1
 fi
 if ! grep -qiE '<!doctype html|<html' "${TMPDIR}/index.html"; then
-  echo "ERROR: GET / did not look like HTML" >&2
+  echo "错误：GET / 返回内容不是 HTML" >&2
   head -c 200 "${TMPDIR}/index.html" >&2 || true
   exit 1
 fi
@@ -148,7 +148,7 @@ else:
     print(0)
 ' "${TMPL_BODY}")"
 if [[ "${TMPL_COUNT}" -lt 4 ]]; then
-  echo "ERROR: expected >=4 templates, got ${TMPL_COUNT}: ${TMPL_BODY}" >&2
+  echo "错误：协议模板应不少于 4 个，实际为 ${TMPL_COUNT}：${TMPL_BODY}" >&2
   exit 1
 fi
 echo "templates: count=${TMPL_COUNT}"
@@ -202,7 +202,7 @@ echo "apply: ${APPLY_BODY}"
 
 TASK_STATUS="$(json_get "${APPLY_BODY}" 'obj.get("status","")')"
 if [[ "${TASK_STATUS}" != "success" ]]; then
-  echo "ERROR: apply task status=${TASK_STATUS} (want success)" >&2
+  echo "错误：配置下发任务状态为 ${TASK_STATUS}（应为 success）" >&2
   echo "${APPLY_BODY}" >&2
   echo "--- agent log ---" >&2
   cat "${AGENT_LOG}" >&2 || true
@@ -221,7 +221,7 @@ for r in obj.get("results") or []:
     if not r.get("ok"):
         sys.exit(2)
 ' "${APPLY_BODY}"; then
-  echo "ERROR: apply results not all ok" >&2
+  echo "错误：配置下发结果并非全部成功" >&2
   echo "${APPLY_BODY}" >&2
   exit 1
 fi
@@ -245,7 +245,7 @@ for r in obj.get("results") or []:
     if not r.get("ok"):
         sys.exit(3)
 ' "${BATCH_BODY}"; then
-  echo "ERROR: batch apply by labels failed" >&2
+  echo "错误：按标签批量下发失败" >&2
   echo "${BATCH_BODY}" >&2
   echo "--- agent log ---" >&2
   cat "${AGENT_LOG}" >&2 || true
@@ -254,13 +254,13 @@ for r in obj.get("results") or []:
   exit 1
 fi
 
-echo "==> wrong agent token must fail probe"
+echo "==> 验证错误 Agent 令牌必须导致探测失败"
 BAD_PROBE_CODE="$(curl -s -o "${TMPDIR}/bad-probe.json" -w '%{http_code}' \
   -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
   -X POST \
   "${PANEL_URL}/api/v1/nodes/${BAD_NODE_ID}/probe")"
 if [[ "${BAD_PROBE_CODE}" == "200" ]]; then
-  echo "ERROR: probe with wrong agent token unexpectedly succeeded" >&2
+  echo "错误：使用错误 Agent 令牌探测时意外成功" >&2
   cat "${TMPDIR}/bad-probe.json" >&2 || true
   exit 1
 fi

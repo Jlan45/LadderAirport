@@ -30,7 +30,7 @@ type SourceStore interface {
 type Aggregator struct {
 	Store SourceStore
 
-	mu    sync.Mutex
+	mu       sync.Mutex
 	inflight map[string]*flight
 }
 
@@ -75,7 +75,7 @@ func (a *Aggregator) EndpointsForSources(ctx context.Context, sources []store.Ex
 		}
 		parsed, detected, err := DetectAndParse(body)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s: parse: %v", src.Name, err))
+			warnings = append(warnings, fmt.Sprintf("%s：解析失败：%v", src.Name, err))
 			continue
 		}
 		if kind == "" {
@@ -109,9 +109,9 @@ func (a *Aggregator) bodyForSource(ctx context.Context, src store.ExternalSource
 	// Never fetched or beyond grace — sync refresh.
 	if err := a.RefreshSource(ctx, src.ID); err != nil {
 		if src.CachedBody != "" {
-			return []byte(src.CachedBody), src.ContentType, fmt.Sprintf("refresh failed, using stale: %v", err)
+			return []byte(src.CachedBody), src.ContentType, fmt.Sprintf("刷新失败，正在使用旧缓存：%v", err)
 		}
-		return nil, "", fmt.Sprintf("refresh failed: %v", err)
+		return nil, "", fmt.Sprintf("刷新失败：%v", err)
 	}
 	// Re-read after refresh.
 	if a.Store != nil {
@@ -119,14 +119,14 @@ func (a *Aggregator) bodyForSource(ctx context.Context, src store.ExternalSource
 			return []byte(updated.CachedBody), updated.ContentType, ""
 		}
 	}
-	return nil, "", "refresh produced empty cache"
+	return nil, "", "刷新结果为空，未更新缓存"
 }
 
 // RefreshSource fetches and parses a source, updating the cache.
 // Concurrent calls for the same id coalesce.
 func (a *Aggregator) RefreshSource(ctx context.Context, id string) error {
 	if a == nil || a.Store == nil {
-		return fmt.Errorf("aggregator not configured")
+		return fmt.Errorf("订阅聚合器尚未配置")
 	}
 	// singleflight
 	a.mu.Lock()
@@ -171,7 +171,7 @@ func (a *Aggregator) doRefresh(ctx context.Context, id string) error {
 		return err
 	}
 	if len(eps) == 0 {
-		err = fmt.Errorf("parsed 0 proxies")
+		err = fmt.Errorf("未解析出任何代理")
 		_ = a.Store.SaveExternalSourceCache(id, src.CachedBody, src.ContentType, src.CachedProxyCount, now, src.LastSuccessUnix, err.Error())
 		return err
 	}
@@ -206,7 +206,7 @@ func (a *Aggregator) refreshDue(ctx context.Context) {
 	}
 	list, err := a.Store.ListExternalSources()
 	if err != nil {
-		log.Printf("external-source refresh: list: %v", err)
+		log.Printf("刷新外部源：查询列表失败：%v", err)
 		return
 	}
 	now := time.Now().Unix()
@@ -229,7 +229,7 @@ func (a *Aggregator) refreshDue(ctx context.Context) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			if err := a.RefreshSource(ctx, srcID); err != nil {
-				log.Printf("external-source refresh %s: %v", srcID, err)
+				log.Printf("刷新外部源 %s 失败：%v", srcID, err)
 			}
 		}()
 	}

@@ -35,7 +35,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	var body putSettingsBody
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	if body.DefaultAgentToken != nil {
@@ -43,14 +43,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.GRPCTimeoutSec != nil {
 		if *body.GRPCTimeoutSec <= 0 {
-			writeError(w, http.StatusBadRequest, "grpc_timeout_sec must be positive")
+			writeError(w, http.StatusBadRequest, "grpc_timeout_sec 必须为正数")
 			return
 		}
 		st.GRPCTimeoutSec = *body.GRPCTimeoutSec
 	}
 	if body.MaxConcurrency != nil {
 		if *body.MaxConcurrency <= 0 {
-			writeError(w, http.StatusBadRequest, "max_concurrency must be positive")
+			writeError(w, http.StatusBadRequest, "max_concurrency 必须为正数")
 			return
 		}
 		st.MaxConcurrency = *body.MaxConcurrency
@@ -64,28 +64,28 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if body.ChainProbeURL != nil {
 		url := strings.TrimSpace(*body.ChainProbeURL)
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-			writeError(w, http.StatusBadRequest, "chain_probe_url must use http or https")
+			writeError(w, http.StatusBadRequest, "chain_probe_url 必须使用 HTTP 或 HTTPS")
 			return
 		}
 		st.ChainProbeURL = url
 	}
 	if body.ChainProbeIntervalSec != nil {
 		if *body.ChainProbeIntervalSec < 10 {
-			writeError(w, http.StatusBadRequest, "chain_probe_interval_sec must be at least 10")
+			writeError(w, http.StatusBadRequest, "chain_probe_interval_sec 不能小于 10")
 			return
 		}
 		st.ChainProbeIntervalSec = *body.ChainProbeIntervalSec
 	}
 	if body.ChainProbeTimeoutSec != nil {
 		if *body.ChainProbeTimeoutSec < 1 || *body.ChainProbeTimeoutSec > 60 {
-			writeError(w, http.StatusBadRequest, "chain_probe_timeout_sec must be 1..60")
+			writeError(w, http.StatusBadRequest, "chain_probe_timeout_sec 必须在 1 到 60 之间")
 			return
 		}
 		st.ChainProbeTimeoutSec = *body.ChainProbeTimeoutSec
 	}
 	if body.NewPassword != nil {
 		if *body.NewPassword == "" {
-			writeError(w, http.StatusBadRequest, "new_password must not be empty")
+			writeError(w, http.StatusBadRequest, "new_password 不能为空")
 			return
 		}
 		hash, err := HashPassword(*body.NewPassword)

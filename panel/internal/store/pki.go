@@ -13,7 +13,7 @@ import (
 // SHA-256 digest is persisted.
 func (s *Store) CreatePKIEnrollmentToken(nodeID string, ttl time.Duration) (string, error) {
 	if nodeID == "" {
-		return "", fmt.Errorf("node id required")
+		return "", fmt.Errorf("必须提供节点 ID")
 	}
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
@@ -31,7 +31,7 @@ func (s *Store) CreatePKIEnrollmentToken(nodeID string, ttl time.Duration) (stri
 		VALUES (?, ?, ?, 0, ?)`,
 		hex.EncodeToString(sum[:]), nodeID, time.Now().Add(ttl).Unix(), now,
 	); err != nil {
-		return "", fmt.Errorf("create enrollment token: %w", err)
+		return "", fmt.Errorf("创建注册令牌失败：%w", err)
 	}
 	return token, nil
 }
@@ -47,7 +47,7 @@ func (s *Store) ConsumePKIEnrollmentToken(nodeID, token string) (bool, error) {
 		now, hex.EncodeToString(sum[:]), nodeID, now,
 	)
 	if err != nil {
-		return false, fmt.Errorf("consume enrollment token: %w", err)
+		return false, fmt.Errorf("使用注册令牌失败：%w", err)
 	}
 	n, _ := res.RowsAffected()
 	return n == 1, nil
@@ -57,7 +57,7 @@ func (s *Store) ConsumePKIEnrollmentToken(nodeID, token string) (bool, error) {
 // retires the previous Agent certificate and binds the node to the new serial.
 func (s *Store) ReplaceActivePKICertificate(cert *PKICertificate, caBundle string) error {
 	if cert == nil || cert.Serial == "" || cert.NodeID == "" {
-		return fmt.Errorf("certificate serial and node id required")
+		return fmt.Errorf("必须提供证书序列号和节点 ID")
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *Store) ReplaceActivePKICertificate(cert *PKICertificate, caBundle strin
 		 WHERE node_id = ? AND profile = 'agent-server' AND status = 'active'`,
 		cert.NodeID,
 	); err != nil {
-		return fmt.Errorf("retire active certificate: %w", err)
+		return fmt.Errorf("停用当前证书失败：%w", err)
 	}
 	if _, err := tx.Exec(`
 		INSERT INTO pki_certificates (
@@ -82,7 +82,7 @@ func (s *Store) ReplaceActivePKICertificate(cert *PKICertificate, caBundle strin
 		cert.Status, cert.RevokedAtUnix, cert.RevokeReason, cert.CertPEM,
 		cert.CreatedAtUnix,
 	); err != nil {
-		return fmt.Errorf("insert certificate: %w", err)
+		return fmt.Errorf("保存证书失败：%w", err)
 	}
 	if _, err := tx.Exec(`
 		UPDATE nodes
@@ -91,27 +91,9 @@ func (s *Store) ReplaceActivePKICertificate(cert *PKICertificate, caBundle strin
 		WHERE id = ?`,
 		caBundle, cert.Serial, cert.NotAfterUnix, nowUnix(), cert.NodeID,
 	); err != nil {
-		return fmt.Errorf("bind node certificate: %w", err)
+		return fmt.Errorf("绑定节点证书失败：%w", err)
 	}
 	return tx.Commit()
-}
-
-// CompletePKIMigration clears the one-time migration marker only when the
-// certificate that the migration script activated is still current.
-func (s *Store) CompletePKIMigration(nodeID, serial string) error {
-	res, err := s.db.Exec(`
-		UPDATE nodes SET pki_migration_required = 0, updated_at_unix = ?
-		WHERE id = ? AND pki_cert_serial = ? AND pki_migration_required = 1`,
-		nowUnix(), nodeID, serial,
-	)
-	if err != nil {
-		return fmt.Errorf("complete PKI migration: %w", err)
-	}
-	changed, _ := res.RowsAffected()
-	if changed != 1 {
-		return fmt.Errorf("PKI migration certificate is not current")
-	}
-	return nil
 }
 
 func scanPKICertificate(row interface{ Scan(...any) error }) (*PKICertificate, error) {
@@ -136,20 +118,20 @@ func (s *Store) ListPKICertificates() ([]PKICertificate, error) {
 		WHERE status = 'active' AND not_after_unix < ?`, now)
 	_, _ = s.db.Exec(`
 		UPDATE nodes SET pki_cert_serial = '', pki_not_after_unix = 0,
-			status = 'unauthorized', last_error = 'management certificate expired',
+			status = 'unauthorized', last_error = '管理证书已过期',
 			updated_at_unix = ?
 		WHERE pki_cert_serial != '' AND pki_not_after_unix < ?`, now, now)
 	rows, err := s.db.Query(`SELECT ` + pkiCertificateCols + `
 		FROM pki_certificates ORDER BY created_at_unix DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("list pki certificates: %w", err)
+		return nil, fmt.Errorf("查询 PKI 证书列表失败：%w", err)
 	}
 	defer rows.Close()
 	out := []PKICertificate{}
 	for rows.Next() {
 		c, err := scanPKICertificate(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan pki certificate: %w", err)
+			return nil, fmt.Errorf("读取 PKI 证书记录失败：%w", err)
 		}
 		c.CertPEM = ""
 		out = append(out, *c)
@@ -163,10 +145,10 @@ func (s *Store) GetPKICertificate(serial string) (*PKICertificate, error) {
 		serial,
 	))
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("pki certificate not found: %s", serial)
+		return nil, fmt.Errorf("PKI 证书不存在：%s", serial)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get pki certificate: %w", err)
+		return nil, fmt.Errorf("读取 PKI 证书失败：%w", err)
 	}
 	return c, nil
 }
@@ -180,7 +162,7 @@ func (s *Store) RevokePKICertificate(serial, reason string) error {
 	var nodeID string
 	if err := tx.QueryRow(`SELECT node_id FROM pki_certificates WHERE serial = ?`, serial).Scan(&nodeID); err != nil {
 		if err == sql.ErrNoRows {
-			return fmt.Errorf("pki certificate not found: %s", serial)
+			return fmt.Errorf("PKI 证书不存在：%s", serial)
 		}
 		return err
 	}
@@ -190,17 +172,17 @@ func (s *Store) RevokePKICertificate(serial, reason string) error {
 		SET status = 'revoked', revoked_at_unix = ?, revoke_reason = ?
 		WHERE serial = ? AND status != 'revoked'`, now, reason, serial)
 	if err != nil {
-		return fmt.Errorf("revoke pki certificate: %w", err)
+		return fmt.Errorf("吊销 PKI 证书失败：%w", err)
 	}
 	changed, _ := res.RowsAffected()
 	if changed == 0 {
-		return fmt.Errorf("certificate already revoked")
+		return fmt.Errorf("证书已经吊销")
 	}
 	if nodeID != "" {
 		if _, err := tx.Exec(`
 			UPDATE nodes SET pki_cert_serial = '', pki_not_after_unix = 0,
 				token = '',
-				status = 'unauthorized', last_error = 'management certificate revoked',
+				status = 'unauthorized', last_error = '管理证书已吊销',
 				updated_at_unix = ?
 			WHERE id = ? AND pki_cert_serial = ?`, now, nodeID, serial); err != nil {
 			return err
@@ -217,7 +199,7 @@ func (s *Store) AddPKIAudit(action, nodeID, serial, actor, detail string) error 
 		newID(), action, nodeID, serial, actor, detail, nowUnix(),
 	)
 	if err != nil {
-		return fmt.Errorf("add pki audit: %w", err)
+		return fmt.Errorf("写入 PKI 审计日志失败：%w", err)
 	}
 	return nil
 }

@@ -68,7 +68,7 @@ func (s *Server) Handler() http.Handler {
 		// Admin APIs require session; /sub/{token} and login are public.
 		if isAPIPath(r.URL.Path) && !isPublicAPI(r) {
 			if !s.authenticated(r) {
-				writeError(w, http.StatusUnauthorized, "unauthorized")
+				writeError(w, http.StatusUnauthorized, "未通过身份认证")
 				return
 			}
 		}
@@ -90,7 +90,7 @@ func (s *Server) mountSPA(mux *http.ServeMux) {
 func spaHandler(root fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			http.Error(w, "不允许使用该请求方法", http.StatusMethodNotAllowed)
 			return
 		}
 
@@ -135,9 +135,6 @@ func isPublicAPI(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/pki/agent-certificates" {
 		return true
 	}
-	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/pki/agent-migrations/complete" {
-		return true
-	}
 	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/pki/bundle" {
 		return true
 	}
@@ -155,7 +152,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("POST /api/v1/pki/agent-certificates", s.handleIssueAgentCertificate)
-	mux.HandleFunc("POST /api/v1/pki/agent-migrations/complete", s.handleCompleteAgentPKIMigration)
 	mux.HandleFunc("GET /api/v1/pki/bundle", s.handlePKIBundle)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)
@@ -234,10 +230,10 @@ func (s *Server) liveDial(ctx context.Context, n store.Node, token string) (Node
 
 func (s *Server) defaultLiveDial(ctx context.Context, n store.Node, token string) (NodeLive, error) {
 	if s.PKI == nil {
-		return nil, fmt.Errorf("management PKI unavailable")
+		return nil, fmt.Errorf("管理 PKI 不可用")
 	}
 	if n.PKICertSerial == "" || n.PKICABundlePEM == "" {
-		return nil, fmt.Errorf("node %s requires Panel PKI migration", n.ID)
+		return nil, fmt.Errorf("节点 %s 尚未完成 Panel PKI 注册", n.ID)
 	}
 	timeout := s.Timeout
 	if timeout <= 0 && s.Runner != nil && s.Runner.Timeout > 0 {
@@ -290,7 +286,38 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	writeJSON(w, status, map[string]string{"error": localizeDatabaseError(msg)})
+}
+
+func localizeDatabaseError(msg string) string {
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "foreign key constraint failed"):
+		return errorPrefix(msg) + "仍有其他数据引用该对象，请先解除关联"
+	case strings.Contains(lower, "unique constraint failed"):
+		return errorPrefix(msg) + "数据已存在，不能重复"
+	case strings.Contains(lower, "not null constraint failed"):
+		return errorPrefix(msg) + "缺少必填数据"
+	case strings.Contains(lower, "check constraint failed"):
+		return errorPrefix(msg) + "数据未通过有效性校验"
+	case strings.Contains(lower, "constraint failed"):
+		return errorPrefix(msg) + "数据约束校验失败"
+	default:
+		return msg
+	}
+}
+
+func errorPrefix(msg string) string {
+	lower := strings.ToLower(msg)
+	idx := strings.Index(lower, "constraint failed")
+	if idx < 0 {
+		return ""
+	}
+	prefix := strings.TrimRight(strings.TrimSpace(msg[:idx]), ":：")
+	if prefix == "" {
+		return ""
+	}
+	return prefix + "："
 }
 
 func decodeJSON(r *http.Request, dest any) error {
@@ -307,5 +334,6 @@ func isNotFound(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "not found")
+	msg := err.Error()
+	return strings.Contains(msg, "not found") || strings.Contains(msg, "不存在") || strings.Contains(msg, "未找到")
 }

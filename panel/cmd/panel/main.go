@@ -21,17 +21,16 @@ import (
 )
 
 func main() {
-	dbPath := flag.String("db", "./data/panel.db", "SQLite database path")
-	listen := flag.String("listen", "", "HTTP listen address (default: settings.listen_addr or :8080)")
-	sessionSecret := flag.String("session-secret", "", "JWT session HMAC secret (random if empty)")
-	bootstrap := flag.Bool("bootstrap", true, "on start, apply configs and start sing-box on all registered nodes")
-	bootstrapTimeout := flag.Duration("bootstrap-timeout", 3*time.Minute, "timeout for initial startup bootstrap")
-	bootstrapRetry := flag.Bool("bootstrap-retry", true, "periodically retry apply+start for nodes not yet online/running")
-	bootstrapRetryInterval := flag.Duration("bootstrap-retry-interval", 30*time.Second, "interval between bootstrap retries")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	pkiDir := flag.String("pki-dir", "", "management PKI directory (default: <db-dir>/pki)")
-	migrateManagementPKI := flag.Bool("migrate-management-pki", false, "initialize management PKI and migrate the database, then exit")
-	pkiRotateIntermediate := flag.Bool("pki-rotate-intermediate", false, "rotate the online intermediate CA and Panel client certificate, then exit")
+	dbPath := flag.String("db", "./data/panel.db", "SQLite 数据库路径")
+	listen := flag.String("listen", "", "HTTP 监听地址（默认读取 settings.listen_addr 或使用 :8080）")
+	sessionSecret := flag.String("session-secret", "", "JWT 会话 HMAC 密钥（为空时随机生成）")
+	bootstrap := flag.Bool("bootstrap", true, "启动时向所有已注册节点下发配置并启动 sing-box")
+	bootstrapTimeout := flag.Duration("bootstrap-timeout", 3*time.Minute, "首次启动下发的超时时间")
+	bootstrapRetry := flag.Bool("bootstrap-retry", true, "定期重试尚未在线或运行节点的下发与启动")
+	bootstrapRetryInterval := flag.Duration("bootstrap-retry-interval", 30*time.Second, "启动重试间隔")
+	showVersion := flag.Bool("version", false, "显示版本后退出")
+	pkiDir := flag.String("pki-dir", "", "管理 PKI 目录（默认：<数据库目录>/pki）")
+	pkiRotateIntermediate := flag.Bool("pki-rotate-intermediate", false, "轮换在线中间 CA 和 Panel 客户端证书后退出")
 	flag.Parse()
 
 	if *showVersion {
@@ -45,13 +44,13 @@ func main() {
 
 	if dir := filepath.Dir(*dbPath); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			log.Fatalf("create db dir: %v", err)
+			log.Fatalf("创建数据库目录失败：%v", err)
 		}
 	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
-		log.Fatalf("open store: %v", err)
+		log.Fatalf("打开数据存储失败：%v", err)
 	}
 	defer func() { _ = st.Close() }()
 
@@ -61,38 +60,34 @@ func main() {
 	}
 	ca, err := pki.Open(dir)
 	if err != nil {
-		log.Fatalf("open management PKI: %v", err)
-	}
-	if *migrateManagementPKI {
-		log.Printf("management PKI migration complete (db=%s pki=%s)", *dbPath, dir)
-		return
+		log.Fatalf("打开管理 PKI 失败：%v", err)
 	}
 	if *pkiRotateIntermediate {
 		if err := ca.RotateIntermediate(time.Now()); err != nil {
-			log.Fatalf("rotate management intermediate CA: %v", err)
+			log.Fatalf("轮换管理中间 CA 失败：%v", err)
 		}
-		log.Printf("management intermediate CA rotated; move %s back to offline storage", filepath.Join(dir, "offline", "root-ca.key"))
+		log.Printf("管理中间 CA 已轮换，请将 %s 移回离线存储", filepath.Join(dir, "offline", "root-ca.key"))
 		return
 	}
-	log.Printf("management PKI enabled (dir=%s intermediate_expires=%s)", dir, time.Unix(ca.Status().IntermediateNotAfterUnix, 0).Format(time.RFC3339))
+	log.Printf("管理 PKI 已启用（目录=%s，中间 CA 到期时间=%s）", dir, time.Unix(ca.Status().IntermediateNotAfterUnix, 0).Format(time.RFC3339))
 	go ca.Run(context.Background())
 
 	if err := api.EnsureAdminPassword(st); err != nil {
-		log.Fatalf("ensure admin password: %v", err)
+		log.Fatalf("初始化管理员密码失败：%v", err)
 	}
 
 	settings, err := st.GetSettings()
 	if err != nil {
-		log.Fatalf("get settings: %v", err)
+		log.Fatalf("读取系统设置失败：%v", err)
 	}
 
 	secret := []byte(*sessionSecret)
 	if len(secret) == 0 {
 		secret, err = randomSecret(32)
 		if err != nil {
-			log.Fatalf("generate session secret: %v", err)
+			log.Fatalf("生成会话密钥失败：%v", err)
 		}
-		log.Printf("session secret not set; generated ephemeral secret (sessions will not survive restart)")
+		log.Printf("未设置会话密钥，已生成临时密钥（重启后现有会话将失效）")
 	}
 
 	runner := batch.NewRunner(st, func() string {
@@ -137,37 +132,37 @@ func main() {
 			time.Sleep(500 * time.Millisecond)
 			ctx, cancel := context.WithTimeout(context.Background(), *bootstrapTimeout)
 			defer cancel()
-			log.Printf("bootstrap: starting (timeout=%s)", *bootstrapTimeout)
+			log.Printf("启动下发：开始（超时=%s）", *bootstrapTimeout)
 			if err := runner.BootstrapAll(ctx); err != nil {
-				log.Printf("bootstrap: finished with error: %v", err)
+				log.Printf("启动下发：完成但发生错误：%v", err)
 			} else {
-				log.Printf("bootstrap: finished")
+				log.Printf("启动下发：完成")
 			}
 		}()
 	} else {
-		log.Printf("bootstrap: disabled (-bootstrap=false)")
+		log.Printf("启动下发：已禁用（-bootstrap=false）")
 	}
 
 	// Keep retrying nodes that come online later (agent started after panel, etc.).
 	if *bootstrap && *bootstrapRetry {
 		go func() {
-			log.Printf("bootstrap-retry: enabled (interval=%s)", *bootstrapRetryInterval)
+			log.Printf("启动重试：已启用（间隔=%s）", *bootstrapRetryInterval)
 			runner.RunBootstrapRetryLoop(context.Background(), *bootstrapRetryInterval)
 		}()
 	} else if *bootstrap {
-		log.Printf("bootstrap-retry: disabled (-bootstrap-retry=false)")
+		log.Printf("启动重试：已禁用（-bootstrap-retry=false）")
 	}
 
 	// Background refresh of external subscription sources.
 	go func() {
-		log.Printf("external-sources: background refresh enabled (interval=%s)", subscription.BackgroundTick)
+		log.Printf("外部源后台刷新已启用（间隔=%s）", subscription.BackgroundTick)
 		agg.RunBackground(context.Background(), subscription.BackgroundTick)
 	}()
 	go chainService.RunProbeLoop(context.Background())
 
-	log.Printf("panel listening on %s (db=%s version=%s)", addr, *dbPath, version.Version)
+	log.Printf("Panel 正在监听 %s（数据库=%s，版本=%s）", addr, *dbPath, version.Version)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
-		log.Fatalf("listen: %v", err)
+		log.Fatalf("启动监听失败：%v", err)
 	}
 }
 

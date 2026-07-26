@@ -33,19 +33,19 @@ type issueAgentCertificateResponse struct {
 
 func (s *Server) handleIssueAgentCertificate(w http.ResponseWriter, r *http.Request) {
 	if s.PKI == nil {
-		writeError(w, http.StatusServiceUnavailable, "management PKI disabled")
+		writeError(w, http.StatusServiceUnavailable, "管理 PKI 已禁用")
 		return
 	}
 	var req issueAgentCertificateRequest
 	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 		return
 	}
 	req.NodeID = strings.TrimSpace(req.NodeID)
 	n, err := s.Store.GetNode(req.NodeID)
 	if err != nil {
 		if isNotFound(err) {
-			writeError(w, http.StatusNotFound, "node not found")
+			writeError(w, http.StatusNotFound, "节点不存在")
 		} else {
 			writeError(w, http.StatusInternalServerError, err.Error())
 		}
@@ -58,7 +58,7 @@ func (s *Server) handleIssueAgentCertificate(w http.ResponseWriter, r *http.Requ
 	want := strings.TrimSpace(n.Token)
 	nodeTokenValid := want != "" && token != "" && subtle.ConstantTimeCompare([]byte(want), []byte(token)) == 1
 	enrollmentTokenValid := false
-	if !nodeTokenValid && (n.PKICertSerial == "" || n.PKIMigrationRequired) && token != "" {
+	if !nodeTokenValid && n.PKICertSerial == "" && token != "" {
 		enrollmentTokenValid, err = s.Store.ConsumePKIEnrollmentToken(n.ID, token)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -66,13 +66,13 @@ func (s *Server) handleIssueAgentCertificate(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if !nodeTokenValid && !enrollmentTokenValid {
-		writeError(w, http.StatusUnauthorized, "invalid or expired token for node")
+		writeError(w, http.StatusUnauthorized, "节点令牌无效或已过期")
 		return
 	}
 	if enrollmentTokenValid && want == "" {
 		want, err = randomAgentToken()
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "generate control token: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "生成控制令牌失败："+err.Error())
 			return
 		}
 		n.Token = want
@@ -141,39 +141,9 @@ func (s *Server) handleIssueAgentCertificate(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-func (s *Server) handleCompleteAgentPKIMigration(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		NodeID string `json:"node_id"`
-		Serial string `json:"serial"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	req.NodeID = strings.TrimSpace(req.NodeID)
-	req.Serial = strings.TrimSpace(req.Serial)
-	n, err := s.Store.GetNode(req.NodeID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "node not found")
-		return
-	}
-	token := bearerToken(r)
-	if n.Token == "" || token == "" ||
-		subtle.ConstantTimeCompare([]byte(n.Token), []byte(token)) != 1 {
-		writeError(w, http.StatusUnauthorized, "invalid token for node")
-		return
-	}
-	if err := s.Store.CompletePKIMigration(n.ID, req.Serial); err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-	_ = s.Store.AddPKIAudit("agent.migration.complete", n.ID, req.Serial, "node:"+n.ID, "")
-	w.WriteHeader(http.StatusNoContent)
-}
-
 func (s *Server) handlePKIBundle(w http.ResponseWriter, _ *http.Request) {
 	if s.PKI == nil {
-		writeError(w, http.StatusServiceUnavailable, "management PKI disabled")
+		writeError(w, http.StatusServiceUnavailable, "管理 PKI 已禁用")
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file")
@@ -226,7 +196,7 @@ func (s *Server) handleListPKICertificates(w http.ResponseWriter, _ *http.Reques
 func (s *Server) handleRevokePKICertificate(w http.ResponseWriter, r *http.Request) {
 	serial := strings.TrimSpace(r.PathValue("serial"))
 	if serial == "" {
-		writeError(w, http.StatusBadRequest, "serial required")
+		writeError(w, http.StatusBadRequest, "必须提供证书序列号")
 		return
 	}
 	var body struct {
@@ -234,7 +204,7 @@ func (s *Server) handleRevokePKICertificate(w http.ResponseWriter, r *http.Reque
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 			return
 		}
 	}

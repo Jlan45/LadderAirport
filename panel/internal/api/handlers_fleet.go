@@ -25,7 +25,7 @@ func classifyRPCError(err error) string {
 	}
 	// string fallback for wrapped errors
 	msg := err.Error()
-	if strings.Contains(msg, "Unauthenticated") || strings.Contains(msg, "invalid token") {
+	if strings.Contains(msg, "Unauthenticated") || strings.Contains(msg, "invalid token") || strings.Contains(msg, "令牌无效") {
 		return "unauthorized"
 	}
 	return "unreachable"
@@ -104,7 +104,7 @@ func (s *Server) refreshOneNode(parent context.Context, n store.Node) store.Node
 	client, err := s.liveDial(ctx, n, s.nodeToken(&n))
 	if err != nil {
 		n.Status = "unreachable"
-		n.LastError = fmt.Sprintf("dial: %v", err)
+		n.LastError = fmt.Sprintf("连接节点失败：%v", err)
 		n.RuntimeState = ""
 		_ = s.Store.UpdateNode(&n)
 		return n

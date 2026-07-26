@@ -65,10 +65,10 @@ type Status struct {
 func Open(dir string) (*Manager, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
-		return nil, fmt.Errorf("pki directory required")
+		return nil, fmt.Errorf("必须提供 PKI 目录")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create pki directory: %w", err)
+		return nil, fmt.Errorf("创建 PKI 目录失败：%w", err)
 	}
 	rootCertPath := filepath.Join(dir, "root-ca.crt")
 	rootKeyPath := filepath.Join(dir, "offline", "root-ca.key")
@@ -76,7 +76,7 @@ func Open(dir string) (*Manager, error) {
 	intKeyPath := filepath.Join(dir, "intermediate-ca.key")
 	if !allExist(rootCertPath, intCertPath, intKeyPath) {
 		if anyExist(rootCertPath, intCertPath, intKeyPath) {
-			return nil, fmt.Errorf("incomplete PKI material in %s", dir)
+			return nil, fmt.Errorf("%s 中的 PKI 材料不完整", dir)
 		}
 		if err := bootstrap(rootCertPath, rootKeyPath, intCertPath, intKeyPath); err != nil {
 			return nil, err
@@ -96,13 +96,13 @@ func Open(dir string) (*Manager, error) {
 		return nil, err
 	}
 	if !root.IsCA || !intermediate.IsCA {
-		return nil, fmt.Errorf("root and intermediate certificates must be CAs")
+		return nil, fmt.Errorf("根证书和中间证书必须是 CA 证书")
 	}
 	if err := intermediate.CheckSignatureFrom(root); err != nil {
-		return nil, fmt.Errorf("intermediate is not signed by root: %w", err)
+		return nil, fmt.Errorf("中间 CA 不是由根 CA 签发：%w", err)
 	}
 	if !publicKeysEqual(intermediate.PublicKey, signer.Public()) {
-		return nil, fmt.Errorf("intermediate certificate/key mismatch")
+		return nil, fmt.Errorf("中间 CA 证书与私钥不匹配")
 	}
 	rootPEM, err := os.ReadFile(rootCertPath)
 	if err != nil {
@@ -149,7 +149,7 @@ func (m *Manager) Run(ctx context.Context) {
 				continue
 			}
 			if err := m.rotatePanelClient(time.Now()); err != nil {
-				log.Printf("management PKI: renew Panel client certificate: %v", err)
+				log.Printf("管理 PKI：续签 Panel 客户端证书失败：%v", err)
 			}
 		}
 	}
@@ -176,10 +176,10 @@ func (m *Manager) RotateIntermediate(now time.Time) error {
 	rootKeyPath := filepath.Join(m.dir, "offline", "root-ca.key")
 	rootSigner, err := loadSigner(rootKeyPath)
 	if err != nil {
-		return fmt.Errorf("load offline root key: %w", err)
+		return fmt.Errorf("加载离线根 CA 私钥失败：%w", err)
 	}
 	if !publicKeysEqual(m.root.PublicKey, rootSigner.Public()) {
-		return fmt.Errorf("root certificate/key mismatch")
+		return fmt.Errorf("根 CA 证书与私钥不匹配")
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -205,7 +205,7 @@ func (m *Manager) RotateIntermediate(now time.Time) error {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, m.root, key.Public(), rootSigner)
 	if err != nil {
-		return fmt.Errorf("sign intermediate: %w", err)
+		return fmt.Errorf("签发中间 CA 失败：%w", err)
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
@@ -238,17 +238,17 @@ func PanelURI() string {
 func (m *Manager) SignAgentCSR(nodeID string, csrPEM []byte, now time.Time) (*IssuedCertificate, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" || strings.ContainsAny(nodeID, "/?#") {
-		return nil, fmt.Errorf("invalid node id")
+		return nil, fmt.Errorf("节点 ID 无效")
 	}
 	csr, err := parseAndValidateCSR(csrPEM)
 	if err != nil {
 		return nil, err
 	}
 	if len(csr.DNSNames)+len(csr.IPAddresses) == 0 {
-		return nil, fmt.Errorf("agent CSR requires at least one DNS or IP SAN")
+		return nil, fmt.Errorf("Agent CSR 至少需要一个 DNS 或 IP SAN")
 	}
 	if len(csr.DNSNames)+len(csr.IPAddresses) > 32 {
-		return nil, fmt.Errorf("too many SANs")
+		return nil, fmt.Errorf("SAN 数量过多")
 	}
 	uri, _ := url.Parse(AgentURI(nodeID))
 	return m.issue(pkix.Name{
@@ -268,7 +268,7 @@ func (m *Manager) issue(subject pkix.Name, publicKey any, profile string, uris [
 		notAfter = max
 	}
 	if !notAfter.After(notBefore) {
-		return nil, fmt.Errorf("intermediate CA expires too soon to issue certificate")
+		return nil, fmt.Errorf("中间 CA 即将过期，无法签发证书")
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
@@ -287,7 +287,7 @@ func (m *Manager) issue(subject pkix.Name, publicKey any, profile string, uris [
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, m.intermediate, publicKey, m.signer)
 	if err != nil {
-		return nil, fmt.Errorf("sign certificate: %w", err)
+		return nil, fmt.Errorf("签发证书失败：%w", err)
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil {
@@ -456,26 +456,26 @@ func bootstrap(rootCertPath, rootKeyPath, intCertPath, intKeyPath string) error 
 func parseAndValidateCSR(data []byte) (*x509.CertificateRequest, error) {
 	block, rest := pem.Decode(data)
 	if block == nil || block.Type != "CERTIFICATE REQUEST" || len(strings.TrimSpace(string(rest))) != 0 {
-		return nil, fmt.Errorf("invalid PEM certificate request")
+		return nil, fmt.Errorf("PEM 格式的证书请求无效")
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("parse CSR: %w", err)
+		return nil, fmt.Errorf("解析 CSR 失败：%w", err)
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return nil, fmt.Errorf("invalid CSR signature: %w", err)
+		return nil, fmt.Errorf("CSR 签名无效：%w", err)
 	}
 	switch key := csr.PublicKey.(type) {
 	case *ecdsa.PublicKey:
 		if key.Curve != elliptic.P256() && key.Curve != elliptic.P384() {
-			return nil, fmt.Errorf("unsupported ECDSA curve")
+			return nil, fmt.Errorf("不支持该 ECDSA 曲线")
 		}
 	default:
-		return nil, fmt.Errorf("Agent CSR must use ECDSA P-256 or P-384")
+		return nil, fmt.Errorf("Agent CSR 必须使用 ECDSA P-256 或 P-384")
 	}
 	for _, name := range csr.DNSNames {
 		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, " \x00") {
-			return nil, fmt.Errorf("invalid DNS SAN")
+			return nil, fmt.Errorf("DNS SAN 无效")
 		}
 	}
 	return csr, nil
@@ -500,11 +500,11 @@ func loadCertificate(path string) (*x509.Certificate, error) {
 	}
 	block, _ := pem.Decode(data)
 	if block == nil || block.Type != "CERTIFICATE" {
-		return nil, fmt.Errorf("invalid certificate PEM: %s", path)
+		return nil, fmt.Errorf("证书 PEM 无效：%s", path)
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("parse certificate %s: %w", path, err)
+		return nil, fmt.Errorf("解析证书 %s 失败：%w", path, err)
 	}
 	return cert, nil
 }
@@ -516,7 +516,7 @@ func loadSigner(path string) (crypto.Signer, error) {
 	}
 	block, _ := pem.Decode(data)
 	if block == nil || block.Type != "PRIVATE KEY" {
-		return nil, fmt.Errorf("invalid private key PEM: %s", path)
+		return nil, fmt.Errorf("私钥 PEM 无效：%s", path)
 	}
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
@@ -524,7 +524,7 @@ func loadSigner(path string) (crypto.Signer, error) {
 	}
 	signer, ok := key.(crypto.Signer)
 	if !ok {
-		return nil, fmt.Errorf("private key is not a signer")
+		return nil, fmt.Errorf("私钥不支持签名")
 	}
 	return signer, nil
 }

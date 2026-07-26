@@ -193,7 +193,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
   const [copiedUpgrade, setCopiedUpgrade] = useState(false)
-  const [copiedMigration, setCopiedMigration] = useState(false)
 
   const isCurrentNode = useCallback(
     (targetId: string, generation: number) =>
@@ -362,7 +361,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setInstallInfo(null)
     setCopied(false)
     setCopiedUpgrade(false)
-    setCopiedMigration(false)
 
     void load(id, currentGeneration, { syncConnection: true, syncInbounds: true, fatal: true })
     void loadInterfaces(id, currentGeneration)
@@ -667,7 +665,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     const current = generationRef.current
     setCopied(false)
     setCopiedUpgrade(false)
-    setCopiedMigration(false)
     try {
       const info = await getNodeInstallCommand(id)
       if (isCurrentNode(id, current)) setInstallInfo(info)
@@ -698,18 +695,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       setCopiedUpgrade(true)
       toast.success('已复制升级命令')
       setTimeout(() => setCopiedUpgrade(false), 2000)
-    } catch {
-      toast.error('复制失败')
-    }
-  }
-
-  async function copyMigration() {
-    if (!installInfo?.migration_command) return
-    try {
-      await copyText(installInfo.migration_command)
-      setCopiedMigration(true)
-      toast.success('已复制一次性 PKI 迁移命令')
-      setTimeout(() => setCopiedMigration(false), 2000)
     } catch {
       toast.error('复制失败')
     }
@@ -1040,12 +1025,12 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                             <div className="text-sm text-zinc-300">Panel 管理 mTLS</div>
                             <div className="font-mono text-xs text-zinc-500">
                               {node?.pki_cert_serial
-                                ? `${node.pki_cert_serial.slice(0, 8)}…${node.pki_cert_serial.slice(-8)}${node.pki_migration_required ? ' · 待确认' : ''}`
-                                : node?.pki_migration_required ? '尚未迁移' : '尚未注册'}
+                                ? `${node.pki_cert_serial.slice(0, 8)}…${node.pki_cert_serial.slice(-8)}`
+                                : '尚未注册'}
                             </div>
                           </div>
-                          <Badge variant={node?.pki_cert_serial && !node.pki_migration_required ? 'success' : 'warning'}>
-                            {node?.pki_migration_required ? '需要迁移' : node?.pki_cert_serial ? '已启用' : '待注册'}
+                          <Badge variant={node?.pki_cert_serial ? 'success' : 'warning'}>
+                            {node?.pki_cert_serial ? '已启用' : '待注册'}
                           </Badge>
                         </div>
 
@@ -1130,29 +1115,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                               {installInfo.install_command}
                             </pre>
                           </>
-                        )}
-
-                        {installInfo.migration_command && (
-                          <div className="space-y-2 mt-4 pt-4 border-t border-amber-900/40">
-                            <div className="flex items-center justify-between">
-                              <h3 className="text-sm font-semibold text-amber-300">一次性 PKI 升级迁移</h3>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-amber-900/60 text-amber-300 hover:bg-amber-950/30 gap-1"
-                                onClick={() => void copyMigration()}
-                              >
-                                {copiedMigration ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                                {copiedMigration ? '已复制' : '复制'}
-                              </Button>
-                            </div>
-                            <p className="text-xs text-zinc-500 leading-normal">
-                              仅供旧节点执行一次。成功后会删除节点自签 CA 和旧 systemd 实现，不保留旧证书或回滚副本。
-                            </p>
-                            <pre className="p-3 bg-zinc-900 border border-amber-900/40 rounded-md overflow-x-auto text-xs font-mono text-amber-200 max-h-[140px]">
-                              {installInfo.migration_command}
-                            </pre>
-                          </div>
                         )}
 
                         {installInfo.upgrade_command && (

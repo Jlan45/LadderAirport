@@ -51,41 +51,6 @@ Agent 每 6 小时检查证书，在有效期经过约三分之二后用现有�
 
 Panel 随后不会再使用该身份连接节点。要恢复节点，应重新生成安装命令并完成注册。短生命周期证书用于限制离线节点无法立即接收吊销信息时的风险窗口。
 
-## 旧节点迁移
-
-本版本不保留节点自签 CA、跳过校验或明文 gRPC 的运行时兼容。升级 Panel 后，没有管理证书的节点会显示「尚未迁移」，控制操作会明确拒绝，直到完成一次性迁移。
-
-1. 先在 Panel 服务器执行 `scripts/migrate-panel-to-management-pki.sh`；
-2. 登录新 Panel，并配置 HTTPS 的 Public Base URL；
-3. 在节点详情生成「一次性 PKI 迁移命令」；
-4. 在目标节点以 root 执行 `scripts/migrate-agent-to-panel-pki.sh` 对应的命令；
-5. Agent 脚本在旧服务仍运行时生成私钥与 CSR、领取证书并准备新二进制；
-6. Agent 脚本切换为严格 mTLS，连续确认服务存活；失败仅在本次执行内回滚；
-7. 成功后脚本删除临时回滚、旧 CA 私钥、旧 unit 残留与旧二进制备份；
-8. 回到 Panel 确认证书序列号，并执行「探测」。
-
-Panel 专用脚本会停止 Panel、临时备份数据库和二进制，使用新 Panel 的 `-migrate-management-pki` 模式初始化 CA、升级数据库并删除旧管理 TLS 字段，然后启动新服务。失败时恢复本次执行前的数据库与二进制；成功后不保留旧实现或临时回滚。
-
-使用本地待发布二进制时：
-
-```bash
-sudo env LADDER_PANEL_BINARY=/path/to/ladder-panel \
-  ./scripts/migrate-panel-to-management-pki.sh
-
-sudo env \
-  LADDER_PANEL='https://panel.example.com' \
-  LADDER_NODE_ID='<node-id>' \
-  LADDER_ENROLL_TOKEN='<one-time-token>' \
-  LADDER_AGENT_BINARY=/path/to/ladder-agent \
-  ./scripts/migrate-agent-to-panel-pki.sh
-```
-
-Release 同时包含 Panel/Agent 二进制和两个迁移脚本。使用 Release 时，从
-`https://github.com/Jlan45/LadderAirport/releases/download/vX.Y.Z/` 下载脚本，并通过
-`LADDER_VERSION=vX.Y.Z` 固定 Panel 和 Agent 到同一个版本。必须先完成 Panel 迁移，再逐节点迁移 Agent。
-
-迁移令牌有效期为 15 分钟且只能使用一次。建议逐节点迁移并探测，不要把同一命令复制到其他节点。
-
 ## 备份
 
 至少备份：

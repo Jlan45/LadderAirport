@@ -22,7 +22,7 @@ const MaxProxiesPerSource = 2000
 func DetectAndParse(raw []byte) ([]ProxyEndpoint, string, error) {
 	raw = bytes.TrimSpace(stripBOM(raw))
 	if len(raw) == 0 {
-		return nil, "", fmt.Errorf("empty subscription body")
+		return nil, "", fmt.Errorf("订阅内容为空")
 	}
 
 	// 1) sing-box client JSON
@@ -80,7 +80,7 @@ func DetectAndParse(raw []byte) ([]ProxyEndpoint, string, error) {
 		return truncateProxies(eps), ContentClashYAML, nil
 	}
 
-	return nil, "", fmt.Errorf("unrecognized external subscription format")
+	return nil, "", fmt.Errorf("无法识别外部订阅格式")
 }
 
 func truncateProxies(eps []ProxyEndpoint) []ProxyEndpoint {

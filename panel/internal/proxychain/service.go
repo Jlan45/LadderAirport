@@ -48,10 +48,10 @@ func NewService(st *store.Store, builder *nodeconfig.Builder, coordinator *sync.
 
 func (s *Service) defaultDial(ctx context.Context, node store.Node, token string) (Agent, error) {
 	if s.PKI == nil {
-		return nil, fmt.Errorf("management PKI unavailable")
+		return nil, fmt.Errorf("管理 PKI 不可用")
 	}
 	if node.PKICertSerial == "" || node.PKICABundlePEM == "" {
-		return nil, fmt.Errorf("node %s requires Panel PKI migration", node.ID)
+		return nil, fmt.Errorf("节点 %s 尚未完成 Panel PKI 注册", node.ID)
 	}
 	settings, err := s.Store.GetSettings()
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *Service) Deploy(ctx context.Context, candidate store.ProxyChain) error 
 		rollbackErr := s.rollback(ctx, changed, oldConfigs)
 		if rollbackErr != nil {
 			_ = s.Store.SetProxyChainRuntime(old.ID, old.Enabled, "degraded", err.Error()+"; rollback: "+rollbackErr.Error())
-			return fmt.Errorf("%w (rollback: %v)", err, rollbackErr)
+			return fmt.Errorf("%w（回滚失败：%v）", err, rollbackErr)
 		}
 		return err
 	}
@@ -185,7 +185,7 @@ func (s *Service) Disable(ctx context.Context, id string) error {
 	if err != nil {
 		if rollbackErr := s.rollback(ctx, changed, oldConfigs); rollbackErr != nil {
 			_ = s.Store.SetProxyChainRuntime(id, true, "degraded", err.Error()+"; rollback: "+rollbackErr.Error())
-			return fmt.Errorf("%w (rollback: %v)", err, rollbackErr)
+			return fmt.Errorf("%w（回滚失败：%v）", err, rollbackErr)
 		}
 		return err
 	}
@@ -285,15 +285,15 @@ func (s *Service) preflight(ctx context.Context, chain store.ProxyChain) error {
 		}
 		client, err := s.Dial(ctx, *node, s.token(*node))
 		if err != nil {
-			return fmt.Errorf("hop %d dial: %w", i, err)
+			return fmt.Errorf("第 %d 跳连接失败：%w", i+1, err)
 		}
 		ping, pingErr := client.Ping(ctx)
 		_ = client.Close()
 		if pingErr != nil {
-			return fmt.Errorf("hop %d ping: %w", i, pingErr)
+			return fmt.Errorf("第 %d 跳探测失败：%w", i+1, pingErr)
 		}
 		if !slices.Contains(ping.GetCapabilities(), Capability) {
-			return fmt.Errorf("hop %d agent must be upgraded: missing capability %s", i, Capability)
+			return fmt.Errorf("第 %d 跳的 Agent 必须升级：缺少能力 %s", i+1, Capability)
 		}
 	}
 	return nil
@@ -309,15 +309,15 @@ func (s *Service) applyOrdered(ctx context.Context, order []string, configs map[
 		}
 		client, err := s.Dial(ctx, *node, s.token(*node))
 		if err != nil {
-			return changed, fmt.Errorf("node %s dial: %w", nodeID, err)
+			return changed, fmt.Errorf("连接节点 %s 失败：%w", nodeID, err)
 		}
 		resp, applyErr := client.ApplyConfig(ctx, cfg.JSON, cfg.Hash, true)
 		_ = client.Close()
 		if applyErr != nil {
-			return changed, fmt.Errorf("node %s apply: %w", nodeID, applyErr)
+			return changed, fmt.Errorf("向节点 %s 下发配置失败：%w", nodeID, applyErr)
 		}
 		if !resp.GetOk() {
-			return changed, fmt.Errorf("node %s apply: %s", nodeID, resp.GetMessage())
+			return changed, fmt.Errorf("向节点 %s 下发配置失败：%s", nodeID, resp.GetMessage())
 		}
 		changed = append(changed, nodeID)
 		node.ConfigHash = cfg.Hash
@@ -355,7 +355,7 @@ func (s *Service) rollback(ctx context.Context, changed []string, configs map[st
 			_ = client.Close()
 		}
 		if err != nil && first == nil {
-			first = fmt.Errorf("node %s: %w", nodeID, err)
+			first = fmt.Errorf("节点 %s：%w", nodeID, err)
 		}
 	}
 	return first
@@ -380,7 +380,7 @@ func (s *Service) ProbeLocked(ctx context.Context, id string) (ProbeResult, erro
 		return ProbeResult{}, err
 	}
 	if !chain.Enabled {
-		return ProbeResult{}, fmt.Errorf("proxy chain is disabled")
+		return ProbeResult{}, fmt.Errorf("代理链已禁用")
 	}
 	settings, err := s.Store.GetSettings()
 	if err != nil {
@@ -394,7 +394,7 @@ func (s *Service) ProbeLocked(ctx context.Context, id string) (ProbeResult, erro
 		_ = s.Store.MigrateSubscriptionsToChains()
 		return result, nil
 	}
-	message := "probe failed"
+	message := "探测失败"
 	if err != nil {
 		message = err.Error()
 	} else if resp.GetMessage() != "" {

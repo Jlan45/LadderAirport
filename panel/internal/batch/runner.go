@@ -57,10 +57,10 @@ func NewRunner(s *store.Store, defaultToken func() string) *Runner {
 
 func (r *Runner) defaultDial(ctx context.Context, n store.Node, token string) (NodeRPC, error) {
 	if r.PKI == nil {
-		return nil, fmt.Errorf("management PKI unavailable")
+		return nil, fmt.Errorf("管理 PKI 不可用")
 	}
 	if n.PKICertSerial == "" || n.PKICABundlePEM == "" {
-		return nil, fmt.Errorf("node %s requires Panel PKI migration", n.ID)
+		return nil, fmt.Errorf("节点 %s 尚未完成 Panel PKI 注册", n.ID)
 	}
 	clientCert := r.PKI.ClientCertificate()
 	cfg := nodeclient.DialConfig{
@@ -79,10 +79,10 @@ func (r *Runner) defaultDial(ctx context.Context, n store.Node, token string) (N
 // Final status: all ok → success; all fail → failed; mixed → partial.
 func (r *Runner) RunTask(ctx context.Context, taskID string) error {
 	if r == nil || r.Store == nil {
-		return fmt.Errorf("runner not configured")
+		return fmt.Errorf("批处理执行器尚未配置")
 	}
 	if r.Dial == nil {
-		return fmt.Errorf("dial not configured")
+		return fmt.Errorf("节点连接器尚未配置")
 	}
 	if r.DefaultToken == nil {
 		r.DefaultToken = func() string { return "" }
@@ -96,7 +96,7 @@ func (r *Runner) RunTask(ctx context.Context, taskID string) error {
 	task.Status = "running"
 	task.Results = []store.TaskNodeResult{}
 	if err := r.Store.UpdateTask(task); err != nil {
-		return fmt.Errorf("mark running: %w", err)
+		return fmt.Errorf("标记任务运行状态失败：%w", err)
 	}
 
 	maxConc := r.MaxConcurrency
@@ -172,7 +172,7 @@ func (r *Runner) RunTask(ctx context.Context, taskID string) error {
 	task.Results = results
 	task.Status = final
 	if err := r.Store.UpdateTask(task); err != nil {
-		return fmt.Errorf("finalize task: %w", err)
+		return fmt.Errorf("完成任务失败：%w", err)
 	}
 	return nil
 }
@@ -196,7 +196,7 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 
 	client, err := r.Dial(opCtx, *node, token)
 	if err != nil {
-		res.Message = fmt.Sprintf("dial: %v", err)
+		res.Message = fmt.Sprintf("连接节点失败：%v", err)
 		node.Status = "unreachable"
 		node.LastError = res.Message
 		_ = r.Store.UpdateNode(node)
@@ -226,7 +226,7 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 		res.OK = resp.GetOk()
 		res.Message = resp.GetMessage()
 		if !res.OK && res.Message == "" {
-			res.Message = "start failed"
+			res.Message = "启动失败"
 		}
 		if res.OK {
 			node.Status = "online"
@@ -247,10 +247,10 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 		res.OK = resp.GetOk()
 		res.Message = resp.GetMessage()
 		if !res.OK && res.Message == "" {
-			res.Message = "stop failed"
+			res.Message = "停止失败"
 		}
 	default:
-		res.Message = fmt.Sprintf("unknown task type %q", taskType)
+		res.Message = fmt.Sprintf("未知任务类型 %q", taskType)
 	}
 	return res
 }
@@ -266,7 +266,7 @@ func (r *Runner) applyNode(ctx context.Context, client NodeRPC, taskID string, n
 	}
 	cfg, err := builder.Build(node.ID)
 	if err != nil {
-		return "", fmt.Errorf("build config: %w", err)
+		return "", fmt.Errorf("构建配置失败：%w", err)
 	}
 	cfgJSON := cfg.JSON
 	hash := cfg.Hash
@@ -278,7 +278,7 @@ func (r *Runner) applyNode(ctx context.Context, client NodeRPC, taskID string, n
 		TaskID:     taskID,
 	}
 	if err := r.Store.SaveSnapshot(snap); err != nil {
-		return "", fmt.Errorf("save snapshot: %w", err)
+		return "", fmt.Errorf("保存配置快照失败：%w", err)
 	}
 
 	resp, err := client.ApplyConfig(ctx, cfgJSON, hash, true)
@@ -288,7 +288,7 @@ func (r *Runner) applyNode(ctx context.Context, client NodeRPC, taskID string, n
 	if !resp.GetOk() {
 		msg := resp.GetMessage()
 		if msg == "" {
-			msg = "apply failed"
+			msg = "配置下发失败"
 		}
 		return "", fmt.Errorf("%s", msg)
 	}
@@ -302,7 +302,7 @@ func (r *Runner) applyNode(ctx context.Context, client NodeRPC, taskID string, n
 	node.LastSeenUnix = time.Now().Unix()
 	if err := r.Store.UpdateNode(node); err != nil {
 		// Apply succeeded; surface update error lightly in message.
-		return fmt.Sprintf("applied (node update: %v)", err), nil
+		return fmt.Sprintf("配置已下发（更新节点状态失败：%v）", err), nil
 	}
 	return resp.GetMessage(), nil
 }

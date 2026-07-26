@@ -134,7 +134,7 @@ func RenderClash(endpoints []ProxyEndpoint) ([]byte, error) {
 	for _, ep := range endpoints {
 		p, err := clashProxy(ep)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", ep.Name, err)
+			return nil, fmt.Errorf("%s：%w", ep.Name, err)
 		}
 		// Prefer UDP on/off already set per protocol; force udp true when absent
 		// so merged external nodes behave like provider override: udp: true.
@@ -336,7 +336,7 @@ func RenderSingbox(endpoints []ProxyEndpoint) ([]byte, error) {
 	for _, ep := range endpoints {
 		ob, err := SingboxOutbound(ep)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", ep.Name, err)
+			return nil, fmt.Errorf("%s：%w", ep.Name, err)
 		}
 		outbounds = append(outbounds, ob)
 		tags = append(tags, ep.Name)
@@ -418,7 +418,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		method, _ := paramString(ep.Params, "method")
 		password, _ := paramString(ep.Params, "password")
 		if method == "" || password == "" {
-			return nil, fmt.Errorf("missing method/password")
+			return nil, fmt.Errorf("缺少加密方法或密码")
 		}
 		p["type"] = "ss"
 		p["cipher"] = method
@@ -431,7 +431,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 	case "trojan":
 		password, _ := paramString(ep.Params, "password")
 		if password == "" {
-			return nil, fmt.Errorf("missing password")
+			return nil, fmt.Errorf("缺少密码")
 		}
 		p["type"] = "trojan"
 		p["password"] = password
@@ -443,7 +443,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 	case "vless":
 		uid, _ := paramString(ep.Params, "uuid")
 		if uid == "" {
-			return nil, fmt.Errorf("missing uuid")
+			return nil, fmt.Errorf("缺少 UUID")
 		}
 		p["type"] = "vless"
 		p["uuid"] = uid
@@ -483,12 +483,12 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 				"short-id":   sid,
 			}
 		default:
-			return nil, fmt.Errorf("unsupported tls_mode %q", mode)
+			return nil, fmt.Errorf("不支持 tls_mode %q", mode)
 		}
 	case "hysteria2":
 		password, _ := paramString(ep.Params, "password")
 		if password == "" {
-			return nil, fmt.Errorf("missing password")
+			return nil, fmt.Errorf("缺少密码")
 		}
 		p["type"] = "hysteria2"
 		p["password"] = password
@@ -506,7 +506,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		uid, _ := paramString(ep.Params, "uuid")
 		password, _ := paramString(ep.Params, "password")
 		if uid == "" || password == "" {
-			return nil, fmt.Errorf("missing uuid/password")
+			return nil, fmt.Errorf("缺少 UUID 或密码")
 		}
 		p["type"] = "tuic"
 		p["uuid"] = uid
@@ -525,7 +525,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 	case "anytls":
 		password, _ := paramString(ep.Params, "password")
 		if password == "" {
-			return nil, fmt.Errorf("missing password")
+			return nil, fmt.Errorf("缺少密码")
 		}
 		p["type"] = "anytls"
 		p["password"] = password
@@ -538,7 +538,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 	case "vmess":
 		uid, _ := paramString(ep.Params, "uuid")
 		if uid == "" {
-			return nil, fmt.Errorf("missing uuid")
+			return nil, fmt.Errorf("缺少 UUID")
 		}
 		p["type"] = "vmess"
 		p["uuid"] = uid
@@ -563,10 +563,10 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 				p["servername"] = sn
 			}
 		default:
-			return nil, fmt.Errorf("unsupported tls_mode %q", mode)
+			return nil, fmt.Errorf("不支持 tls_mode %q", mode)
 		}
 	default:
-		return nil, fmt.Errorf("unsupported protocol %q", ep.Protocol)
+		return nil, fmt.Errorf("不支持协议 %q", ep.Protocol)
 	}
 	return p, nil
 }
@@ -584,7 +584,7 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		method, _ := paramString(ep.Params, "method")
 		password, _ := paramString(ep.Params, "password")
 		if method == "" || password == "" {
-			return nil, fmt.Errorf("missing method/password")
+			return nil, fmt.Errorf("缺少加密方法或密码")
 		}
 		o["type"] = "shadowsocks"
 		o["method"] = method
@@ -592,7 +592,7 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 	case "trojan":
 		password, _ := paramString(ep.Params, "password")
 		if password == "" {
-			return nil, fmt.Errorf("missing password")
+			return nil, fmt.Errorf("缺少密码")
 		}
 		o["type"] = "trojan"
 		o["password"] = password
@@ -604,7 +604,7 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 	case "vless":
 		uid, _ := paramString(ep.Params, "uuid")
 		if uid == "" {
-			return nil, fmt.Errorf("missing uuid")
+			return nil, fmt.Errorf("缺少 UUID")
 		}
 		o["type"] = "vless"
 		o["uuid"] = uid
@@ -644,12 +644,12 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 				},
 			}
 		default:
-			return nil, fmt.Errorf("unsupported tls_mode %q", mode)
+			return nil, fmt.Errorf("不支持 tls_mode %q", mode)
 		}
 	case "hysteria2":
 		password, _ := paramString(ep.Params, "password")
 		if password == "" {
-			return nil, fmt.Errorf("missing password")
+			return nil, fmt.Errorf("缺少密码")
 		}
 		o["type"] = "hysteria2"
 		o["password"] = password
@@ -668,7 +668,7 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		uid, _ := paramString(ep.Params, "uuid")
 		password, _ := paramString(ep.Params, "password")
 		if uid == "" || password == "" {
-			return nil, fmt.Errorf("missing uuid/password")
+			return nil, fmt.Errorf("缺少 UUID 或密码")
 		}
 		o["type"] = "tuic"
 		o["uuid"] = uid
@@ -688,7 +688,7 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 	case "anytls":
 		password, _ := paramString(ep.Params, "password")
 		if password == "" {
-			return nil, fmt.Errorf("missing password")
+			return nil, fmt.Errorf("缺少密码")
 		}
 		o["type"] = "anytls"
 		o["password"] = password
@@ -704,7 +704,7 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 	case "vmess":
 		uid, _ := paramString(ep.Params, "uuid")
 		if uid == "" {
-			return nil, fmt.Errorf("missing uuid")
+			return nil, fmt.Errorf("缺少 UUID")
 		}
 		o["type"] = "vmess"
 		o["uuid"] = uid
@@ -727,10 +727,10 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 				"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 			}
 		default:
-			return nil, fmt.Errorf("unsupported tls_mode %q", mode)
+			return nil, fmt.Errorf("不支持 tls_mode %q", mode)
 		}
 	default:
-		return nil, fmt.Errorf("unsupported protocol %q", ep.Protocol)
+		return nil, fmt.Errorf("不支持协议 %q", ep.Protocol)
 	}
 	return o, nil
 }
@@ -749,22 +749,22 @@ func endpointTLSSkipVerify(ep ProxyEndpoint) bool {
 
 func realityPublicKey(privateKeyB64 string) (string, error) {
 	if privateKeyB64 == "" {
-		return "", fmt.Errorf("missing reality private_key")
+		return "", fmt.Errorf("缺少 Reality private_key")
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(privateKeyB64)
 	if err != nil {
 		// try StdEncoding
 		raw, err = base64.StdEncoding.DecodeString(privateKeyB64)
 		if err != nil {
-			return "", fmt.Errorf("decode reality private key: %w", err)
+			return "", fmt.Errorf("解码 Reality 私钥失败：%w", err)
 		}
 	}
 	if len(raw) != 32 {
-		return "", fmt.Errorf("reality private key must be 32 bytes")
+		return "", fmt.Errorf("Reality 私钥必须为 32 字节")
 	}
 	priv, err := ecdh.X25519().NewPrivateKey(raw)
 	if err != nil {
-		return "", fmt.Errorf("reality private key: %w", err)
+		return "", fmt.Errorf("处理 Reality 私钥失败：%w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()), nil
 }
@@ -812,11 +812,11 @@ func paramStringMust(m map[string]any, key string) string {
 
 func paramInt(m map[string]any, key string) (int, error) {
 	if m == nil {
-		return 0, fmt.Errorf("missing")
+		return 0, fmt.Errorf("缺少数值")
 	}
 	v, ok := m[key]
 	if !ok || v == nil {
-		return 0, fmt.Errorf("missing")
+		return 0, fmt.Errorf("缺少数值")
 	}
 	switch n := v.(type) {
 	case int:
@@ -833,7 +833,7 @@ func paramInt(m map[string]any, key string) (int, error) {
 		_, err := fmt.Sscanf(strings.TrimSpace(n), "%d", &i)
 		return i, err
 	default:
-		return 0, fmt.Errorf("bad type")
+		return 0, fmt.Errorf("数值类型无效")
 	}
 }
 
