@@ -108,22 +108,15 @@ func (r *Runner) nodesNeedingBootstrap() ([]store.Node, error) {
 	}
 	var need []store.Node
 	for _, n := range nodes {
-		if nodeLooksSynced(n) {
-			continue
+		builder := r.ConfigBuilder
+		if builder == nil {
+			return nil, fmt.Errorf("config builder not configured")
 		}
-		ins, err := r.Store.ListInboundsForNode(n.ID)
+		cfg, err := builder.Build(n.ID)
 		if err != nil {
 			return nil, err
 		}
-		hasEnabled := false
-		for _, in := range ins {
-			if in.Enabled {
-				hasEnabled = true
-				break
-			}
-		}
-		if !hasEnabled {
-			// Nothing to push; skip to avoid endless convert failures.
+		if nodeLooksSynced(n) && (n.ConfigHash == "" || n.ConfigHash == cfg.Hash) {
 			continue
 		}
 		need = append(need, n)

@@ -37,6 +37,26 @@ func (s *Server) Ping(context.Context, *agentv1.PingRequest) (*agentv1.PingRespo
 	return &agentv1.PingResponse{
 		AgentVersion:   s.agentVersion,
 		SingboxVersion: s.singboxVersion,
+		Capabilities:   []string{"proxy_chain_v1"},
+	}, nil
+}
+
+func (s *Server) ProbeOutbound(ctx context.Context, req *agentv1.ProbeOutboundRequest) (*agentv1.ProbeOutboundResponse, error) {
+	if req == nil || strings.TrimSpace(req.GetOutboundTag()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "outbound_tag required")
+	}
+	targetURL := strings.TrimSpace(req.GetUrl())
+	if targetURL == "" {
+		targetURL = "https://www.gstatic.com/generate_204"
+	}
+	delay, err := s.rt.ProbeOutbound(ctx, req.GetOutboundTag(), targetURL)
+	if err != nil {
+		return &agentv1.ProbeOutboundResponse{Ok: false, Message: err.Error()}, nil
+	}
+	return &agentv1.ProbeOutboundResponse{
+		Ok:      true,
+		DelayMs: delay,
+		Message: "ok",
 	}, nil
 }
 

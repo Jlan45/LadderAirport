@@ -158,6 +158,56 @@ func TestConvertEmptyError(t *testing.T) {
 	}
 }
 
+func TestConvertAllowEmptyAndChainRoute(t *testing.T) {
+	empty, err := Convert(nil, ConvertOptions{AllowEmpty: true})
+	if err != nil {
+		t.Fatalf("Convert empty: %v", err)
+	}
+	var emptyConfig struct {
+		Inbounds []any `json:"inbounds"`
+	}
+	if err := json.Unmarshal(empty, &emptyConfig); err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyConfig.Inbounds) != 0 {
+		t.Fatalf("empty inbounds = %d, want 0", len(emptyConfig.Inbounds))
+	}
+
+	in := store.InboundConfig{
+		ID: "chain-entry", Name: "entry", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{
+			"listen": "0.0.0.0", "port": float64(8388),
+			"method": "aes-256-gcm", "password": "secret", "network": "tcp",
+		},
+	}
+	raw, err := Convert([]store.InboundConfig{in}, ConvertOptions{
+		ChainRoutes: []ChainRoute{{
+			InboundID: in.ID,
+			Outbound: map[string]any{
+				"type": "shadowsocks", "tag": "chain-next",
+				"server": "next.example", "server_port": 8389,
+				"method": "aes-256-gcm", "password": "next-secret",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Convert chain route: %v", err)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	outbounds := cfg["outbounds"].([]any)
+	if len(outbounds) != 2 || outbounds[1].(map[string]any)["tag"] != "chain-next" {
+		t.Fatalf("outbounds = %#v", outbounds)
+	}
+	route := cfg["route"].(map[string]any)
+	rules := route["rules"].([]any)
+	if len(rules) != 1 || rules[0].(map[string]any)["outbound"] != "chain-next" {
+		t.Fatalf("route rules = %#v", rules)
+	}
+}
+
 func TestConvertPortConflict(t *testing.T) {
 	a := store.InboundConfig{
 		ID: "a", Name: "a", Protocol: "shadowsocks", Enabled: true,

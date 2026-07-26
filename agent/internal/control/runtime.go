@@ -31,4 +31,5 @@ type Runtime interface {
 	Stop(ctx context.Context) error
 	Status(ctx context.Context) Status
 	Metrics(ctx context.Context) Metrics
+	ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (uint32, error)
 }

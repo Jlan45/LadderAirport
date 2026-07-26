@@ -5,7 +5,7 @@
   "inbounds": [
     {
       "type": "vmess",
-      "tag": "in-vmess-main",
+      "tag": "in-vmess-main-vm001",
       "listen": "0.0.0.0",
       "listen_port": 10086,
       "users": [

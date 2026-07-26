@@ -33,19 +33,20 @@ type Node struct {
 	LastSeenUnix    int64  `json:"last_seen_unix"`
 	ConfigHash      string `json:"config_hash"`
 	// Live monitoring cache (updated by fleet refresh / probe).
-	RuntimeState   string  `json:"runtime_state"` // running | stopped | error | ""
-	AgentVersion   string  `json:"agent_version"`
-	SingboxVersion string  `json:"singbox_version"`
-	Connections    int64   `json:"connections"`
-	UplinkBytes    int64   `json:"uplink_bytes"`
-	DownlinkBytes  int64   `json:"downlink_bytes"`
-	CPUPercent     float64 `json:"cpu_percent"`
-	MemoryRSSBytes int64   `json:"memory_rss_bytes"`
-	MetricsAtUnix  int64   `json:"metrics_at_unix"`
-	LastError      string  `json:"last_error,omitempty"`
-	InboundCount   int     `json:"inbound_count,omitempty"` // filled by overview, not persisted
-	CreatedAtUnix  int64   `json:"created_at_unix"`
-	UpdatedAtUnix  int64   `json:"updated_at_unix"`
+	RuntimeState   string   `json:"runtime_state"` // running | stopped | error | ""
+	AgentVersion   string   `json:"agent_version"`
+	SingboxVersion string   `json:"singbox_version"`
+	Capabilities   []string `json:"capabilities"`
+	Connections    int64    `json:"connections"`
+	UplinkBytes    int64    `json:"uplink_bytes"`
+	DownlinkBytes  int64    `json:"downlink_bytes"`
+	CPUPercent     float64  `json:"cpu_percent"`
+	MemoryRSSBytes int64    `json:"memory_rss_bytes"`
+	MetricsAtUnix  int64    `json:"metrics_at_unix"`
+	LastError      string   `json:"last_error,omitempty"`
+	InboundCount   int      `json:"inbound_count,omitempty"` // filled by overview, not persisted
+	CreatedAtUnix  int64    `json:"created_at_unix"`
+	UpdatedAtUnix  int64    `json:"updated_at_unix"`
 }
 
 // NodeOperatorUpdate contains only fields controlled by an operator. Runtime
@@ -157,6 +158,7 @@ type TaskNodeResult struct {
 	NodeID  string `json:"node_id"`
 	OK      bool   `json:"ok"`
 	Message string `json:"message"`
+	Phase   string `json:"phase,omitempty"`
 }
 
 type Settings struct {
@@ -166,7 +168,11 @@ type Settings struct {
 	MaxConcurrency    int    `json:"max_concurrency"`
 	ListenAddr        string `json:"listen_addr"`
 	// PublicBaseURL is used to render full subscription links (e.g. https://panel.example.com).
-	PublicBaseURL string `json:"public_base_url"`
+	PublicBaseURL             string `json:"public_base_url"`
+	ChainProbeURL             string `json:"chain_probe_url"`
+	ChainProbeIntervalSec     int    `json:"chain_probe_interval_sec"`
+	ChainProbeTimeoutSec      int    `json:"chain_probe_timeout_sec"`
+	ChainSubscriptionMigrated bool   `json:"-"`
 }
 
 // Subscription is a client-facing share link.
@@ -177,9 +183,42 @@ type Subscription struct {
 	Token              string   `json:"token"`            // URL secret for public /sub/{token}
 	InboundIDs         []string `json:"inbound_ids"`      // selected IDs when IncludeAllInbounds is false
 	IncludeAllInbounds bool     `json:"include_all_inbounds"`
+	IncludeStandalone  bool     `json:"include_standalone"`
+	ChainIDs           []string `json:"chain_ids"`
+	IncludeAllChains   bool     `json:"include_all_chains"`
 	Enabled            bool     `json:"enabled"`
 	CreatedAtUnix      int64    `json:"created_at_unix"`
 	UpdatedAtUnix      int64    `json:"updated_at_unix"`
+}
+
+// ProxyChain is an ordered server-side proxy path. Hops are chain-owned and
+// therefore do not appear in node_inbounds unless separately attached.
+type ProxyChain struct {
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Enabled          bool            `json:"enabled"`
+	State            string          `json:"state"` // disabled|deploying|healthy|degraded
+	Hops             []ProxyChainHop `json:"hops"`
+	LastDeployUnix   int64           `json:"last_deploy_unix"`
+	LastDeployError  string          `json:"last_deploy_error,omitempty"`
+	LastProbeUnix    int64           `json:"last_probe_unix"`
+	LastProbeDelayMS int             `json:"last_probe_delay_ms"`
+	LastProbeError   string          `json:"last_probe_error,omitempty"`
+	FailedHopIndex   int             `json:"failed_hop_index"` // -1 when unknown/healthy
+	CreatedAtUnix    int64           `json:"created_at_unix"`
+	UpdatedAtUnix    int64           `json:"updated_at_unix"`
+}
+
+// ProxyChainHop describes how a consumer (the client for hop zero, otherwise
+// the preceding Agent) reaches this hop.
+type ProxyChainHop struct {
+	ChainID       string `json:"chain_id,omitempty"`
+	Position      int    `json:"position"`
+	NodeID        string `json:"node_id"`
+	InboundID     string `json:"inbound_id"`
+	DialAddress   string `json:"dial_address"`
+	DialPort      int    `json:"dial_port"`
+	TLSSkipVerify bool   `json:"tls_skip_verify"`
 }
 
 // ExternalSource is a remote subscription URL that can be attached to panel subscriptions.

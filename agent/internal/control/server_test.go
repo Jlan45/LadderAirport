@@ -23,6 +23,8 @@ type stubRuntime struct {
 	state      control.State
 	configHash string
 	startedAt  int64
+	probeTag   string
+	probeURL   string
 }
 
 func (s *stubRuntime) Apply(_ context.Context, _ string, hash string) error {
@@ -59,6 +61,14 @@ func (s *stubRuntime) Status(context.Context) control.Status {
 
 func (s *stubRuntime) Metrics(context.Context) control.Metrics {
 	return control.Metrics{}
+}
+
+func (s *stubRuntime) ProbeOutbound(_ context.Context, tag, targetURL string) (uint32, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.probeTag = tag
+	s.probeURL = targetURL
+	return 1, nil
 }
 
 func startTestServer(t *testing.T, token string, rt control.Runtime) (agentv1.AgentControlClient, func()) {
@@ -120,5 +130,35 @@ func TestApplyConfigOK(t *testing.T) {
 	st := rt.Status(context.Background())
 	if st.State != control.StateRunning || st.ConfigHash != "abc" {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestPingCapabilityAndProbeOutbound(t *testing.T) {
+	rt := &stubRuntime{state: control.StateRunning}
+	client, cleanup := startTestServer(t, "secret", rt)
+	defer cleanup()
+	ctx := auth.AppendBearerToken(context.Background(), "secret")
+
+	ping, err := client.Ping(ctx, &agentv1.PingRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ping.Capabilities) != 1 || ping.Capabilities[0] != "proxy_chain_v1" {
+		t.Fatalf("capabilities = %v", ping.Capabilities)
+	}
+	probe, err := client.ProbeOutbound(ctx, &agentv1.ProbeOutboundRequest{
+		OutboundTag: "chain-next",
+		Url:         "https://probe.example/204",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !probe.Ok || probe.DelayMs != 1 {
+		t.Fatalf("probe = %+v", probe)
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.probeTag != "chain-next" || rt.probeURL != "https://probe.example/204" {
+		t.Fatalf("runtime probe args = %q %q", rt.probeTag, rt.probeURL)
 	}
 }

@@ -5,7 +5,7 @@
   "inbounds": [
     {
       "type": "trojan",
-      "tag": "in-trojan-main",
+      "tag": "in-trojan-main-tr001",
       "listen": "0.0.0.0",
       "listen_port": 443,
       "users": [

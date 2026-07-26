@@ -108,6 +108,7 @@ export interface Node {
   runtime_state?: string
   agent_version?: string
   singbox_version?: string
+  capabilities?: string[]
   connections?: number
   uplink_bytes?: number
   downlink_bytes?: number
@@ -201,6 +202,9 @@ export interface Settings {
   max_concurrency: number
   listen_addr: string
   public_base_url?: string
+  chain_probe_url?: string
+  chain_probe_interval_sec?: number
+  chain_probe_timeout_sec?: number
 }
 
 export interface Subscription {
@@ -211,11 +215,52 @@ export interface Subscription {
   inbound_ids: string[]
   /** True includes every enabled local inbound; false allows an external-only subscription. */
   include_all_inbounds: boolean
+  include_standalone: boolean
+  chain_ids: string[]
+  include_all_chains: boolean
   external_source_ids?: string[]
   enabled: boolean
   url?: string
   created_at_unix: number
   updated_at_unix: number
+}
+
+export interface ProxyChainHop {
+  chain_id?: string
+  position: number
+  node_id: string
+  inbound_id: string
+  dial_address: string
+  dial_port: number
+  tls_skip_verify: boolean
+}
+
+export interface ProxyChain {
+  id: string
+  name: string
+  enabled: boolean
+  state: 'disabled' | 'deploying' | 'healthy' | 'degraded' | string
+  hops: ProxyChainHop[]
+  last_deploy_unix: number
+  last_deploy_error?: string
+  last_probe_unix: number
+  last_probe_delay_ms: number
+  last_probe_error?: string
+  failed_hop_index: number
+  created_at_unix: number
+  updated_at_unix: number
+}
+
+export interface ProxyChainInput {
+  name: string
+  hops: Array<Omit<ProxyChainHop, 'chain_id' | 'position'>>
+}
+
+export interface ChainProbeResult {
+  ok: boolean
+  delay_ms: number
+  message?: string
+  failed_hop_index: number
 }
 
 export interface ExternalSource {
@@ -322,6 +367,9 @@ export interface PutSettingsInput {
   max_concurrency?: number
   listen_addr?: string
   public_base_url?: string
+  chain_probe_url?: string
+  chain_probe_interval_sec?: number
+  chain_probe_timeout_sec?: number
   new_password?: string
 }
 
@@ -615,6 +663,9 @@ export function createSubscription(body: {
   format?: string
   inbound_ids?: string[]
   include_all_inbounds?: boolean
+  include_standalone?: boolean
+  chain_ids?: string[]
+  include_all_chains?: boolean
   external_source_ids?: string[]
   enabled?: boolean
 }): Promise<Subscription> {
@@ -628,6 +679,9 @@ export function updateSubscription(
     format?: string
     inbound_ids?: string[]
     include_all_inbounds?: boolean
+    include_standalone?: boolean
+    chain_ids?: string[]
+    include_all_chains?: boolean
     external_source_ids?: string[]
     enabled?: boolean
     rotate_token?: boolean
@@ -643,6 +697,40 @@ export function deleteSubscription(id: string): Promise<void> {
 export async function previewSubscription(id: string, format?: string): Promise<string> {
   const query = format ? `?format=${encodeURIComponent(format)}` : ''
   return requestText(`/subscriptions/${id}/preview${query}`)
+}
+
+// --- Server-side proxy chains ---
+
+export function listProxyChains(): Promise<ProxyChain[]> {
+  return request('GET', '/proxy-chains')
+}
+
+export function createProxyChain(body: ProxyChainInput): Promise<ProxyChain> {
+  return request('POST', '/proxy-chains', body)
+}
+
+export function updateProxyChain(id: string, body: ProxyChainInput): Promise<ProxyChain> {
+  return request('PUT', `/proxy-chains/${id}`, body)
+}
+
+export function deleteProxyChain(id: string): Promise<void> {
+  return request('DELETE', `/proxy-chains/${id}`)
+}
+
+export function enableProxyChain(id: string): Promise<ProxyChain> {
+  return request('POST', `/proxy-chains/${id}/enable`)
+}
+
+export function disableProxyChain(id: string): Promise<ProxyChain> {
+  return request('POST', `/proxy-chains/${id}/disable`)
+}
+
+export function probeProxyChain(id: string): Promise<ChainProbeResult> {
+  return request('POST', `/proxy-chains/${id}/probe`)
+}
+
+export function previewProxyChain(body: ProxyChainInput): Promise<{ configs: Record<string, unknown> }> {
+  return request('POST', '/proxy-chains/preview', body)
 }
 
 // --- External subscription sources ---

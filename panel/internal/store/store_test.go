@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -183,6 +184,112 @@ func TestCreateInboundAndAttach(t *testing.T) {
 	}
 	if len(attached) != 0 {
 		t.Fatalf("expected no attachments, got %d", len(attached))
+	}
+}
+
+func TestProxyChainOwnsBindingsAndPreservesOrder(t *testing.T) {
+	s := openTestStore(t)
+	nodes := []*Node{
+		{Name: "entry", Address: "10.0.0.1", GRPCPort: 9090},
+		{Name: "exit", Address: "10.0.0.2", GRPCPort: 9090},
+	}
+	inbounds := []*InboundConfig{
+		{Name: "entry-in", Protocol: "shadowsocks", Enabled: true, Params: map[string]any{"port": 8388}},
+		{Name: "exit-in", Protocol: "shadowsocks", Enabled: true, Params: map[string]any{"port": 8389}},
+	}
+	for _, node := range nodes {
+		if err := s.CreateNode(node); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, inbound := range inbounds {
+		if err := s.CreateInbound(inbound); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	chain := &ProxyChain{
+		Name: "entry-to-exit",
+		Hops: []ProxyChainHop{
+			{NodeID: nodes[0].ID, InboundID: inbounds[0].ID},
+			{NodeID: nodes[1].ID, InboundID: inbounds[1].ID, DialAddress: "edge.internal", DialPort: 18443},
+		},
+	}
+	if err := s.CreateProxyChain(chain); err != nil {
+		t.Fatalf("CreateProxyChain: %v", err)
+	}
+	got, err := s.GetProxyChain(chain.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled || got.State != "disabled" || len(got.Hops) != 2 {
+		t.Fatalf("created chain = %+v", got)
+	}
+	if got.Hops[0].Position != 0 || got.Hops[1].Position != 1 ||
+		got.Hops[1].DialAddress != "edge.internal" || got.Hops[1].DialPort != 18443 {
+		t.Fatalf("hop order/overrides not preserved: %+v", got.Hops)
+	}
+
+	if err := s.SetNodeInbounds(nodes[0].ID, []string{inbounds[0].ID}); err == nil ||
+		!strings.Contains(err.Error(), "reserved by a proxy chain") {
+		t.Fatalf("standalone binding should be blocked, got %v", err)
+	}
+	conflict := &ProxyChain{
+		Name: "conflict",
+		Hops: []ProxyChainHop{
+			{NodeID: nodes[0].ID, InboundID: inbounds[0].ID},
+			{NodeID: nodes[1].ID, InboundID: inbounds[1].ID},
+		},
+	}
+	if err := s.CreateProxyChain(conflict); err == nil ||
+		!strings.Contains(err.Error(), "reserved by another chain") {
+		t.Fatalf("overlapping chain should be blocked, got %v", err)
+	}
+}
+
+func TestMigrateSubscriptionsToChainsOnce(t *testing.T) {
+	s := openTestStore(t)
+	local := &Subscription{
+		Name: "local", Format: "clash", Token: "local-token",
+		IncludeAllInbounds: true, IncludeStandalone: true, Enabled: true,
+	}
+	externalOnly := &Subscription{
+		Name: "external", Format: "clash", Token: "external-token",
+		IncludeAllInbounds: false, IncludeStandalone: false, Enabled: true,
+	}
+	if err := s.CreateSubscription(local); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateSubscription(externalOnly); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MigrateSubscriptionsToChains(); err != nil {
+		t.Fatal(err)
+	}
+
+	gotLocal, err := s.GetSubscription(local.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotLocal.IncludeStandalone || !gotLocal.IncludeAllChains {
+		t.Fatalf("local subscription not migrated to chain-only: %+v", gotLocal)
+	}
+	gotExternal, err := s.GetSubscription(externalOnly.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotExternal.IncludeStandalone || gotExternal.IncludeAllChains {
+		t.Fatalf("external-only subscription should be unchanged: %+v", gotExternal)
+	}
+	settings, err := s.GetSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.ChainSubscriptionMigrated {
+		t.Fatal("migration marker not set")
+	}
+	if err := s.MigrateSubscriptionsToChains(); err != nil {
+		t.Fatalf("second migration must be a no-op: %v", err)
 	}
 }
 

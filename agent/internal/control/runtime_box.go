@@ -4,6 +4,7 @@ import (
 	"context"
 	stdjson "encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	box "github.com/sagernet/sing-box"
+	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/include"
 	"github.com/sagernet/sing-box/option"
@@ -280,6 +282,33 @@ func (r *BoxRuntime) Metrics(_ context.Context) Metrics {
 		CPUPercent:     sampleCPUPercent(),
 		MemoryRSSBytes: int64(ms.Sys),
 	}
+}
+
+// ProbeOutbound performs a real HTTP URL test through a running outbound. The
+// lifecycle lock prevents Apply from closing the box while the dial is active.
+func (r *BoxRuntime) ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (uint32, error) {
+	parsed, err := url.Parse(targetURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return 0, fmt.Errorf("probe URL must be absolute http/https")
+	}
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+	r.mu.Lock()
+	instance := r.instance
+	state := r.state
+	r.mu.Unlock()
+	if instance == nil || state != StateRunning {
+		return 0, fmt.Errorf("sing-box is not running")
+	}
+	outbound, ok := instance.Outbound().Outbound(outboundTag)
+	if !ok {
+		return 0, fmt.Errorf("outbound not found: %s", outboundTag)
+	}
+	delay, err := urltest.URLTest(ctx, targetURL, outbound)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(delay), nil
 }
 
 // ConfigJSON returns the last successfully applied config JSON (for tests).

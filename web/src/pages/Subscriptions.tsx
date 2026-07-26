@@ -62,6 +62,7 @@ import {
   deleteSubscription,
   listExternalSources,
   listInbounds,
+  listProxyChains,
   listSubscriptions,
   previewExternalSource,
   previewSubscription,
@@ -70,6 +71,7 @@ import {
   updateSubscription,
   type ExternalSource,
   type InboundConfig,
+  type ProxyChain,
   type Subscription,
 } from '../api/client'
 import { copyText } from '../lib/clipboard'
@@ -87,6 +89,8 @@ type SubscriptionEditor = {
   enabled: boolean
   localMode: LocalMode
   inboundIds: Set<string>
+  includeAllChains: boolean
+  chainIds: Set<string>
   sourceIds: Set<string>
 }
 
@@ -107,8 +111,10 @@ const EMPTY_SUB_EDITOR: SubscriptionEditor = {
   id: null,
   name: '',
   enabled: true,
-  localMode: 'all',
+  localMode: 'none',
   inboundIds: new Set(),
+  includeAllChains: true,
+  chainIds: new Set(),
   sourceIds: new Set(),
 }
 
@@ -126,6 +132,7 @@ export default function Subscriptions() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [inbounds, setInbounds] = useState<InboundConfig[]>([])
   const [sources, setSources] = useState<ExternalSource[]>([])
+  const [chains, setChains] = useState<ProxyChain[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [pending, setPending] = useState<Set<string>>(new Set())
@@ -158,6 +165,7 @@ export default function Subscriptions() {
       listSubscriptions(),
       listInbounds(),
       listExternalSources(),
+      listProxyChains(),
     ])
     if (version !== loadVersion.current) return
 
@@ -168,6 +176,8 @@ export default function Subscriptions() {
     else errors.push(errorText(results[1].reason, '入站列表加载失败'))
     if (results[2].status === 'fulfilled') setSources(results[2].value ?? [])
     else errors.push(errorText(results[2].reason, '外部源列表加载失败'))
+    if (results[3].status === 'fulfilled') setChains(results[3].value ?? [])
+    else errors.push(errorText(results[3].reason, '代理链列表加载失败'))
     setLoadError(errors.join('；'))
     setLoading(false)
   }, [])
@@ -224,25 +234,45 @@ export default function Subscriptions() {
 
   function openCreateSubscription() {
     setEditorError('')
-    setSubEditor({ ...EMPTY_SUB_EDITOR, open: true, inboundIds: new Set(), sourceIds: new Set() })
+    setSubEditor({
+      ...EMPTY_SUB_EDITOR,
+      open: true,
+      inboundIds: new Set(),
+      chainIds: new Set(),
+      sourceIds: new Set(),
+    })
   }
 
   function openEditSubscription(subscription: Subscription) {
     setEditorError('')
+    const includeStandalone = subscription.include_standalone ?? true
     const includeAll = subscription.include_all_inbounds ?? subscription.inbound_ids.length === 0
     setSubEditor({
       open: true,
       id: subscription.id,
       name: subscription.name,
       enabled: subscription.enabled,
-      localMode: includeAll ? 'all' : subscription.inbound_ids.length ? 'custom' : 'none',
+      localMode: !includeStandalone
+        ? 'none'
+        : includeAll
+          ? 'all'
+          : subscription.inbound_ids.length
+            ? 'custom'
+            : 'none',
       inboundIds: new Set(subscription.inbound_ids ?? []),
+      includeAllChains: subscription.include_all_chains ?? false,
+      chainIds: new Set(subscription.chain_ids ?? []),
       sourceIds: new Set(subscription.external_source_ids ?? []),
     })
   }
 
   function closeSubscriptionEditor() {
-    if (!saving) setSubEditor({ ...EMPTY_SUB_EDITOR, inboundIds: new Set(), sourceIds: new Set() })
+    if (!saving) setSubEditor({
+      ...EMPTY_SUB_EDITOR,
+      inboundIds: new Set(),
+      chainIds: new Set(),
+      sourceIds: new Set(),
+    })
   }
 
   function toggleEditorInbound(id: string) {
@@ -251,6 +281,10 @@ export default function Subscriptions() {
 
   function toggleEditorSource(id: string) {
     setSubEditor((current) => ({ ...current, sourceIds: toggleSet(current.sourceIds, id) }))
+  }
+
+  function toggleEditorChain(id: string) {
+    setSubEditor((current) => ({ ...current, chainIds: toggleSet(current.chainIds, id) }))
   }
 
   async function saveSubscription() {
@@ -262,9 +296,11 @@ export default function Subscriptions() {
     }
     if (
       subEditor.localMode === 'none' &&
+      !subEditor.includeAllChains &&
+      subEditor.chainIds.size === 0 &&
       subEditor.sourceIds.size === 0
     ) {
-      setEditorError('至少选择一个本地入站范围或外部源')
+      setEditorError('至少选择一个代理链、本地入站范围或外部源')
       return
     }
     if (
@@ -283,6 +319,9 @@ export default function Subscriptions() {
       include_all_inbounds: subEditor.localMode === 'all',
       inbound_ids:
         subEditor.localMode === 'custom' ? Array.from(subEditor.inboundIds) : [],
+      include_standalone: subEditor.localMode !== 'none',
+      include_all_chains: subEditor.includeAllChains,
+      chain_ids: subEditor.includeAllChains ? [] : Array.from(subEditor.chainIds),
       external_source_ids: Array.from(subEditor.sourceIds),
     }
     try {
@@ -295,7 +334,12 @@ export default function Subscriptions() {
           : [...current, saved],
       )
       toast.success(subEditor.id ? '订阅已更新' : '订阅已创建')
-      setSubEditor({ ...EMPTY_SUB_EDITOR, inboundIds: new Set(), sourceIds: new Set() })
+      setSubEditor({
+        ...EMPTY_SUB_EDITOR,
+        inboundIds: new Set(),
+        chainIds: new Set(),
+        sourceIds: new Set(),
+      })
     } catch (err) {
       setEditorError(errorText(err, '保存订阅失败'))
     } finally {
@@ -718,23 +762,26 @@ export default function Subscriptions() {
                       {/* Content Aggregation Summary */}
                       <div className="grid grid-cols-2 gap-2 pt-3 border-t border-zinc-900/80 text-xs">
                         <div className="space-y-0.5">
-                          <span className="text-[10px] text-zinc-500 block">本地节点范围</span>
+                          <span className="text-[10px] text-zinc-500 block">服务端代理链</span>
                           <span className="text-zinc-200 font-medium flex items-center gap-1">
                             <Server className="h-3 w-3 text-zinc-500" />
-                            {sub.include_all_inbounds
-                              ? `全网可接入 (${inbounds.length} 个)`
-                              : (sub.inbound_ids?.length ?? 0) > 0
-                                ? `指定 ${sub.inbound_ids.length} 个入站`
-                                : '不包含本地'}
+                            {sub.include_all_chains
+                              ? `全部已启用链 (${chains.filter((chain) => chain.enabled).length} 条)`
+                              : (sub.chain_ids?.length ?? 0) > 0
+                                ? `指定 ${sub.chain_ids.length} 条链`
+                                : '不包含代理链'}
                           </span>
                         </div>
                         <div className="space-y-0.5">
-                          <span className="text-[10px] text-zinc-500 block">关联外部订阅源</span>
+                          <span className="text-[10px] text-zinc-500 block">原始节点与外部源</span>
                           <span className="text-zinc-200 font-medium flex items-center gap-1">
                             <Layers className="h-3 w-3 text-zinc-500" />
+                            {sub.include_standalone
+                              ? (sub.include_all_inbounds ? '全部原始节点' : `指定 ${sub.inbound_ids.length} 个入站`)
+                              : '不含原始节点'}
                             {(sub.external_source_ids?.length ?? 0) > 0
-                              ? `包含 ${sub.external_source_ids?.length ?? 0} 个外部源`
-                              : '仅本地节点'}
+                              ? ` + ${sub.external_source_ids?.length ?? 0} 个外部源`
+                              : ''}
                           </span>
                         </div>
                       </div>
@@ -948,6 +995,44 @@ export default function Subscriptions() {
                 placeholder="例：常用客户端订阅 / 通用节点池"
                 className="bg-zinc-900 border-zinc-800 text-sm text-zinc-100"
               />
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-zinc-900">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs text-zinc-300 block">服务端代理链</Label>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">客户端只连接链的入口，不会看到中间跳</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="sub-all-chains" className="text-[11px] text-zinc-400">全部已启用链</Label>
+                  <Switch
+                    id="sub-all-chains"
+                    checked={subEditor.includeAllChains}
+                    onCheckedChange={(value) => setSubEditor({ ...subEditor, includeAllChains: value })}
+                  />
+                </div>
+              </div>
+              {!subEditor.includeAllChains && (
+                <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 max-h-40 overflow-y-auto space-y-2">
+                  {chains.length === 0 ? (
+                    <div className="text-xs text-zinc-500 text-center py-2">暂无代理链，请先在“代理链”页面创建</div>
+                  ) : (
+                    chains.map((chain) => (
+                      <div key={chain.id} className="flex items-center space-x-2 text-xs">
+                        <Checkbox
+                          id={`chain-${chain.id}`}
+                          checked={subEditor.chainIds.has(chain.id)}
+                          onCheckedChange={() => toggleEditorChain(chain.id)}
+                        />
+                        <label htmlFor={`chain-${chain.id}`} className="text-zinc-300 cursor-pointer flex-1">
+                          {chain.name}
+                          <span className="text-zinc-500 ml-1">({chain.hops.length} 跳 · {chainStateText(chain.state)})</span>
+                        </label>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="space-y-2 pt-2 border-t border-zinc-900">
@@ -1283,6 +1368,13 @@ function formatInterval(seconds: number): string {
     return `${seconds / 60} 分钟`
   }
   return `${seconds} 秒`
+}
+
+function chainStateText(state: string): string {
+  if (state === 'healthy') return '健康'
+  if (state === 'degraded') return '降级'
+  if (state === 'deploying') return '部署中'
+  return '已停用'
 }
 
 function errorText(err: unknown, fallback: string): string {

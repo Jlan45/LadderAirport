@@ -122,6 +122,7 @@ func (s *Server) refreshOneNode(parent context.Context, n store.Node) store.Node
 	n.LastSeenUnix = time.Now().Unix()
 	n.AgentVersion = ping.GetAgentVersion()
 	n.SingboxVersion = ping.GetSingboxVersion()
+	n.Capabilities = append([]string{}, ping.GetCapabilities()...)
 	n.LastError = ""
 
 	if st, err := client.GetStatus(ctx); err == nil {

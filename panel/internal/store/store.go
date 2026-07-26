@@ -25,6 +25,10 @@ func Open(path string) (*Store, error) {
 	}
 	// Single-writer is typical for panel; keep it simple and reliable.
 	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable sqlite foreign keys: %w", err)
+	}
 
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
@@ -78,6 +82,35 @@ func (s *Store) migrate() error {
 			PRIMARY KEY (node_id, inbound_id),
 			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
 			FOREIGN KEY (inbound_id) REFERENCES inbounds(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS proxy_chains (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			enabled INTEGER NOT NULL DEFAULT 0,
+			state TEXT NOT NULL DEFAULT 'disabled',
+			last_deploy_unix INTEGER NOT NULL DEFAULT 0,
+			last_deploy_error TEXT NOT NULL DEFAULT '',
+			last_probe_unix INTEGER NOT NULL DEFAULT 0,
+			last_probe_delay_ms INTEGER NOT NULL DEFAULT 0,
+			last_probe_error TEXT NOT NULL DEFAULT '',
+			failed_hop_index INTEGER NOT NULL DEFAULT -1,
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS proxy_chain_hops (
+			chain_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			node_id TEXT NOT NULL,
+			inbound_id TEXT NOT NULL,
+			dial_address TEXT NOT NULL DEFAULT '',
+			dial_port INTEGER NOT NULL DEFAULT 0,
+			tls_skip_verify INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (chain_id, position),
+			UNIQUE (chain_id, node_id),
+			UNIQUE (node_id, inbound_id),
+			FOREIGN KEY (chain_id) REFERENCES proxy_chains(id) ON DELETE CASCADE,
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE RESTRICT,
+			FOREIGN KEY (inbound_id) REFERENCES inbounds(id) ON DELETE RESTRICT
 		)`,
 		`CREATE TABLE IF NOT EXISTS tasks (
 			id TEXT PRIMARY KEY,
@@ -165,11 +198,19 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN egress_interface TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN port_mappings_json TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE nodes ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE settings ADD COLUMN chain_probe_url TEXT NOT NULL DEFAULT 'https://www.gstatic.com/generate_204'`,
+		`ALTER TABLE settings ADD COLUMN chain_probe_interval_sec INTEGER NOT NULL DEFAULT 60`,
+		`ALTER TABLE settings ADD COLUMN chain_probe_timeout_sec INTEGER NOT NULL DEFAULT 10`,
+		`ALTER TABLE settings ADD COLUMN chain_subscription_migrated INTEGER NOT NULL DEFAULT 0`,
 		// Nullable during migration so legacy rows can be backfilled from inbound_ids_json.
 		`ALTER TABLE subscriptions ADD COLUMN include_all_inbounds INTEGER`,
+		`ALTER TABLE subscriptions ADD COLUMN include_standalone INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE subscriptions ADD COLUMN chain_ids_json TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE subscriptions ADD COLUMN include_all_chains INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, stmt := range alters {
 		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
@@ -261,20 +302,24 @@ func (s *Store) CreateNode(n *Node) error {
 	if err != nil {
 		return fmt.Errorf("marshal port_mappings: %w", err)
 	}
+	capabilitiesJSON, err := marshalJSON(n.Capabilities)
+	if err != nil {
+		return fmt.Errorf("marshal capabilities: %w", err)
+	}
 	_, err = s.db.Exec(`
 		INSERT INTO nodes (
 			id, name, address, grpc_port, token, labels_json, tls_skip_verify, ca_cert_pem,
 			status, last_seen_unix, config_hash,
 			runtime_state, agent_version, singbox_version,
 			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
-			metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json,
+			metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
 			created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, boolToInt(n.TLSSkipVerify), n.CACertPEM,
 		n.Status, n.LastSeenUnix, n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
-		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress, mappingsJSON,
+		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress, mappingsJSON, capabilitiesJSON,
 		n.CreatedAtUnix, n.UpdatedAtUnix,
 	)
 	if err != nil {
@@ -300,6 +345,10 @@ func (s *Store) UpdateNode(n *Node) error {
 	if err != nil {
 		return fmt.Errorf("marshal port_mappings: %w", err)
 	}
+	capabilitiesJSON, err := marshalJSON(n.Capabilities)
+	if err != nil {
+		return fmt.Errorf("marshal capabilities: %w", err)
+	}
 	res, err := s.db.Exec(`
 		UPDATE nodes SET
 			name = ?, address = ?, grpc_port = ?, token = ?, labels_json = ?,
@@ -308,7 +357,7 @@ func (s *Store) UpdateNode(n *Node) error {
 			runtime_state = ?, agent_version = ?, singbox_version = ?,
 			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
 			metrics_at_unix = ?, last_error = ?, egress_interface = ?, public_address = ?,
-			port_mappings_json = ?,
+			port_mappings_json = ?, capabilities_json = ?,
 			updated_at_unix = ?
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
@@ -317,7 +366,7 @@ func (s *Store) UpdateNode(n *Node) error {
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
 		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress,
-		mappingsJSON,
+		mappingsJSON, capabilitiesJSON,
 		n.UpdatedAtUnix, n.ID,
 	)
 	if err != nil {
@@ -430,13 +479,14 @@ func scanNode(row interface {
 	var n Node
 	var labelsJSON string
 	var mappingsJSON string
+	var capabilitiesJSON string
 	var tlsSkip int
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Address, &n.GRPCPort, &n.Token, &labelsJSON, &tlsSkip, &n.CACertPEM,
 		&n.Status, &n.LastSeenUnix, &n.ConfigHash,
 		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
 		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
-		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface, &n.PublicAddress, &mappingsJSON,
+		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface, &n.PublicAddress, &mappingsJSON, &capabilitiesJSON,
 		&n.CreatedAtUnix, &n.UpdatedAtUnix,
 	)
 	if err != nil {
@@ -452,6 +502,10 @@ func scanNode(row interface {
 		return nil, fmt.Errorf("unmarshal port_mappings: %w", err)
 	}
 	n.PortMappings = NormalizePortMappings(n.PortMappings)
+	n.Capabilities = []string{}
+	if err := unmarshalJSON(capabilitiesJSON, &n.Capabilities); err != nil {
+		return nil, fmt.Errorf("unmarshal capabilities: %w", err)
+	}
 	return &n, nil
 }
 
@@ -459,7 +513,7 @@ const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, tls_sk
 	status, last_seen_unix, config_hash,
 	runtime_state, agent_version, singbox_version,
 	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
-	metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json,
+	metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
 	created_at_unix, updated_at_unix`
 
 func (s *Store) GetNode(id string) (*Node, error) {
@@ -739,6 +793,13 @@ func (s *Store) SetNodeInboundBindings(nodeID string, bindings []NodeInboundBind
 		if exists == 0 {
 			return fmt.Errorf("inbound not found: %s", iid)
 		}
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM proxy_chain_hops WHERE node_id = ? AND inbound_id = ?`,
+			nodeID, iid).Scan(&exists); err != nil {
+			return err
+		}
+		if exists > 0 {
+			return fmt.Errorf("node/inbound is reserved by a proxy chain: %s/%s", nodeID, iid)
+		}
 		pubAddr := strings.TrimSpace(b.PublicAddress)
 		pubPort := b.PublicPort
 		if pubPort < 0 || pubPort > 65535 {
@@ -967,14 +1028,20 @@ func (s *Store) ListTasks() ([]Task, error) {
 
 func (s *Store) GetSettings() (*Settings, error) {
 	var st Settings
+	var migrated int
 	err := s.db.QueryRow(`
-		SELECT admin_password_hash, default_agent_token, grpc_timeout_sec, max_concurrency, listen_addr, public_base_url
+		SELECT admin_password_hash, default_agent_token, grpc_timeout_sec, max_concurrency,
+			listen_addr, public_base_url, chain_probe_url, chain_probe_interval_sec,
+			chain_probe_timeout_sec, chain_subscription_migrated
 		FROM settings WHERE id = 1`).Scan(
-		&st.AdminPasswordHash, &st.DefaultAgentToken, &st.GRPCTimeoutSec, &st.MaxConcurrency, &st.ListenAddr, &st.PublicBaseURL,
+		&st.AdminPasswordHash, &st.DefaultAgentToken, &st.GRPCTimeoutSec, &st.MaxConcurrency,
+		&st.ListenAddr, &st.PublicBaseURL, &st.ChainProbeURL, &st.ChainProbeIntervalSec,
+		&st.ChainProbeTimeoutSec, &migrated,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get settings: %w", err)
 	}
+	st.ChainSubscriptionMigrated = migrated != 0
 	return &st, nil
 }
 
@@ -989,14 +1056,50 @@ func (s *Store) SaveSettings(st *Settings) error {
 			grpc_timeout_sec = ?,
 			max_concurrency = ?,
 			listen_addr = ?,
-			public_base_url = ?
+			public_base_url = ?,
+			chain_probe_url = ?,
+			chain_probe_interval_sec = ?,
+			chain_probe_timeout_sec = ?,
+			chain_subscription_migrated = ?
 		WHERE id = 1`,
-		st.AdminPasswordHash, st.DefaultAgentToken, st.GRPCTimeoutSec, st.MaxConcurrency, st.ListenAddr, st.PublicBaseURL,
+		st.AdminPasswordHash, st.DefaultAgentToken, st.GRPCTimeoutSec, st.MaxConcurrency,
+		st.ListenAddr, st.PublicBaseURL, st.ChainProbeURL, st.ChainProbeIntervalSec,
+		st.ChainProbeTimeoutSec, boolToInt(st.ChainSubscriptionMigrated),
 	)
 	if err != nil {
 		return fmt.Errorf("save settings: %w", err)
 	}
 	return nil
+}
+
+// MigrateSubscriptionsToChains switches subscriptions that currently expose
+// local standalone endpoints to all enabled chains. It is intentionally
+// one-shot and leaves external-only subscriptions untouched.
+func (s *Store) MigrateSubscriptionsToChains() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var migrated int
+	if err := tx.QueryRow(`SELECT chain_subscription_migrated FROM settings WHERE id = 1`).Scan(&migrated); err != nil {
+		return err
+	}
+	if migrated != 0 {
+		return nil
+	}
+	if _, err := tx.Exec(`
+		UPDATE subscriptions
+		SET include_standalone = 0, include_all_chains = 1, chain_ids_json = '[]',
+			updated_at_unix = ?
+		WHERE COALESCE(include_all_inbounds, 1) = 1
+		   OR TRIM(inbound_ids_json) NOT IN ('', '[]', 'null')`, nowUnix()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE settings SET chain_subscription_migrated = 1 WHERE id = 1`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // --- Subscriptions ---
@@ -1022,16 +1125,28 @@ func (s *Store) CreateSubscription(sub *Subscription) error {
 	if sub.IncludeAllInbounds {
 		sub.InboundIDs = []string{}
 	}
+	if sub.ChainIDs == nil {
+		sub.ChainIDs = []string{}
+	}
+	if sub.IncludeAllChains {
+		sub.ChainIDs = []string{}
+	}
 	idsJSON, err := marshalJSON(sub.InboundIDs)
+	if err != nil {
+		return err
+	}
+	chainIDsJSON, err := marshalJSON(sub.ChainIDs)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec(`
 		INSERT INTO subscriptions (
 			id, name, format, token, inbound_ids_json, include_all_inbounds,
+			include_standalone, chain_ids_json, include_all_chains,
 			enabled, created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sub.ID, sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.IncludeAllInbounds),
+		boolToInt(sub.IncludeStandalone), chainIDsJSON, boolToInt(sub.IncludeAllChains),
 		boolToInt(sub.Enabled), sub.CreatedAtUnix, sub.UpdatedAtUnix,
 	)
 	if err != nil {
@@ -1051,15 +1166,28 @@ func (s *Store) UpdateSubscription(sub *Subscription) error {
 	if sub.IncludeAllInbounds {
 		sub.InboundIDs = []string{}
 	}
+	if sub.ChainIDs == nil {
+		sub.ChainIDs = []string{}
+	}
+	if sub.IncludeAllChains {
+		sub.ChainIDs = []string{}
+	}
 	idsJSON, err := marshalJSON(sub.InboundIDs)
+	if err != nil {
+		return err
+	}
+	chainIDsJSON, err := marshalJSON(sub.ChainIDs)
 	if err != nil {
 		return err
 	}
 	res, err := s.db.Exec(`
 		UPDATE subscriptions SET
-			name=?, format=?, token=?, inbound_ids_json=?, include_all_inbounds=?, enabled=?, updated_at_unix=?
+			name=?, format=?, token=?, inbound_ids_json=?, include_all_inbounds=?,
+			include_standalone=?, chain_ids_json=?, include_all_chains=?,
+			enabled=?, updated_at_unix=?
 		WHERE id=?`,
 		sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.IncludeAllInbounds),
+		boolToInt(sub.IncludeStandalone), chainIDsJSON, boolToInt(sub.IncludeAllChains),
 		boolToInt(sub.Enabled), sub.UpdatedAtUnix, sub.ID,
 	)
 	if err != nil {
@@ -1087,6 +1215,7 @@ func (s *Store) DeleteSubscription(id string) error {
 func (s *Store) GetSubscription(id string) (*Subscription, error) {
 	row := s.db.QueryRow(`
 		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
+			include_standalone, chain_ids_json, include_all_chains,
 			enabled, created_at_unix, updated_at_unix
 		FROM subscriptions WHERE id = ?`, id)
 	return scanSubscription(row)
@@ -1095,6 +1224,7 @@ func (s *Store) GetSubscription(id string) (*Subscription, error) {
 func (s *Store) GetSubscriptionByToken(token string) (*Subscription, error) {
 	row := s.db.QueryRow(`
 		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
+			include_standalone, chain_ids_json, include_all_chains,
 			enabled, created_at_unix, updated_at_unix
 		FROM subscriptions WHERE token = ?`, token)
 	sub, err := scanSubscription(row)
@@ -1107,6 +1237,7 @@ func (s *Store) GetSubscriptionByToken(token string) (*Subscription, error) {
 func (s *Store) ListSubscriptions() ([]Subscription, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
+			include_standalone, chain_ids_json, include_all_chains,
 			enabled, created_at_unix, updated_at_unix
 		FROM subscriptions ORDER BY created_at_unix ASC`)
 	if err != nil {
@@ -1131,10 +1262,11 @@ func scanSubscription(row interface {
 	Scan(dest ...any) error
 }) (*Subscription, error) {
 	var sub Subscription
-	var idsJSON string
-	var enabled, includeAll int
+	var idsJSON, chainIDsJSON string
+	var enabled, includeAll, includeStandalone, includeAllChains int
 	err := row.Scan(
 		&sub.ID, &sub.Name, &sub.Format, &sub.Token, &idsJSON, &includeAll,
+		&includeStandalone, &chainIDsJSON, &includeAllChains,
 		&enabled, &sub.CreatedAtUnix, &sub.UpdatedAtUnix,
 	)
 	if err == sql.ErrNoRows {
@@ -1145,9 +1277,15 @@ func scanSubscription(row interface {
 	}
 	sub.Enabled = enabled != 0
 	sub.IncludeAllInbounds = includeAll != 0
+	sub.IncludeStandalone = includeStandalone != 0
+	sub.IncludeAllChains = includeAllChains != 0
 	sub.InboundIDs = []string{}
 	if err := unmarshalJSON(idsJSON, &sub.InboundIDs); err != nil {
 		return nil, fmt.Errorf("unmarshal inbound_ids: %w", err)
+	}
+	sub.ChainIDs = []string{}
+	if err := unmarshalJSON(chainIDsJSON, &sub.ChainIDs); err != nil {
+		return nil, fmt.Errorf("unmarshal chain_ids: %w", err)
 	}
 	if sub.InboundIDs == nil {
 		sub.InboundIDs = []string{}
@@ -1432,6 +1570,343 @@ func scanExternalSource(row interface {
 		return nil, fmt.Errorf("unmarshal headers: %w", err)
 	}
 	return &src, nil
+}
+
+// --- Proxy chains ---
+
+func validateProxyChain(c *ProxyChain) error {
+	if c == nil {
+		return fmt.Errorf("proxy chain is nil")
+	}
+	c.Name = strings.TrimSpace(c.Name)
+	if c.Name == "" {
+		return fmt.Errorf("proxy chain name required")
+	}
+	if len(c.Hops) < 2 || len(c.Hops) > 8 {
+		return fmt.Errorf("proxy chain must contain 2 to 8 hops")
+	}
+	nodes := map[string]bool{}
+	for i := range c.Hops {
+		h := &c.Hops[i]
+		h.Position = i
+		h.DialAddress = strings.TrimSpace(h.DialAddress)
+		if h.NodeID == "" || h.InboundID == "" {
+			return fmt.Errorf("hop %d requires node_id and inbound_id", i)
+		}
+		if nodes[h.NodeID] {
+			return fmt.Errorf("node %s is repeated in proxy chain", h.NodeID)
+		}
+		nodes[h.NodeID] = true
+		if h.DialPort < 0 || h.DialPort > 65535 {
+			return fmt.Errorf("hop %d dial_port must be 0 or 1..65535", i)
+		}
+	}
+	return nil
+}
+
+func (s *Store) validateProxyChainRefs(tx *sql.Tx, c *ProxyChain) error {
+	for i, h := range c.Hops {
+		var exists int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM nodes WHERE id = ?`, h.NodeID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists == 0 {
+			return fmt.Errorf("hop %d node not found: %s", i, h.NodeID)
+		}
+		var enabled int
+		if err := tx.QueryRow(`SELECT enabled FROM inbounds WHERE id = ?`, h.InboundID).Scan(&enabled); err != nil {
+			if err == sql.ErrNoRows {
+				return fmt.Errorf("hop %d inbound not found: %s", i, h.InboundID)
+			}
+			return err
+		}
+		if enabled == 0 {
+			return fmt.Errorf("hop %d inbound is disabled: %s", i, h.InboundID)
+		}
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM node_inbounds WHERE node_id = ? AND inbound_id = ?`,
+			h.NodeID, h.InboundID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists > 0 {
+			return fmt.Errorf("hop %d node/inbound is already a standalone binding", i)
+		}
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM proxy_chain_hops WHERE node_id = ? AND inbound_id = ? AND chain_id <> ?`,
+			h.NodeID, h.InboundID, c.ID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists > 0 {
+			return fmt.Errorf("hop %d node/inbound is already reserved by another chain", i)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ValidateProxyChain(c *ProxyChain) error {
+	if err := validateProxyChain(c); err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.validateProxyChainRefs(tx, c); err != nil {
+		return err
+	}
+	var exists int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM proxy_chains WHERE name = ? COLLATE NOCASE AND id <> ?`,
+		c.Name, c.ID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists > 0 {
+		return fmt.Errorf("proxy chain name already exists: %s", c.Name)
+	}
+	return nil
+}
+
+func insertProxyChainHops(tx *sql.Tx, c *ProxyChain) error {
+	for i, h := range c.Hops {
+		if _, err := tx.Exec(`
+			INSERT INTO proxy_chain_hops
+				(chain_id, position, node_id, inbound_id, dial_address, dial_port, tls_skip_verify)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			c.ID, i, h.NodeID, h.InboundID, h.DialAddress, h.DialPort, boolToInt(h.TLSSkipVerify)); err != nil {
+			return fmt.Errorf("insert proxy chain hop %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) CreateProxyChain(c *ProxyChain) error {
+	if err := validateProxyChain(c); err != nil {
+		return err
+	}
+	if c.ID == "" {
+		c.ID = newID()
+	}
+	now := nowUnix()
+	c.CreatedAtUnix, c.UpdatedAtUnix = now, now
+	c.Enabled = false
+	c.State = "disabled"
+	c.FailedHopIndex = -1
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.validateProxyChainRefs(tx, c); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO proxy_chains
+			(id, name, enabled, state, failed_hop_index, created_at_unix, updated_at_unix)
+		VALUES (?, ?, 0, 'disabled', -1, ?, ?)`, c.ID, c.Name, now, now); err != nil {
+		return fmt.Errorf("create proxy chain: %w", err)
+	}
+	if err := insertProxyChainHops(tx, c); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateProxyChain replaces metadata and ordered hops. Runtime fields are
+// preserved unless supplied by SetProxyChainRuntime.
+func (s *Store) UpdateProxyChain(c *ProxyChain) error {
+	if err := validateProxyChain(c); err != nil {
+		return err
+	}
+	existing, err := s.GetProxyChain(c.ID)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.validateProxyChainRefs(tx, c); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM proxy_chain_hops WHERE chain_id = ?`, c.ID); err != nil {
+		return err
+	}
+	if err := insertProxyChainHops(tx, c); err != nil {
+		return err
+	}
+	now := nowUnix()
+	res, err := tx.Exec(`UPDATE proxy_chains SET name = ?, enabled = ?, state = ?, updated_at_unix = ? WHERE id = ?`,
+		c.Name, boolToInt(c.Enabled), firstNonEmptyString(c.State, existing.State), now, c.ID)
+	if err != nil {
+		return fmt.Errorf("update proxy chain: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("proxy chain not found: %s", c.ID)
+	}
+	c.CreatedAtUnix = existing.CreatedAtUnix
+	c.UpdatedAtUnix = now
+	return tx.Commit()
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func scanProxyChain(row interface{ Scan(dest ...any) error }) (*ProxyChain, error) {
+	var c ProxyChain
+	var enabled int
+	err := row.Scan(
+		&c.ID, &c.Name, &enabled, &c.State,
+		&c.LastDeployUnix, &c.LastDeployError,
+		&c.LastProbeUnix, &c.LastProbeDelayMS, &c.LastProbeError, &c.FailedHopIndex,
+		&c.CreatedAtUnix, &c.UpdatedAtUnix,
+	)
+	if err != nil {
+		return nil, err
+	}
+	c.Enabled = enabled != 0
+	c.Hops = []ProxyChainHop{}
+	return &c, nil
+}
+
+const proxyChainSelectCols = `id, name, enabled, state,
+	last_deploy_unix, last_deploy_error,
+	last_probe_unix, last_probe_delay_ms, last_probe_error, failed_hop_index,
+	created_at_unix, updated_at_unix`
+
+func (s *Store) loadProxyChainHops(c *ProxyChain) error {
+	rows, err := s.db.Query(`
+		SELECT chain_id, position, node_id, inbound_id, dial_address, dial_port, tls_skip_verify
+		FROM proxy_chain_hops WHERE chain_id = ? ORDER BY position`, c.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var h ProxyChainHop
+		var skip int
+		if err := rows.Scan(&h.ChainID, &h.Position, &h.NodeID, &h.InboundID,
+			&h.DialAddress, &h.DialPort, &skip); err != nil {
+			return err
+		}
+		h.TLSSkipVerify = skip != 0
+		c.Hops = append(c.Hops, h)
+	}
+	return rows.Err()
+}
+
+func (s *Store) GetProxyChain(id string) (*ProxyChain, error) {
+	c, err := scanProxyChain(s.db.QueryRow(`SELECT `+proxyChainSelectCols+` FROM proxy_chains WHERE id = ?`, id))
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("proxy chain not found: %s", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get proxy chain: %w", err)
+	}
+	if err := s.loadProxyChainHops(c); err != nil {
+		return nil, fmt.Errorf("load proxy chain hops: %w", err)
+	}
+	return c, nil
+}
+
+func (s *Store) ListProxyChains() ([]ProxyChain, error) {
+	rows, err := s.db.Query(`SELECT ` + proxyChainSelectCols + ` FROM proxy_chains ORDER BY created_at_unix`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProxyChain
+	for rows.Next() {
+		c, err := scanProxyChain(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if err := s.loadProxyChainHops(&out[i]); err != nil {
+			return nil, err
+		}
+	}
+	if out == nil {
+		out = []ProxyChain{}
+	}
+	return out, nil
+}
+
+func (s *Store) SetProxyChainRuntime(id string, enabled bool, state, deployErr string) error {
+	now := nowUnix()
+	res, err := s.db.Exec(`
+		UPDATE proxy_chains
+		SET enabled = ?, state = ?, last_deploy_unix = ?, last_deploy_error = ?, updated_at_unix = ?
+		WHERE id = ?`, boolToInt(enabled), state, now, deployErr, now, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("proxy chain not found: %s", id)
+	}
+	return nil
+}
+
+func (s *Store) SetProxyChainProbe(id string, ok bool, delayMS int, message string, failedHop int) error {
+	state := "degraded"
+	if ok {
+		state = "healthy"
+		message = ""
+		failedHop = -1
+	}
+	now := nowUnix()
+	_, err := s.db.Exec(`
+		UPDATE proxy_chains
+		SET state = ?, last_probe_unix = ?, last_probe_delay_ms = ?,
+			last_probe_error = ?, failed_hop_index = ?, updated_at_unix = ?
+		WHERE id = ? AND enabled = 1`,
+		state, now, delayMS, message, failedHop, now, id)
+	return err
+}
+
+func (s *Store) DeleteProxyChain(id string) error {
+	var enabled int
+	if err := s.db.QueryRow(`SELECT enabled FROM proxy_chains WHERE id = ?`, id).Scan(&enabled); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("proxy chain not found: %s", id)
+		}
+		return err
+	}
+	if enabled != 0 {
+		return fmt.Errorf("disable proxy chain before deleting it")
+	}
+	res, err := s.db.Exec(`DELETE FROM proxy_chains WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("proxy chain not found: %s", id)
+	}
+	return nil
+}
+
+func (s *Store) InboundUsedByEnabledChain(inboundID string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM proxy_chain_hops h
+		JOIN proxy_chains c ON c.id = h.chain_id
+		WHERE h.inbound_id = ? AND c.enabled = 1`, inboundID).Scan(&n)
+	return n > 0, err
+}
+
+func (s *Store) InboundUsedByAnyChain(inboundID string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM proxy_chain_hops WHERE inbound_id = ?`, inboundID).Scan(&n)
+	return n > 0, err
 }
 
 // --- Snapshots ---

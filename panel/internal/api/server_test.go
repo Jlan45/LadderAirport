@@ -110,6 +110,10 @@ func (m *mockLive) GetMetrics(_ context.Context) (*agentv1.GetMetricsResponse, e
 	}, nil
 }
 
+func (m *mockLive) ProbeOutbound(_ context.Context, _, _ string) (*agentv1.ProbeOutboundResponse, error) {
+	return &agentv1.ProbeOutboundResponse{Ok: true, DelayMs: 1}, nil
+}
+
 // logStream is a minimal StreamLogs client for SSE tests.
 type logStream struct {
 	lines []*agentv1.LogLine

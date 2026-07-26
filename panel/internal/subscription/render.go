@@ -25,6 +25,9 @@ type ProxyEndpoint struct {
 	Params     map[string]any
 	SourceID   string // "" = local inventory; external source id when merged
 	SourceName string // display group name; empty = local ("本地")
+	// TLSSkipVerify overrides TLS certificate verification. Nil preserves the
+	// legacy subscription behavior (skip verification).
+	TLSSkipVerify *bool
 }
 
 // clientServerHost returns the host clients should dial.
@@ -145,20 +148,20 @@ func RenderClash(endpoints []ProxyEndpoint) ([]byte, error) {
 	}
 
 	doc := map[string]any{
-		"port":                       7890,
-		"socks-port":                 7891,
-		"allow-lan":                  true,
-		"mode":                       "rule",
-		"log-level":                  "info",
-		"external-controller":        "127.0.0.1:9090",
-		"unified-delay":              true,
-		"tcp-concurrent":             true,
-		"find-process-mode":          "strict",
-		"global-client-fingerprint":  "chrome",
-		"ipv6":                       false,
-		"dns":                        clashDNS(),
-		"proxies":                    proxies,
-		"proxy-groups":               clashProxyGroups(endpoints),
+		"port":                      7890,
+		"socks-port":                7891,
+		"allow-lan":                 true,
+		"mode":                      "rule",
+		"log-level":                 "info",
+		"external-controller":       "127.0.0.1:9090",
+		"unified-delay":             true,
+		"tcp-concurrent":            true,
+		"find-process-mode":         "strict",
+		"global-client-fingerprint": "chrome",
+		"ipv6":                      false,
+		"dns":                       clashDNS(),
+		"proxies":                   proxies,
+		"proxy-groups":              clashProxyGroups(endpoints),
 		"rules": []string{
 			"RULE-SET,privateip," + clashGroupDirect + ",no-resolve",
 			"RULE-SET,cn," + clashGroupDirect,
@@ -273,9 +276,11 @@ func clashRuleProviders() map[string]any {
 }
 
 // clashProxyGroups builds:
-//   🚀 节点选择 (select of per-source groups)
-//   🎯 全球直连 (DIRECT / 节点选择)
-//   one url-test group per source (本地 + each external source name)
+//
+//	🚀 节点选择 (select of per-source groups)
+//	🎯 全球直连 (DIRECT / 节点选择)
+//	one url-test group per source (本地 + each external source name)
+//
 // No proxy-providers — all members are inlined proxy names.
 func clashProxyGroups(endpoints []ProxyEndpoint) []map[string]any {
 	order := make([]string, 0)
@@ -324,13 +329,12 @@ func clashProxyGroups(endpoints []ProxyEndpoint) []map[string]any {
 	return groups
 }
 
-
 // RenderSingbox produces sing-box client JSON with remote CN rule sets.
 func RenderSingbox(endpoints []ProxyEndpoint) ([]byte, error) {
 	tags := make([]string, 0, len(endpoints))
 	outbounds := make([]map[string]any, 0, len(endpoints)+4)
 	for _, ep := range endpoints {
-		ob, err := singboxOutbound(ep)
+		ob, err := SingboxOutbound(ep)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", ep.Name, err)
 		}
@@ -432,7 +436,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		p["type"] = "trojan"
 		p["password"] = password
 		p["udp"] = true
-		p["skip-cert-verify"] = true
+		p["skip-cert-verify"] = endpointTLSSkipVerify(ep)
 		if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
 			p["sni"] = sn
 		}
@@ -457,7 +461,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 			// plain
 		case "tls":
 			p["tls"] = true
-			p["skip-cert-verify"] = true
+			p["skip-cert-verify"] = endpointTLSSkipVerify(ep)
 			if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
 				p["servername"] = sn
 			}
@@ -488,7 +492,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		}
 		p["type"] = "hysteria2"
 		p["password"] = password
-		p["skip-cert-verify"] = true
+		p["skip-cert-verify"] = endpointTLSSkipVerify(ep)
 		if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
 			p["sni"] = sn
 		}
@@ -507,7 +511,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		p["type"] = "tuic"
 		p["uuid"] = uid
 		p["password"] = password
-		p["skip-cert-verify"] = true
+		p["skip-cert-verify"] = endpointTLSSkipVerify(ep)
 		p["udp-relay-mode"] = "native"
 		if cc, _ := paramString(ep.Params, "congestion_control"); cc != "" {
 			p["congestion-controller"] = cc
@@ -526,7 +530,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		p["type"] = "anytls"
 		p["password"] = password
 		p["udp"] = true
-		p["skip-cert-verify"] = true
+		p["skip-cert-verify"] = endpointTLSSkipVerify(ep)
 		p["client-fingerprint"] = "chrome"
 		if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
 			p["sni"] = sn
@@ -554,7 +558,7 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		case "none":
 		case "tls":
 			p["tls"] = true
-			p["skip-cert-verify"] = true
+			p["skip-cert-verify"] = endpointTLSSkipVerify(ep)
 			if sn, _ := paramString(ep.Params, "server_name"); sn != "" {
 				p["servername"] = sn
 			}
@@ -567,7 +571,9 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 	return p, nil
 }
 
-func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
+// SingboxOutbound converts one normalized endpoint into a sing-box outbound.
+// It is also used by the server-side chain config builder.
+func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 	o := map[string]any{
 		"tag":         ep.Name,
 		"server":      ep.Server,
@@ -592,7 +598,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		o["password"] = password
 		o["tls"] = map[string]any{
 			"enabled":     true,
-			"insecure":    true,
+			"insecure":    endpointTLSSkipVerify(ep),
 			"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 		}
 	case "vless":
@@ -614,7 +620,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		case "tls":
 			o["tls"] = map[string]any{
 				"enabled":     true,
-				"insecure":    true,
+				"insecure":    endpointTLSSkipVerify(ep),
 				"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 			}
 		case "reality":
@@ -649,7 +655,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		o["password"] = password
 		o["tls"] = map[string]any{
 			"enabled":     true,
-			"insecure":    true,
+			"insecure":    endpointTLSSkipVerify(ep),
 			"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 		}
 		if up, err := paramInt(ep.Params, "up_mbps"); err == nil && up > 0 {
@@ -675,7 +681,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		}
 		o["tls"] = map[string]any{
 			"enabled":     true,
-			"insecure":    true,
+			"insecure":    endpointTLSSkipVerify(ep),
 			"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 			"alpn":        []string{"h3"},
 		}
@@ -688,7 +694,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		o["password"] = password
 		o["tls"] = map[string]any{
 			"enabled":     true,
-			"insecure":    true,
+			"insecure":    endpointTLSSkipVerify(ep),
 			"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 			"utls": map[string]any{
 				"enabled":     true,
@@ -717,7 +723,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		case "tls":
 			o["tls"] = map[string]any{
 				"enabled":     true,
-				"insecure":    true,
+				"insecure":    endpointTLSSkipVerify(ep),
 				"server_name": firstNonEmpty(paramStringMust(ep.Params, "server_name"), ep.Server),
 			}
 		default:
@@ -727,6 +733,18 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		return nil, fmt.Errorf("unsupported protocol %q", ep.Protocol)
 	}
 	return o, nil
+}
+
+// Kept for package-local compatibility with existing tests and callers.
+func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
+	return SingboxOutbound(ep)
+}
+
+func endpointTLSSkipVerify(ep ProxyEndpoint) bool {
+	if ep.TLSSkipVerify == nil {
+		return true
+	}
+	return *ep.TLSSkipVerify
 }
 
 func realityPublicKey(privateKeyB64 string) (string, error) {
@@ -750,7 +768,6 @@ func realityPublicKey(privateKeyB64 string) (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()), nil
 }
-
 
 // resolveRealityPublicKey prefers an already-known public_key (external sources)
 // and falls back to deriving from private_key (local inventory).

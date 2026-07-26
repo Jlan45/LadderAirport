@@ -14,6 +14,7 @@ import (
 
 	"github.com/ladderairport/panel/internal/batch"
 	"github.com/ladderairport/panel/internal/nodeclient"
+	"github.com/ladderairport/panel/internal/proxychain"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
 	"github.com/ladderairport/panel/web"
@@ -27,6 +28,7 @@ type NodeLive interface {
 	Ping(ctx context.Context) (*agentv1.PingResponse, error)
 	GetStatus(ctx context.Context) (*agentv1.GetStatusResponse, error)
 	GetMetrics(ctx context.Context) (*agentv1.GetMetricsResponse, error)
+	ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (*agentv1.ProbeOutboundResponse, error)
 	ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesResponse, error)
 	UpgradeAgent(ctx context.Context, version, repo, downloadURL, sha256 string) (*agentv1.UpgradeAgentResponse, error)
 	StreamLogs(ctx context.Context, level string, tail int32) (agentv1.AgentControl_StreamLogsClient, error)
@@ -51,6 +53,7 @@ type Server struct {
 
 	// Timeout for probe/metrics/logs dials. Defaults to Runner.Timeout or 10s.
 	Timeout time.Duration
+	Chains  *proxychain.Service
 }
 
 // Handler returns an http.Handler with all routes, auth middleware, and embedded SPA.
@@ -190,6 +193,16 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/subscriptions/{id}", s.handleUpdateSubscription)
 	mux.HandleFunc("DELETE /api/v1/subscriptions/{id}", s.handleDeleteSubscription)
 	mux.HandleFunc("GET /api/v1/subscriptions/{id}/preview", s.handlePreviewSubscription)
+
+	mux.HandleFunc("GET /api/v1/proxy-chains", s.handleListProxyChains)
+	mux.HandleFunc("POST /api/v1/proxy-chains", s.handleCreateProxyChain)
+	mux.HandleFunc("POST /api/v1/proxy-chains/preview", s.handlePreviewProxyChain)
+	mux.HandleFunc("GET /api/v1/proxy-chains/{id}", s.handleGetProxyChain)
+	mux.HandleFunc("PUT /api/v1/proxy-chains/{id}", s.handleUpdateProxyChain)
+	mux.HandleFunc("DELETE /api/v1/proxy-chains/{id}", s.handleDeleteProxyChain)
+	mux.HandleFunc("POST /api/v1/proxy-chains/{id}/enable", s.handleEnableProxyChain)
+	mux.HandleFunc("POST /api/v1/proxy-chains/{id}/disable", s.handleDisableProxyChain)
+	mux.HandleFunc("POST /api/v1/proxy-chains/{id}/probe", s.handleProbeProxyChain)
 
 	mux.HandleFunc("GET /api/v1/external-sources", s.handleListExternalSources)
 	mux.HandleFunc("POST /api/v1/external-sources", s.handleCreateExternalSource)

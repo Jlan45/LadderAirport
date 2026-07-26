@@ -16,12 +16,15 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 type putSettingsBody struct {
-	DefaultAgentToken *string `json:"default_agent_token"`
-	GRPCTimeoutSec    *int    `json:"grpc_timeout_sec"`
-	MaxConcurrency    *int    `json:"max_concurrency"`
-	ListenAddr        *string `json:"listen_addr"`
-	PublicBaseURL     *string `json:"public_base_url"`
-	NewPassword       *string `json:"new_password"`
+	DefaultAgentToken     *string `json:"default_agent_token"`
+	GRPCTimeoutSec        *int    `json:"grpc_timeout_sec"`
+	MaxConcurrency        *int    `json:"max_concurrency"`
+	ListenAddr            *string `json:"listen_addr"`
+	PublicBaseURL         *string `json:"public_base_url"`
+	ChainProbeURL         *string `json:"chain_probe_url"`
+	ChainProbeIntervalSec *int    `json:"chain_probe_interval_sec"`
+	ChainProbeTimeoutSec  *int    `json:"chain_probe_timeout_sec"`
+	NewPassword           *string `json:"new_password"`
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +60,28 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.PublicBaseURL != nil {
 		st.PublicBaseURL = strings.TrimSpace(*body.PublicBaseURL)
+	}
+	if body.ChainProbeURL != nil {
+		url := strings.TrimSpace(*body.ChainProbeURL)
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+			writeError(w, http.StatusBadRequest, "chain_probe_url must use http or https")
+			return
+		}
+		st.ChainProbeURL = url
+	}
+	if body.ChainProbeIntervalSec != nil {
+		if *body.ChainProbeIntervalSec < 10 {
+			writeError(w, http.StatusBadRequest, "chain_probe_interval_sec must be at least 10")
+			return
+		}
+		st.ChainProbeIntervalSec = *body.ChainProbeIntervalSec
+	}
+	if body.ChainProbeTimeoutSec != nil {
+		if *body.ChainProbeTimeoutSec < 1 || *body.ChainProbeTimeoutSec > 60 {
+			writeError(w, http.StatusBadRequest, "chain_probe_timeout_sec must be 1..60")
+			return
+		}
+		st.ChainProbeTimeoutSec = *body.ChainProbeTimeoutSec
 	}
 	if body.NewPassword != nil {
 		if *body.NewPassword == "" {

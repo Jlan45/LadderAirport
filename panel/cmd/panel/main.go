@@ -13,6 +13,7 @@ import (
 
 	"github.com/ladderairport/panel/internal/api"
 	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/proxychain"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
 	"github.com/ladderairport/panel/internal/version"
@@ -83,11 +84,13 @@ func main() {
 	}
 
 	agg := subscription.NewAggregator(st)
+	chainService := proxychain.NewService(st, runner.ConfigBuilder, runner.Coordinator)
 	srv := &api.Server{
 		Store:      st,
 		Runner:     runner,
 		Secret:     secret,
 		Aggregator: agg,
+		Chains:     chainService,
 	}
 
 	addr := *listen
@@ -131,6 +134,7 @@ func main() {
 		log.Printf("external-sources: background refresh enabled (interval=%s)", subscription.BackgroundTick)
 		agg.RunBackground(context.Background(), subscription.BackgroundTick)
 	}()
+	go chainService.RunProbeLoop(context.Background())
 
 	log.Printf("panel listening on %s (db=%s version=%s)", addr, *dbPath, version.Version)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {

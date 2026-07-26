@@ -8,10 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ladderairport/panel/internal/converter"
 	"github.com/ladderairport/panel/internal/nodeclient"
+	"github.com/ladderairport/panel/internal/nodeconfig"
 	"github.com/ladderairport/panel/internal/store"
-	"github.com/ladderairport/pkg/hashutil"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
 
@@ -34,6 +33,8 @@ type Runner struct {
 	Timeout        time.Duration
 	MaxConcurrency int
 	Dial           DialFunc
+	ConfigBuilder  *nodeconfig.Builder
+	Coordinator    *sync.Mutex
 }
 
 // NewRunner constructs a Runner with sensible defaults.
@@ -47,6 +48,8 @@ func NewRunner(s *store.Store, defaultToken func() string) *Runner {
 		MaxConcurrency: 10,
 	}
 	r.Dial = r.defaultDial
+	r.ConfigBuilder = &nodeconfig.Builder{Store: s}
+	r.Coordinator = &sync.Mutex{}
 	return r
 }
 
@@ -244,18 +247,20 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 }
 
 func (r *Runner) applyNode(ctx context.Context, client NodeRPC, taskID string, node *store.Node) (string, error) {
-	inbounds, err := r.Store.ListInboundsForNode(node.ID)
-	if err != nil {
-		return "", fmt.Errorf("list inbounds: %w", err)
+	if r.Coordinator != nil {
+		r.Coordinator.Lock()
+		defer r.Coordinator.Unlock()
 	}
-	cfgBytes, err := converter.Convert(inbounds, converter.ConvertOptions{
-		BindInterface: node.EgressInterface,
-	})
-	if err != nil {
-		return "", fmt.Errorf("convert: %w", err)
+	builder := r.ConfigBuilder
+	if builder == nil {
+		builder = &nodeconfig.Builder{Store: r.Store}
 	}
-	cfgJSON := string(cfgBytes)
-	hash := hashutil.SHA256Hex(cfgBytes)
+	cfg, err := builder.Build(node.ID)
+	if err != nil {
+		return "", fmt.Errorf("build config: %w", err)
+	}
+	cfgJSON := cfg.JSON
+	hash := cfg.Hash
 
 	snap := &store.ConfigSnapshot{
 		NodeID:     node.ID,

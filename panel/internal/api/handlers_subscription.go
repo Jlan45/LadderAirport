@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/ladderairport/panel/internal/nodeconfig"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
 )
@@ -32,6 +33,9 @@ type createSubBody struct {
 	Format             string   `json:"format"`
 	InboundIDs         []string `json:"inbound_ids"`
 	IncludeAllInbounds *bool    `json:"include_all_inbounds"`
+	IncludeStandalone  *bool    `json:"include_standalone"`
+	ChainIDs           []string `json:"chain_ids"`
+	IncludeAllChains   *bool    `json:"include_all_chains"`
 	ExternalSourceIDs  []string `json:"external_source_ids"`
 	Enabled            *bool    `json:"enabled"`
 }
@@ -63,12 +67,25 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	if body.IncludeAllInbounds != nil {
 		includeAll = *body.IncludeAllInbounds
 	}
+	settings, _ := s.Store.GetSettings()
+	migrated := settings != nil && settings.ChainSubscriptionMigrated
+	includeStandalone := !migrated
+	if body.IncludeStandalone != nil {
+		includeStandalone = *body.IncludeStandalone
+	}
+	includeAllChains := migrated
+	if body.IncludeAllChains != nil {
+		includeAllChains = *body.IncludeAllChains
+	}
 	sub := &store.Subscription{
 		Name:               body.Name,
 		Format:             format,
 		Token:              token,
 		InboundIDs:         body.InboundIDs,
 		IncludeAllInbounds: includeAll,
+		IncludeStandalone:  includeStandalone,
+		ChainIDs:           body.ChainIDs,
+		IncludeAllChains:   includeAllChains,
 		Enabled:            enabled,
 	}
 	if err := s.Store.CreateSubscription(sub); err != nil {
@@ -106,6 +123,9 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		Format             *string  `json:"format"`
 		InboundIDs         []string `json:"inbound_ids"`
 		IncludeAllInbounds *bool    `json:"include_all_inbounds"`
+		IncludeStandalone  *bool    `json:"include_standalone"`
+		ChainIDs           []string `json:"chain_ids"`
+		IncludeAllChains   *bool    `json:"include_all_chains"`
 		ExternalSourceIDs  []string `json:"external_source_ids"`
 		Enabled            *bool    `json:"enabled"`
 		Rotate             bool     `json:"rotate_token"`
@@ -116,6 +136,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 	before := *existing
 	before.InboundIDs = append([]string{}, existing.InboundIDs...)
+	before.ChainIDs = append([]string{}, existing.ChainIDs...)
 	if body.Name != nil && strings.TrimSpace(*body.Name) != "" {
 		existing.Name = *body.Name
 	}
@@ -131,6 +152,18 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if body.IncludeAllInbounds != nil {
 		existing.IncludeAllInbounds = *body.IncludeAllInbounds
+	}
+	if body.IncludeStandalone != nil {
+		existing.IncludeStandalone = *body.IncludeStandalone
+	}
+	if body.ChainIDs != nil {
+		existing.ChainIDs = body.ChainIDs
+		if body.IncludeAllChains == nil {
+			existing.IncludeAllChains = len(body.ChainIDs) == 0
+		}
+	}
+	if body.IncludeAllChains != nil {
+		existing.IncludeAllChains = *body.IncludeAllChains
 	}
 	if body.Enabled != nil {
 		existing.Enabled = *body.Enabled
@@ -292,7 +325,7 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		nodeAttachments[n.ID] = atts
 	}
 	local := []subscription.ProxyEndpoint{}
-	if sub.IncludeAllInbounds || len(sub.InboundIDs) > 0 {
+	if sub.IncludeStandalone && (sub.IncludeAllInbounds || len(sub.InboundIDs) > 0) {
 		filter := sub.InboundIDs
 		if sub.IncludeAllInbounds {
 			filter = nil
@@ -300,6 +333,29 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		local, err = subscription.CollectEndpointsFromAttachments(nodes, nodeAttachments, filter)
 		if err != nil {
 			return nil, "", err
+		}
+	}
+	if sub.IncludeAllChains || len(sub.ChainIDs) > 0 {
+		chains, err := s.Store.ListProxyChains()
+		if err != nil {
+			return nil, "", err
+		}
+		filter := map[string]bool{}
+		for _, id := range sub.ChainIDs {
+			filter[id] = true
+		}
+		builder := &nodeconfig.Builder{Store: s.Store}
+		for _, chain := range chains {
+			if !chain.Enabled || (!sub.IncludeAllChains && !filter[chain.ID]) {
+				continue
+			}
+			ep, err := builder.ResolveHopEndpoint(chain, 0)
+			if err != nil {
+				return nil, "", err
+			}
+			ep.Name = chain.Name
+			ep.SourceName = "链式代理"
+			local = append(local, ep)
 		}
 	}
 

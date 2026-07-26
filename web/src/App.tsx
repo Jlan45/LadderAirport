@@ -13,6 +13,7 @@ import {
   Server,
   Network,
   Share2,
+  Waypoints,
   Settings as SettingsIcon,
   Loader2,
   Sun,
@@ -26,11 +27,13 @@ const Login = lazy(() => import('./pages/Login'))
 const Fleet = lazy(() => import('./pages/Fleet'))
 const Inbounds = lazy(() => import('./pages/Inbounds'))
 const Subscriptions = lazy(() => import('./pages/Subscriptions'))
+const ProxyChains = lazy(() => import('./pages/ProxyChains'))
 const Settings = lazy(() => import('./pages/Settings'))
 
 const NAV = [
   { path: '/', label: '节点', icon: <Server className="h-4 w-4" /> },
   { path: '/inbounds', label: '入站', icon: <Network className="h-4 w-4" /> },
+  { path: '/chains', label: '代理链', icon: <Waypoints className="h-4 w-4" /> },
   { path: '/subscriptions', label: '订阅', icon: <Share2 className="h-4 w-4" /> },
   { path: '/settings', label: '设置', icon: <SettingsIcon className="h-4 w-4" /> },
 ] as const
@@ -105,6 +108,7 @@ function AppLayout() {
   const active = useMemo(() => {
     const path = location.pathname
     if (path.startsWith('/inbounds')) return '/inbounds'
+    if (path.startsWith('/chains')) return '/chains'
     if (path.startsWith('/subscriptions')) return '/subscriptions'
     if (path.startsWith('/settings')) return '/settings'
     return '/'
@@ -240,6 +244,7 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route path="/" element={<Fleet />} />
             <Route path="/inbounds" element={<Inbounds />} />
+            <Route path="/chains" element={<ProxyChains />} />
             <Route path="/subscriptions" element={<Subscriptions />} />
             <Route path="/settings" element={<Settings />} />
           </Route>

@@ -16,6 +16,16 @@ type ConvertOptions struct {
 	// BindInterface sets sing-box direct outbound bind_interface.
 	// Empty means OS default routing (field omitted).
 	BindInterface string
+	// AllowEmpty emits a valid listener-free config. This is required when a
+	// chain is disabled or the final inbound is detached.
+	AllowEmpty bool
+	// ChainRoutes routes traffic arriving on InboundID to Outbound.
+	ChainRoutes []ChainRoute
+}
+
+type ChainRoute struct {
+	InboundID string
+	Outbound  map[string]any
 }
 
 // Convert builds a full sing-box JSON config from inbound configs.
@@ -28,12 +38,13 @@ func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error
 			enabled = append(enabled, in)
 		}
 	}
-	if len(enabled) == 0 {
+	if len(enabled) == 0 && !opts.AllowEmpty {
 		return nil, fmt.Errorf("no enabled inbounds")
 	}
 
 	seenPorts := map[string]string{} // "listen:port" -> name/id
 	outInbounds := make([]map[string]any, 0, len(enabled))
+	inboundTags := make(map[string]string, len(enabled))
 	for _, in := range enabled {
 		mapped, err := mapInbound(in)
 		if err != nil {
@@ -46,6 +57,7 @@ func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error
 			return nil, fmt.Errorf("port conflict on %s (between %s and %s)", key, prev, label(in))
 		}
 		seenPorts[key] = label(in)
+		inboundTags[in.ID] = inboundTag(in)
 		outInbounds = append(outInbounds, mapped)
 	}
 
@@ -57,15 +69,43 @@ func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error
 		direct["bind_interface"] = iface
 	}
 
+	outbounds := []map[string]any{direct}
+	rules := make([]map[string]any, 0, len(opts.ChainRoutes))
+	outboundTags := map[string]bool{"direct": true}
+	for _, route := range opts.ChainRoutes {
+		tag, ok := inboundTags[route.InboundID]
+		if !ok {
+			return nil, fmt.Errorf("chain route inbound not enabled: %s", route.InboundID)
+		}
+		if route.Outbound == nil {
+			return nil, fmt.Errorf("chain route outbound missing for inbound %s", route.InboundID)
+		}
+		outboundTag, _ := route.Outbound["tag"].(string)
+		if strings.TrimSpace(outboundTag) == "" {
+			return nil, fmt.Errorf("chain route outbound tag required for inbound %s", route.InboundID)
+		}
+		if outboundTags[outboundTag] {
+			return nil, fmt.Errorf("duplicate outbound tag %q", outboundTag)
+		}
+		outboundTags[outboundTag] = true
+		outbounds = append(outbounds, route.Outbound)
+		rules = append(rules, map[string]any{
+			"inbound":  []string{tag},
+			"action":   "route",
+			"outbound": outboundTag,
+		})
+	}
+	routeOptions := map[string]any{"final": "direct"}
+	if len(rules) > 0 {
+		routeOptions["rules"] = rules
+	}
 	cfg := map[string]any{
 		"log": map[string]any{
 			"level": "info",
 		},
 		"inbounds":  outInbounds,
-		"outbounds": []map[string]any{direct},
-		"route": map[string]any{
-			"final": "direct",
-		},
+		"outbounds": outbounds,
+		"route":     routeOptions,
 	}
 	return json.Marshal(cfg)
 }
@@ -548,6 +588,14 @@ func inboundTag(in store.InboundConfig) string {
 	}
 	if base == "" {
 		base = "inbound"
+	}
+	id := strings.ToLower(strings.TrimSpace(in.ID))
+	id = nonTagChars.ReplaceAllString(id, "")
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	if id != "" {
+		return "in-" + base + "-" + id
 	}
 	return "in-" + base
 }

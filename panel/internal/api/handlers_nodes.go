@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ladderairport/panel/internal/converter"
+	"github.com/ladderairport/panel/internal/nodeconfig"
 	"github.com/ladderairport/panel/internal/store"
 )
 
@@ -424,11 +424,6 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	if len(bindings) == 0 {
-		out.DeployMessage = "关联已清空；未向节点下发（无入站配置）"
-		writeJSON(w, http.StatusOK, out)
-		return
-	}
 	if s.Runner == nil {
 		out.DeployMessage = "关联已保存；runner 未配置，未下发"
 		writeJSON(w, http.StatusOK, out)
@@ -499,20 +494,17 @@ func (s *Server) handleNodePreview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	inbounds, err := s.Store.ListInboundsForNode(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	builder := &nodeconfig.Builder{Store: s.Store}
+	if s.Runner != nil && s.Runner.ConfigBuilder != nil {
+		builder = s.Runner.ConfigBuilder
 	}
-	cfgBytes, err := converter.Convert(inbounds, converter.ConvertOptions{
-		BindInterface: node.EgressInterface,
-	})
+	built, err := builder.Build(node.ID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var cfg any
-	if err := json.Unmarshal(cfgBytes, &cfg); err != nil {
+	if err := json.Unmarshal([]byte(built.JSON), &cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -602,6 +594,7 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 	node.LastSeenUnix = time.Now().Unix()
 	node.AgentVersion = resp.GetAgentVersion()
 	node.SingboxVersion = resp.GetSingboxVersion()
+	node.Capabilities = append([]string{}, resp.GetCapabilities()...)
 	node.LastError = ""
 	// Best-effort status/metrics on single probe.
 	if st, err := client.GetStatus(ctx); err == nil {
@@ -626,6 +619,7 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 		"node":            node,
 		"agent_version":   resp.GetAgentVersion(),
 		"singbox_version": resp.GetSingboxVersion(),
+		"capabilities":    resp.GetCapabilities(),
 	})
 }
 

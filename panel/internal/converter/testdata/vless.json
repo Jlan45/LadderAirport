@@ -5,7 +5,7 @@
   "inbounds": [
     {
       "type": "vless",
-      "tag": "in-vless-main",
+      "tag": "in-vless-main-vl001",
       "listen": "::",
       "listen_port": 443,
       "users": [

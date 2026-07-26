@@ -17,12 +17,25 @@ service AgentControl {
   // root-owned systemd path unit can replace /usr/local/bin/ladder-agent and restart.
   // The RPC returns after staging (before restart). Panel should re-probe for the new version.
   rpc UpgradeAgent(UpgradeAgentRequest) returns (UpgradeAgentResponse);
+  rpc ProbeOutbound(ProbeOutboundRequest) returns (ProbeOutboundResponse);
 }
 
 message PingRequest {}
 message PingResponse {
   string agent_version = 1;
   string singbox_version = 2;
+  repeated string capabilities = 3;
+}
+
+message ProbeOutboundRequest {
+  string outbound_tag = 1;
+  string url = 2;
+}
+
+message ProbeOutboundResponse {
+  bool ok = 1;
+  uint32 delay_ms = 2;
+  string message = 3;
 }
 
 message ApplyConfigRequest {

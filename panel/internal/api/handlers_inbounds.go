@@ -86,6 +86,17 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	if body.Protocol != nil || body.Params != nil || body.Enabled != nil {
+		used, err := s.Store.InboundUsedByEnabledChain(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if used {
+			writeError(w, http.StatusConflict, "inbound is used by an enabled proxy chain; disable the chain before editing protocol parameters")
+			return
+		}
+	}
 	if body.Name != nil && *body.Name != "" {
 		existing.Name = *body.Name
 	}
@@ -133,6 +144,13 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
+	if used, err := s.Store.InboundUsedByAnyChain(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	} else if used {
+		writeError(w, http.StatusConflict, "inbound is referenced by a proxy chain")
+		return
+	}
 	if err := s.Store.DeleteInbound(id); err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())

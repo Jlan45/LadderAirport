@@ -158,6 +158,13 @@ func (c *Client) GetMetrics(ctx context.Context) (*agentv1.GetMetricsResponse, e
 	return c.api.GetMetrics(c.withAuth(ctx), &agentv1.GetMetricsRequest{})
 }
 
+func (c *Client) ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (*agentv1.ProbeOutboundResponse, error) {
+	return c.api.ProbeOutbound(c.withAuth(ctx), &agentv1.ProbeOutboundRequest{
+		OutboundTag: outboundTag,
+		Url:         targetURL,
+	})
+}
+
 // ListInterfaces lists host network interfaces on the agent for egress selection.
 func (c *Client) ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesResponse, error) {
 	return c.api.ListInterfaces(c.withAuth(ctx), &agentv1.ListInterfacesRequest{})
