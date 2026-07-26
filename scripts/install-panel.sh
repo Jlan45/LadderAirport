@@ -394,14 +394,15 @@ do_install() {
   echo
   echo "建议下一步:"
   echo "  1. 在「设置」填写 Public Base URL（用于订阅链接与节点一键安装命令）"
-  echo "  2. 修改管理员密码与 session secret 备份"
-  echo "  3. 按需用 Nginx/Caddy 反代 HTTPS 到 ${ACTIVE_LISTEN}"
-  echo "  4. 安装节点: 见 deploy/README-agent.md 或 Panel「添加节点并生成安装命令」"
+  echo "  2. 修改管理员密码，并备份 session secret、SQLite 与 ${DATA_DIR}/pki"
+  echo "  3. 安全备份后将 ${DATA_DIR}/pki/offline/root-ca.key 转移到离线介质"
+  echo "  4. 按需用 Nginx/Caddy 反代 HTTPS 到 ${ACTIVE_LISTEN}"
+  echo "  5. 安装节点: 见 deploy/README-agent.md 或 Panel「添加节点并生成安装命令」"
   echo
   echo "运维: systemctl status|restart ladder-panel ; journalctl -u ladder-panel -f"
   echo "升级: curl -fsSL .../install-panel.sh | sudo env LADDER_ACTION=upgrade [LADDER_VERSION=vX.Y.Z] bash"
   echo "卸载: curl -fsSL .../install-panel.sh | sudo env LADDER_ACTION=uninstall bash"
-  echo "备份: 复制 ${ACTIVE_DB} 与 ${ENV_FILE}"
+  echo "备份: 复制 ${ACTIVE_DB}、${ENV_FILE} 与 ${DATA_DIR}/pki（根私钥应另存离线）"
 }
 
 # ---------- upgrade ----------

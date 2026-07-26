@@ -16,6 +16,7 @@ import (
 
 	"github.com/ladderairport/panel/internal/api"
 	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/panel/internal/store"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc/metadata"
@@ -175,6 +176,11 @@ func newTestServer(t *testing.T, dial batch.DialFunc, live api.LiveDialFunc) (*h
 		}
 		return s.DefaultAgentToken
 	})
+	ca, err := pki.Open(filepath.Join(t.TempDir(), "pki"))
+	if err != nil {
+		t.Fatalf("Open PKI: %v", err)
+	}
+	runner.PKI = ca
 	if dial != nil {
 		runner.Dial = dial
 	}
@@ -184,6 +190,7 @@ func newTestServer(t *testing.T, dial batch.DialFunc, live api.LiveDialFunc) (*h
 		Runner: runner,
 		Secret: []byte("test-session-secret-at-least-32b"),
 		Dial:   live,
+		PKI:    ca,
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -353,8 +360,7 @@ func TestUpdateNodeIsPartialAndPreservesLiveFields(t *testing.T) {
 		GRPCPort:        50051,
 		Token:           "node-token",
 		Labels:          []string{"edge", "prod"},
-		TLSSkipVerify:   true,
-		CACertPEM:       "certificate",
+		PKICABundlePEM:  "certificate",
 		PublicAddress:   "edge.example.com",
 		PortMappings:    []store.PortMapping{{ListenPort: 8443, PublicPort: 443}},
 		EgressInterface: "eth0",
@@ -404,8 +410,8 @@ func TestUpdateNodeIsPartialAndPreservesLiveFields(t *testing.T) {
 		got.MemoryRSSBytes != 4096 {
 		t.Fatalf("live fields overwritten by partial update: %+v", got)
 	}
-	if got.Token != "node-token" || len(got.Labels) != 2 || !got.TLSSkipVerify ||
-		got.CACertPEM != "certificate" || got.PublicAddress != "edge.example.com" ||
+	if got.Token != "node-token" || len(got.Labels) != 2 ||
+		got.PKICABundlePEM != "certificate" || got.PublicAddress != "edge.example.com" ||
 		got.EgressInterface != "eth0" || len(got.PortMappings) != 1 {
 		t.Fatalf("omitted editable fields were not preserved: %+v", got)
 	}
@@ -413,7 +419,6 @@ func TestUpdateNodeIsPartialAndPreservesLiveFields(t *testing.T) {
 	resp, body = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+n.ID, map[string]any{
 		"token":            "",
 		"labels":           []string{},
-		"ca_cert_pem":      "",
 		"public_address":   "",
 		"port_mappings":    []any{},
 		"egress_interface": "",
@@ -425,7 +430,7 @@ func TestUpdateNodeIsPartialAndPreservesLiveFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Token != "" || len(got.Labels) != 0 || got.CACertPEM != "" || got.PublicAddress != "" ||
+	if got.Token != "" || len(got.Labels) != 0 || got.PKICABundlePEM != "certificate" || got.PublicAddress != "" ||
 		len(got.PortMappings) != 0 || got.EgressInterface != "" {
 		t.Fatalf("explicit empty values were not saved: %+v", got)
 	}
@@ -557,7 +562,7 @@ func TestFleetFlow(t *testing.T) {
 	rpc := &mockRPC{applyOK: true, startOK: true, stopOK: true}
 	live := &mockLive{pingOK: true, metricsOK: true}
 
-	ts, client, _ := newTestServer(t,
+	ts, client, st := newTestServer(t,
 		func(_ context.Context, n store.Node, _ string) (batch.NodeRPC, error) {
 			return rpc, nil
 		},
@@ -602,20 +607,16 @@ func TestFleetFlow(t *testing.T) {
 	// Bootstrap node with install command.
 	resp, boot := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/nodes/bootstrap", map[string]any{
 		"name": "edge-boot", "grpc_port": 50051,
-		"enable_tls": true,
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("bootstrap status = %d body=%v", resp.StatusCode, boot)
 	}
 	cmd, _ := boot["install_command"].(string)
-	if !strings.Contains(cmd, "LADDER_TOKEN=") || !strings.Contains(cmd, "LADDER_TLS=1") {
+	if !strings.Contains(cmd, "LADDER_ENROLL_TOKEN=") || strings.Contains(cmd, "LADDER_TLS=") {
 		t.Fatalf("install_command = %q", cmd)
 	}
 	if !strings.Contains(cmd, "LADDER_PANEL=") {
 		t.Fatalf("expected LADDER_PANEL in command: %q", cmd)
-	}
-	if boot["enroll_enabled"] != true {
-		t.Fatalf("enroll_enabled = %v", boot["enroll_enabled"])
 	}
 	bootNode, _ := boot["node"].(map[string]any)
 	bootID, _ := bootNode["id"].(string)
@@ -627,70 +628,31 @@ func TestFleetFlow(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("install-command status = %d", resp.StatusCode)
 	}
-	if _, ok := inst["install_command"].(string); !ok {
+	if install, _ := inst["install_command"].(string); install == "" {
 		t.Fatalf("install-command body = %v", inst)
 	}
+	if migration, _ := inst["migration_command"].(string); migration != "" {
+		t.Fatalf("new node must not receive migration command: %v", inst)
+	}
 
-	// Agent enroll without admin session (new client, no cookies).
-	enrollClient := &http.Client{Timeout: 10 * time.Second}
-	enrollBody := map[string]any{
-		"token": bootToken, "node_id": bootID,
-		"address": "203.0.113.50", "grpc_port": 50051,
-		"ca_cert_pem": "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
-		"tls_enabled": true,
-	}
-	raw, _ := json.Marshal(enrollBody)
-	ereq, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/agent/enroll", bytes.NewReader(raw))
+	legacyNode, err := st.GetNode(nodeID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ereq.Header.Set("Content-Type", "application/json")
-	ereq.Header.Set("Authorization", "Bearer "+bootToken)
-	eresp, err := enrollClient.Do(ereq)
-	if err != nil {
+	legacyNode.PKIMigrationRequired = true
+	if err := st.UpdateNode(legacyNode); err != nil {
 		t.Fatal(err)
 	}
-	defer eresp.Body.Close()
-	if eresp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(eresp.Body)
-		t.Fatalf("enroll status = %d body=%s", eresp.StatusCode, b)
-	}
-	// Admin list should show updated address/CA.
-	resp, nodesList := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes", nil)
+	resp, inst = doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+nodeID+"/install-command", nil)
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("list nodes after enroll: %d", resp.StatusCode)
+		t.Fatalf("legacy install-command status = %d", resp.StatusCode)
 	}
-	// nodes may be array directly or wrapped — doJSON returns map for objects; arrays?
-	// list returns JSON array — doJSON might fail. Check existing patterns.
-	_ = nodesList
-	// Fetch via install-command node re-get by updating — use probe path not needed.
-	// Get node by re-bootstrap list: call GET node not exist — use store via bootstrap node fields after enroll.
-	// Re-get install-command which embeds node
-	resp, inst2 := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+bootID+"/install-command", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("install-command after enroll: %d", resp.StatusCode)
+	migration, _ := inst["migration_command"].(string)
+	if migration == "" || !strings.Contains(migration, "migrate-agent-to-panel-pki.sh") {
+		t.Fatalf("migration command missing: %v", inst)
 	}
-	node2, _ := inst2["node"].(map[string]any)
-	if node2["address"] != "203.0.113.50" {
-		t.Fatalf("address after enroll = %v", node2["address"])
-	}
-	ca, _ := node2["ca_cert_pem"].(string)
-	if !strings.Contains(ca, "BEGIN CERTIFICATE") {
-		t.Fatalf("ca after enroll = %q", ca)
-	}
-	resp, _ = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+bootID, map[string]any{
-		"tls_skip_verify": true,
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("enable TLS skip verify: %d", resp.StatusCode)
-	}
-	resp, insecureTLSInstall := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+bootID+"/install-command", nil)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("install-command with skipped verification: %d", resp.StatusCode)
-	}
-	insecureTLSCommand, _ := insecureTLSInstall["install_command"].(string)
-	if insecureTLSInstall["enable_tls"] != true || !strings.Contains(insecureTLSCommand, "LADDER_TLS=1") {
-		t.Fatalf("TLS transport disabled by skip-verify: %v", insecureTLSInstall)
+	if install, _ := inst["install_command"].(string); install != "" {
+		t.Fatalf("legacy node must only receive migration command: %v", inst)
 	}
 
 	// Create inbound (shadowsocks).
@@ -947,107 +909,4 @@ func TestBatchByLabels(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("batch apply results = %v, want 2", results)
 	}
-}
-
-func TestAgentEnrollManualFirst(t *testing.T) {
-	ts, client, st := newTestServer(t, nil, nil)
-
-	// Pre-create node with operator-chosen NAT control address/port + public_address.
-	n := &store.Node{
-		Name:          "nat-node",
-		Address:       "203.0.113.9",
-		GRPCPort:      55051,
-		Token:         "enroll-token-keep",
-		PublicAddress: "edge.example.com",
-		Status:        "unknown",
-	}
-	if err := st.CreateNode(n); err != nil {
-		t.Fatalf("CreateNode: %v", err)
-	}
-
-	// Enroll reports private IP + different port + CA. Must not clobber address/port/public.
-	enrollClient := &http.Client{Timeout: 10 * time.Second}
-	body := map[string]any{
-		"token": n.Token, "node_id": n.ID,
-		"address": "10.0.0.8", "grpc_port": 50051,
-		"ca_cert_pem": "-----BEGIN CERTIFICATE-----\nKEEPME\n-----END CERTIFICATE-----\n",
-		"tls_enabled": true,
-	}
-	raw, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/agent/enroll", bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+n.Token)
-	resp, err := enrollClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("enroll status = %d body=%s", resp.StatusCode, b)
-	}
-
-	got, err := st.GetNode(n.ID)
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if got.Address != "203.0.113.9" {
-		t.Fatalf("address overwritten: %q", got.Address)
-	}
-	if got.GRPCPort != 55051 {
-		t.Fatalf("grpc_port overwritten: %d", got.GRPCPort)
-	}
-	if got.PublicAddress != "edge.example.com" {
-		t.Fatalf("public_address changed: %q", got.PublicAddress)
-	}
-	if !strings.Contains(got.CACertPEM, "KEEPME") {
-		t.Fatalf("ca not updated: %q", got.CACertPEM)
-	}
-	if got.TLSSkipVerify {
-		t.Fatalf("tls_skip_verify should be false after CA enroll")
-	}
-
-	// Empty-address node still gets filled on first enroll.
-	n2 := &store.Node{
-		Name: "pending-node", Address: "", GRPCPort: 50051,
-		Token: "enroll-token-fill", Status: "pending",
-	}
-	if err := st.CreateNode(n2); err != nil {
-		t.Fatalf("CreateNode n2: %v", err)
-	}
-	body2 := map[string]any{
-		"token": n2.Token, "node_id": n2.ID,
-		"address": "198.51.100.7", "grpc_port": 50051,
-		"ca_cert_pem": "-----BEGIN CERTIFICATE-----\nFILL\n-----END CERTIFICATE-----\n",
-	}
-	raw2, _ := json.Marshal(body2)
-	req2, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/agent/enroll", bytes.NewReader(raw2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("Authorization", "Bearer "+n2.Token)
-	resp2, err := enrollClient.Do(req2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp2.Body)
-		t.Fatalf("enroll2 status = %d body=%s", resp2.StatusCode, b)
-	}
-	got2, err := st.GetNode(n2.ID)
-	if err != nil {
-		t.Fatalf("GetNode n2: %v", err)
-	}
-	if got2.Address != "198.51.100.7" {
-		t.Fatalf("empty address not filled: %q", got2.Address)
-	}
-	if got2.Status == "pending" {
-		t.Fatalf("status still pending after enroll")
-	}
-	_ = client // logged-in client unused; enroll is public
 }

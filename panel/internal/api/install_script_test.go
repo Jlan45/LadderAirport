@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-func TestBuildInstallCommandTLS(t *testing.T) {
+func TestBuildInstallCommandRequiresPanelPKI(t *testing.T) {
 	cmd := buildInstallCommand(installCommandOpts{
-		Token: "tok'en", AgentVersion: "latest", EnableTLS: true,
+		EnrollmentToken: "tok'en",
+		AgentVersion:    "latest",
+		PanelBaseURL:    "https://panel.example.com/",
+		NodeID:          "node-1",
 	})
-	if !strings.Contains(cmd, "LADDER_TLS=1") {
-		t.Fatalf("want TLS=1: %s", cmd)
-	}
-	if !strings.Contains(cmd, "LADDER_TOKEN=") {
-		t.Fatalf("missing token: %s", cmd)
+	if !strings.Contains(cmd, `LADDER_ENROLL_TOKEN='tok'\''en'`) {
+		t.Fatalf("missing escaped enrollment token: %s", cmd)
 	}
 	if strings.Contains(cmd, "LADDER_VERSION=") {
 		t.Fatalf("latest should omit version: %s", cmd)
@@ -21,17 +21,22 @@ func TestBuildInstallCommandTLS(t *testing.T) {
 	if !strings.Contains(cmd, defaultInstallScriptURL) {
 		t.Fatalf("missing script url: %s", cmd)
 	}
-	if strings.Contains(cmd, "LADDER_PANEL=") {
-		t.Fatalf("no panel without base url: %s", cmd)
+	if !strings.Contains(cmd, "LADDER_PANEL='https://panel.example.com'") ||
+		!strings.Contains(cmd, "LADDER_NODE_ID='node-1'") {
+		t.Fatalf("missing Panel identity: %s", cmd)
+	}
+	if strings.Contains(cmd, "LADDER_TLS=") || strings.Contains(cmd, "LADDER_TOKEN=") {
+		t.Fatalf("legacy install variables must not be emitted: %s", cmd)
 	}
 }
 
 func TestBuildInstallCommandWithEnroll(t *testing.T) {
 	cmd := buildInstallCommand(installCommandOpts{
-		Token: "abc", EnableTLS: true,
-		PanelBaseURL: "https://panel.example.com/",
-		NodeID:       "nid-1",
-		GRPCPort:     50051,
+		EnrollmentToken: "abc",
+		PanelBaseURL:    "https://panel.example.com/",
+		NodeID:          "nid-1",
+		GRPCPort:        50051,
+		ReportAddress:   "edge.example.com",
 	})
 	if !strings.Contains(cmd, "LADDER_PANEL='https://panel.example.com'") {
 		t.Fatalf("panel: %s", cmd)
@@ -42,17 +47,32 @@ func TestBuildInstallCommandWithEnroll(t *testing.T) {
 	if !strings.Contains(cmd, "LADDER_GRPC_PORT=50051") {
 		t.Fatalf("port: %s", cmd)
 	}
+	if !strings.Contains(cmd, "LADDER_REPORT_ADDRESS='edge.example.com'") {
+		t.Fatalf("report address: %s", cmd)
+	}
 }
 
-func TestBuildInstallCommandPlainVersion(t *testing.T) {
-	cmd := buildInstallCommand(installCommandOpts{
-		Token: "abc", AgentVersion: "v0.2.0", EnableTLS: false,
+func TestBuildPKIMigrationCommand(t *testing.T) {
+	cmd := buildPKIMigrationCommand(installCommandOpts{
+		EnrollmentToken: "one-time",
+		AgentVersion:    "v0.9.0",
+		PanelBaseURL:    "https://panel.example.com/",
+		NodeID:          "node-1",
+		GRPCPort:        50051,
+		ReportAddress:   "192.0.2.10",
 	})
-	if !strings.Contains(cmd, "LADDER_TLS=0") {
-		t.Fatalf("%s", cmd)
-	}
-	if !strings.Contains(cmd, "LADDER_VERSION='v0.2.0'") {
-		t.Fatalf("%s", cmd)
+	for _, want := range []string{
+		defaultPKIMigrationScriptURL,
+		"LADDER_PANEL='https://panel.example.com'",
+		"LADDER_NODE_ID='node-1'",
+		"LADDER_ENROLL_TOKEN='one-time'",
+		"LADDER_VERSION='v0.9.0'",
+		"LADDER_GRPC_PORT=50051",
+		"LADDER_REPORT_ADDRESS='192.0.2.10'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("missing %q: %s", want, cmd)
+		}
 	}
 }
 

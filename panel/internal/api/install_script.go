@@ -9,6 +9,7 @@ import (
 
 // Default raw install script URL (main branch). Override via request field if needed.
 const defaultInstallScriptURL = "https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh"
+const defaultPKIMigrationScriptURL = "https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/migrate-agent-to-panel-pki.sh"
 
 func randomAgentToken() (string, error) {
 	b := make([]byte, 24)
@@ -20,34 +21,28 @@ func randomAgentToken() (string, error) {
 
 // installCommandOpts configures the curl|bash one-liner.
 type installCommandOpts struct {
-	ScriptURL    string
-	Token        string
-	AgentVersion string
-	EnableTLS    bool
-	PanelBaseURL string // e.g. https://panel.example.com — enables auto-enroll
-	NodeID       string
-	GRPCPort     int
-	Listen       string // optional LADDER_LISTEN override
+	ScriptURL       string
+	EnrollmentToken string
+	AgentVersion    string
+	PanelBaseURL    string
+	NodeID          string
+	GRPCPort        int
+	ReportAddress   string
+	Listen          string // optional LADDER_LISTEN override
 }
 
-// buildInstallCommand produces a one-liner for curl|bash install with token, TLS, and optional enroll.
+// buildInstallCommand produces a strict Panel-PKI installation command.
 func buildInstallCommand(opts installCommandOpts) string {
 	scriptURL := opts.ScriptURL
 	if scriptURL == "" {
 		scriptURL = defaultInstallScriptURL
 	}
-	tlsVal := "1"
-	if !opts.EnableTLS {
-		tlsVal = "0"
-	}
 	var b strings.Builder
 	b.WriteString("curl -fsSL ")
 	b.WriteString(shellSingleQuote(scriptURL))
 	b.WriteString(" | sudo env")
-	b.WriteString(" LADDER_TOKEN=")
-	b.WriteString(shellSingleQuote(opts.Token))
-	b.WriteString(" LADDER_TLS=")
-	b.WriteString(tlsVal)
+	b.WriteString(" LADDER_ENROLL_TOKEN=")
+	b.WriteString(shellSingleQuote(opts.EnrollmentToken))
 	if opts.AgentVersion != "" && opts.AgentVersion != "latest" {
 		b.WriteString(" LADDER_VERSION=")
 		b.WriteString(shellSingleQuote(opts.AgentVersion))
@@ -64,10 +59,40 @@ func buildInstallCommand(opts installCommandOpts) string {
 			b.WriteString(" LADDER_GRPC_PORT=")
 			b.WriteString(fmt.Sprintf("%d", opts.GRPCPort))
 		}
+		if opts.ReportAddress != "" {
+			b.WriteString(" LADDER_REPORT_ADDRESS=")
+			b.WriteString(shellSingleQuote(opts.ReportAddress))
+		}
 	}
 	if opts.Listen != "" {
 		b.WriteString(" LADDER_LISTEN=")
 		b.WriteString(shellSingleQuote(opts.Listen))
+	}
+	b.WriteString(" bash")
+	return b.String()
+}
+
+func buildPKIMigrationCommand(opts installCommandOpts) string {
+	var b strings.Builder
+	b.WriteString("curl -fsSL ")
+	b.WriteString(shellSingleQuote(defaultPKIMigrationScriptURL))
+	b.WriteString(" | sudo env LADDER_PANEL=")
+	b.WriteString(shellSingleQuote(strings.TrimRight(strings.TrimSpace(opts.PanelBaseURL), "/")))
+	b.WriteString(" LADDER_NODE_ID=")
+	b.WriteString(shellSingleQuote(opts.NodeID))
+	b.WriteString(" LADDER_ENROLL_TOKEN=")
+	b.WriteString(shellSingleQuote(opts.EnrollmentToken))
+	if opts.AgentVersion != "" && opts.AgentVersion != "latest" {
+		b.WriteString(" LADDER_VERSION=")
+		b.WriteString(shellSingleQuote(opts.AgentVersion))
+	}
+	if opts.GRPCPort > 0 {
+		b.WriteString(" LADDER_GRPC_PORT=")
+		b.WriteString(fmt.Sprintf("%d", opts.GRPCPort))
+	}
+	if opts.ReportAddress != "" {
+		b.WriteString(" LADDER_REPORT_ADDRESS=")
+		b.WriteString(shellSingleQuote(opts.ReportAddress))
 	}
 	b.WriteString(" bash")
 	return b.String()
@@ -118,30 +143,17 @@ func panelBaseFromSettings(publicBaseURL string) string {
 	return strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
 }
 
-func installSteps(enableTLS bool, address string, grpcPort int, panelBase string, enrollOK bool) []string {
+func installSteps(address string, grpcPort int) []string {
 	steps := []string{
 		"在目标服务器（Linux amd64/arm64）以 root 执行上方一键安装命令。",
-		"安装脚本会下载 ladder-agent、写入 systemd，并生成 TLS 证书（LADDER_TLS=0 可关）。",
+		"安装脚本会在节点本地生成私钥与 CSR，由 Panel 管理 CA 签发 30 天证书，并强制启用 mTLS。",
+		"安装时会调用 Panel 证书接口完成身份注册；私钥始终留在节点，证书到期前由 Agent 自动续签。",
+		"回到 Panel 刷新节点列表，确认管理证书已绑定后点「探测」。",
 	}
-	if enrollOK && panelBase != "" {
-		steps = append(steps,
-			"安装结束会自动向 Panel 上报地址与 CA（POST /api/v1/agent/enroll）；若节点已有控制面地址/端口则不会覆盖。",
-			"回到 Panel 刷新节点列表，确认地址/CA 已写入后点「探测」。",
-		)
-		if strings.TrimSpace(address) != "" {
-			steps = append(steps, fmt.Sprintf("控制面地址已预填时 enroll 不会改写；端口转发请确认 gRPC 端口为外部映射端口（当前 %d）。", grpcPort))
-		} else {
-			steps = append(steps, "NAT/端口转发：在节点详情填写 Panel 可达的控制面地址与映射端口；客户端入口不同时再填「公网地址」。")
-		}
+	if strings.TrimSpace(address) != "" {
+		steps = append(steps, fmt.Sprintf("控制面地址已预填时注册不会改写；端口转发请确认 gRPC 端口为外部映射端口（当前 %d）。", grpcPort))
 	} else {
-		steps = append(steps,
-			"未配置 Public Base URL：无法自动上报。请在「设置」填写 Panel 公网地址（如 https://panel.example.com）后重新生成安装命令。",
-		)
-		if enableTLS {
-			steps = append(steps,
-				"或手动：sudo cat /etc/ladder-agent/tls/ca.crt 粘贴到节点 CA，并填写控制面地址。",
-			)
-		}
+		steps = append(steps, "NAT/端口转发：在节点详情填写 Panel 可达的控制面地址与映射端口；客户端入口不同时再填「公网地址」。")
 	}
 	steps = append(steps, "探测成功后即可关联入站并下发配置。")
 	return steps

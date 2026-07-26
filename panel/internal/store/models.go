@@ -11,14 +11,18 @@ type PortMapping struct {
 }
 
 type Node struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Address       string   `json:"address"`   // control dial host (Panel → Agent)
-	GRPCPort      int      `json:"grpc_port"` // control dial port (external mapped port if NAT)
-	Token         string   `json:"token,omitempty"`
-	Labels        []string `json:"labels"`
-	TLSSkipVerify bool     `json:"tls_skip_verify"`
-	CACertPEM     string   `json:"ca_cert_pem,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Address        string   `json:"address"`   // control dial host (Panel → Agent)
+	GRPCPort       int      `json:"grpc_port"` // control dial port (external mapped port if NAT)
+	Token          string   `json:"token,omitempty"`
+	Labels         []string `json:"labels"`
+	PKICABundlePEM string   `json:"-"`
+	// PKICertSerial binds Panel dialing to the currently active Panel-issued
+	// Agent server certificate.
+	PKICertSerial        string `json:"pki_cert_serial,omitempty"`
+	PKINotAfter          int64  `json:"pki_not_after_unix,omitempty"`
+	PKIMigrationRequired bool   `json:"pki_migration_required,omitempty"`
 	// PublicAddress is the client-facing host for subscriptions (Clash/sing-box server).
 	// Empty means fall back to Address. Host only — client ports come from inbound params
 	// or PortMappings when listen/public ports differ.
@@ -57,8 +61,6 @@ type NodeOperatorUpdate struct {
 	GRPCPort        *int           `json:"grpc_port"`
 	Token           *string        `json:"token"`
 	Labels          *[]string      `json:"labels"`
-	TLSSkipVerify   *bool          `json:"tls_skip_verify"`
-	CACertPEM       *string        `json:"ca_cert_pem"`
 	PublicAddress   *string        `json:"public_address"`
 	PortMappings    *[]PortMapping `json:"port_mappings"`
 	EgressInterface *string        `json:"egress_interface"`
@@ -246,5 +248,34 @@ type ConfigSnapshot struct {
 	ConfigJSON    string `json:"config_json"`
 	ConfigHash    string `json:"config_hash"`
 	TaskID        string `json:"task_id,omitempty"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
+}
+
+// PKICertificate is an issuance record for a management-plane certificate.
+// Private keys are never stored by Panel for Agent certificates.
+type PKICertificate struct {
+	Serial        string `json:"serial"`
+	NodeID        string `json:"node_id,omitempty"`
+	Profile       string `json:"profile"` // agent-server | panel-client
+	Subject       string `json:"subject"`
+	URISAN        string `json:"uri_san"`
+	DNSSANs       string `json:"dns_sans,omitempty"`
+	IPSANs        string `json:"ip_sans,omitempty"`
+	NotBeforeUnix int64  `json:"not_before_unix"`
+	NotAfterUnix  int64  `json:"not_after_unix"`
+	Status        string `json:"status"` // active | replaced | revoked | expired
+	RevokedAtUnix int64  `json:"revoked_at_unix,omitempty"`
+	RevokeReason  string `json:"revoke_reason,omitempty"`
+	CertPEM       string `json:"cert_pem,omitempty"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
+}
+
+type PKIAuditLog struct {
+	ID            string `json:"id"`
+	Action        string `json:"action"`
+	NodeID        string `json:"node_id,omitempty"`
+	Serial        string `json:"serial,omitempty"`
+	Actor         string `json:"actor"`
+	Detail        string `json:"detail,omitempty"`
 	CreatedAtUnix int64  `json:"created_at_unix"`
 }

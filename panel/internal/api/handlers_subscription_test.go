@@ -66,4 +66,3 @@ func TestSanitizeFilename(t *testing.T) {
 		t.Fatalf("empty = %q", got)
 	}
 }
-

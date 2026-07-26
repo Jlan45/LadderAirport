@@ -10,6 +10,7 @@ import (
 
 	"github.com/ladderairport/panel/internal/nodeclient"
 	"github.com/ladderairport/panel/internal/nodeconfig"
+	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/panel/internal/store"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
@@ -30,6 +31,7 @@ type Service struct {
 	Builder     *nodeconfig.Builder
 	Dial        DialFunc
 	Coordinator *sync.Mutex
+	PKI         *pki.Manager
 }
 
 func NewService(st *store.Store, builder *nodeconfig.Builder, coordinator *sync.Mutex) *Service {
@@ -45,18 +47,25 @@ func NewService(st *store.Store, builder *nodeconfig.Builder, coordinator *sync.
 }
 
 func (s *Service) defaultDial(ctx context.Context, node store.Node, token string) (Agent, error) {
+	if s.PKI == nil {
+		return nil, fmt.Errorf("management PKI unavailable")
+	}
+	if node.PKICertSerial == "" || node.PKICABundlePEM == "" {
+		return nil, fmt.Errorf("node %s requires Panel PKI migration", node.ID)
+	}
 	settings, err := s.Store.GetSettings()
 	if err != nil {
 		return nil, err
 	}
+	clientCert := s.PKI.ClientCertificate()
 	cfg := nodeclient.DialConfig{
-		Address:       net.JoinHostPort(node.Address, fmt.Sprintf("%d", node.GRPCPort)),
-		Token:         token,
-		Timeout:       time.Duration(settings.GRPCTimeoutSec) * time.Second,
-		TLSSkipVerify: node.TLSSkipVerify,
-	}
-	if node.CACertPEM != "" {
-		cfg.CACertPEM = []byte(node.CACertPEM)
+		Address:           net.JoinHostPort(node.Address, fmt.Sprintf("%d", node.GRPCPort)),
+		Token:             token,
+		Timeout:           time.Duration(settings.GRPCTimeoutSec) * time.Second,
+		CACertPEM:         []byte(node.PKICABundlePEM),
+		ClientCertificate: &clientCert,
+		ExpectedPeerURI:   pki.AgentURI(node.ID),
+		ExpectedSerial:    node.PKICertSerial,
 	}
 	return nodeclient.Dial(ctx, cfg)
 }

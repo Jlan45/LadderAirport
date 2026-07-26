@@ -55,4 +55,7 @@ install-panel:
 	sudo LADDER_FROM=local ./scripts/install-panel.sh
 
 install-agent:
-	sudo LADDER_FROM=local ./scripts/install-agent.sh
+	@test -n "$(LADDER_PANEL)" -a -n "$(LADDER_NODE_ID)" -a -n "$(LADDER_ENROLL_TOKEN)" || \
+		(echo "LADDER_PANEL, LADDER_NODE_ID and LADDER_ENROLL_TOKEN are required"; exit 1)
+	@sudo env LADDER_FROM=local LADDER_PANEL="$(LADDER_PANEL)" LADDER_NODE_ID="$(LADDER_NODE_ID)" \
+		LADDER_ENROLL_TOKEN="$(LADDER_ENROLL_TOKEN)" ./scripts/install-agent.sh

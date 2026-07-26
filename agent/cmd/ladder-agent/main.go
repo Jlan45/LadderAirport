@@ -2,15 +2,19 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/ladderairport/agent/internal/control"
+	"github.com/ladderairport/agent/internal/managementpki"
 	"github.com/ladderairport/agent/internal/version"
 	"github.com/ladderairport/pkg/auth"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
@@ -21,8 +25,13 @@ import (
 func main() {
 	listen := flag.String("listen", ":50051", "gRPC listen address")
 	token := flag.String("token", "changeme", "shared bearer token for AgentControl")
-	tlsCert := flag.String("tls-cert", "", "TLS certificate file (optional)")
-	tlsKey := flag.String("tls-key", "", "TLS private key file (optional)")
+	tlsCert := flag.String("tls-cert", "", "Panel-issued TLS certificate file (required)")
+	tlsKey := flag.String("tls-key", "", "Agent TLS private key file (required)")
+	tlsClientCA := flag.String("tls-client-ca", "", "Panel management CA bundle (required)")
+	panelURL := flag.String("panel-url", "", "Panel base URL for certificate renewal (required)")
+	nodeID := flag.String("node-id", "", "Panel node ID for certificate identity (required)")
+	reportAddress := flag.String("report-address", "", "address reported to Panel during certificate renewal")
+	tlsSANs := flag.String("tls-sans", "", "comma-separated DNS/IP SANs preserved during renewal")
 	dataDir := flag.String("data-dir", "", "directory for cached config/state (optional)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -38,6 +47,12 @@ func main() {
 
 	if *token == "" {
 		log.Fatal("-token is required")
+	}
+	if *tlsCert == "" || *tlsKey == "" || *tlsClientCA == "" || *panelURL == "" || *nodeID == "" {
+		log.Fatal("-tls-cert, -tls-key, -tls-client-ca, -panel-url and -node-id are required")
+	}
+	if err := managementpki.ParsePanelURL(*panelURL); err != nil {
+		log.Fatal(err)
 	}
 	if *dataDir != "" {
 		if err := os.MkdirAll(*dataDir, 0o755); err != nil {
@@ -58,20 +73,51 @@ func main() {
 		grpc.StreamInterceptor(auth.StreamServerInterceptor(*token)),
 	}
 
-	useTLS := *tlsCert != "" && *tlsKey != ""
-	if useTLS {
-		creds, err := credentials.NewServerTLSFromFile(*tlsCert, *tlsKey)
-		if err != nil {
-			log.Fatalf("load TLS credentials: %v", err)
-		}
-		opts = append(opts, grpc.Creds(creds))
-		log.Printf("tls=enabled cert=%s", *tlsCert)
-	} else {
-		if *tlsCert != "" || *tlsKey != "" {
-			log.Printf("warning: both -tls-cert and -tls-key required for TLS; falling back to plaintext")
-		}
-		log.Printf("warning: listening without TLS (lab mode)")
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	host, portText, _ := net.SplitHostPort(*listen)
+	port, _ := strconv.Atoi(portText)
+	if *reportAddress != "" {
+		host = *reportAddress
 	}
+	certManager, err := managementpki.New(managementpki.Config{
+		PanelURL: *panelURL,
+		NodeID:   *nodeID,
+		Token:    *token,
+		CertPath: *tlsCert,
+		KeyPath:  *tlsKey,
+		CAPath:   *tlsClientCA,
+		Address:  host,
+		GRPCPort: port,
+		SANs:     strings.Split(*tlsSANs, ","),
+	})
+	if err != nil {
+		log.Fatalf("load management TLS: %v", err)
+	}
+	tlsConfig := &tls.Config{
+		MinVersion:     tls.VersionTLS12,
+		GetCertificate: certManager.GetCertificate,
+	}
+	pool, err := managementpki.ClientCAPool(*tlsClientCA)
+	if err != nil {
+		log.Fatalf("load Panel client CA: %v", err)
+	}
+	tlsConfig.ClientCAs = pool
+	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+	tlsConfig.VerifyPeerCertificate = managementpki.VerifyPanelIdentity
+	tlsConfig.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		currentPool, err := managementpki.ClientCAPool(*tlsClientCA)
+		if err != nil {
+			return nil, err
+		}
+		current := tlsConfig.Clone()
+		current.GetConfigForClient = nil
+		current.ClientCAs = currentPool
+		return current, nil
+	}
+	log.Printf("mtls=required cert=%s client_ca=%s", *tlsCert, *tlsClientCA)
+	opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	go certManager.Run(runCtx)
 
 	gs := grpc.NewServer(opts...)
 	agentv1.RegisterAgentControlServer(gs, srv)
@@ -93,6 +139,7 @@ func main() {
 	select {
 	case sig := <-sigCh:
 		log.Printf("signal %v, shutting down", sig)
+		cancelRun()
 		gs.GracefulStop()
 		_ = rt.Stop(context.Background())
 	case err := <-errCh:

@@ -2,9 +2,9 @@
 # 一键安装 / 升级 / 卸载 ladder-agent（systemd）。
 # 默认从 GitHub Release 拉最新二进制。
 #
-# 安装（推荐）:
-#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
-#     | sudo env LADDER_TOKEN=mysecret bash
+# 安装（从 Panel 节点页面复制命令；以下变量均必需）:
+#   sudo env LADDER_PANEL=https://panel.example.com LADDER_NODE_ID=... \
+#     LADDER_ENROLL_TOKEN=... ./scripts/install-agent.sh
 #
 # 升级（只换二进制 + 刷新 unit + restart；保留 agent.env 与 TLS）:
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
@@ -14,9 +14,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
 #     | sudo env LADDER_ACTION=uninstall bash
 #
-# 其它:
-#   sudo LADDER_TLS=0 LADDER_TOKEN=mysecret ./scripts/install-agent.sh
-#   sudo LADDER_FROM=local LADDER_TOKEN=mysecret ./scripts/install-agent.sh
+# 本地构建安装:
+#   sudo LADDER_FROM=local LADDER_PANEL=https://panel.example.com \
+#     LADDER_NODE_ID=... LADDER_ENROLL_TOKEN=... ./scripts/install-agent.sh
 #   sudo ./scripts/install-agent.sh upgrade
 #   sudo ./scripts/install-agent.sh uninstall
 #
@@ -60,19 +60,17 @@ USER_NAME="${LADDER_USER:-ladder}"
 GROUP_NAME="${LADDER_GROUP:-ladder}"
 LISTEN="${LADDER_LISTEN:-0.0.0.0:50051}"
 TOKEN="${LADDER_TOKEN:-}"
+ENROLL_TOKEN="${LADDER_ENROLL_TOKEN:-}"
 # release | local  （默认 release）
 FROM="${LADDER_FROM:-release}"
 VERSION="${LADDER_VERSION:-latest}" # latest 或 v0.2.0
-# TLS: 1=自签并启用（默认）; 0=明文 lab
-TLS_ENABLE="${LADDER_TLS:-1}"
-TLS_DAYS="${LADDER_TLS_DAYS:-825}"
-TLS_CN="${LADDER_TLS_CN:-}"
 TLS_EXTRA_SANS="${LADDER_TLS_EXTRA_SANS:-}" # 逗号分隔: DNS:foo,IP:1.2.3.4
-# Panel auto-enroll (set by Panel-generated install command)
+# Panel PKI enrollment (set by Panel-generated install command)
 PANEL_URL="${LADDER_PANEL:-}"          # e.g. https://panel.example.com
 NODE_ID="${LADDER_NODE_ID:-}"
 REPORT_ADDR="${LADDER_REPORT_ADDRESS:-}" # force reported address; else auto-detect
 GRPC_PORT_HINT="${LADDER_GRPC_PORT:-}"
+ALLOW_HTTP="${LADDER_ALLOW_HTTP:-0}"
 TMPDIR_DL=""
 ENV_FILE="${CONF_DIR}/agent.env"
 
@@ -239,6 +237,15 @@ build_san_list() {
     fi
   fi
 
+  if [[ -n "${REPORT_ADDR}" ]]; then
+    local report_san="${REPORT_ADDR%%%*}"
+    if [[ "${report_san}" == *:* || "${report_san}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      sans+=("IP:${report_san}")
+    else
+      sans+=("DNS:${report_san}")
+    fi
+  fi
+
   if [[ -n "${TLS_EXTRA_SANS}" ]]; then
     local IFS=','
     local extra
@@ -284,104 +291,99 @@ build_san_list() {
   echo "${joined}"
 }
 
-# Generate node-local CA + leaf cert if missing. Idempotent.
+# Request a Panel-issued Agent certificate. The private key is generated on the
+# Agent and never sent to Panel.
 ensure_tls_material() {
   need_cmd openssl
-
+  need_cmd curl
+  need_cmd python3
   mkdir -p "${TLS_DIR}"
-  local ca_key="${TLS_DIR}/ca.key"
-  local ca_crt="${TLS_DIR}/ca.crt"
   local srv_key="${TLS_DIR}/server.key"
   local srv_crt="${TLS_DIR}/server.crt"
+  local ca_crt="${TLS_DIR}/ca.crt"
   local srv_csr="${TLS_DIR}/server.csr"
-  local srv_ext="${TLS_DIR}/server.ext"
-
-  if [[ -f "${ca_crt}" && -f "${srv_crt}" && -f "${srv_key}" ]]; then
-    echo "==> TLS 证书已存在，复用: ${TLS_DIR}"
-    return
-  fi
-
-  echo "==> 生成自签 TLS 材料 → ${TLS_DIR}"
-  local cn="${TLS_CN}"
-  if [[ -z "${cn}" ]]; then
-    cn="$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo ladder-agent)"
-  fi
+  local req_conf="${TLS_DIR}/server-csr.conf"
+  local response_file="${TLS_DIR}/issue-response.tmp"
+  local payload_file="${TLS_DIR}/issue-request.tmp"
+  local token_file="${TLS_DIR}/control-token.tmp"
   local san
   san="$(build_san_list)"
-  echo "    CN=${cn}"
-  echo "    SAN=${san}"
 
-  openssl genrsa -out "${ca_key}" 2048 2>/dev/null
-  openssl req -x509 -new -nodes \
-    -key "${ca_key}" \
-    -sha256 \
-    -days "${TLS_DAYS}" \
-    -subj "/CN=LadderAirport Agent CA ($(hostname -s 2>/dev/null || echo node))" \
-    -out "${ca_crt}"
-
-  openssl genrsa -out "${srv_key}" 2048 2>/dev/null
-  openssl req -new \
-    -key "${srv_key}" \
-    -subj "/CN=${cn}" \
-    -out "${srv_csr}"
-
-  cat >"${srv_ext}" <<EOF
-basicConstraints=CA:FALSE
-keyUsage=digitalSignature,keyEncipherment
-extendedKeyUsage=serverAuth
-subjectAltName=${san}
-EOF
-
-  openssl x509 -req \
-    -in "${srv_csr}" \
-    -CA "${ca_crt}" \
-    -CAkey "${ca_key}" \
-    -CAcreateserial \
-    -out "${srv_crt}" \
-    -days "${TLS_DAYS}" \
-    -sha256 \
-    -extfile "${srv_ext}"
-
-  rm -f "${srv_csr}" "${srv_ext}" "${TLS_DIR}/ca.srl"
-
-  # CA key stays on node for re-issue; lock down
-  chmod 600 "${ca_key}" "${srv_key}"
-  chmod 644 "${ca_crt}" "${srv_crt}"
-  chown -R root:"${GROUP_NAME}" "${TLS_DIR}"
-  # ladder user needs read server cert/key at runtime
-  chmod 640 "${srv_key}"
-  # ca.key only root
-  chmod 600 "${ca_key}"
-}
-
-write_panel_import() {
-  local import_file="${CONF_DIR}/panel-import.txt"
-  local ca_crt="${TLS_DIR}/ca.crt"
-  local addr_hint
-  addr_hint="$(detect_report_address)"
-  [[ -n "${addr_hint}" ]] || addr_hint="<本机公网或内网 IP>"
-
+  echo "==> 由 Panel 管理 CA 签发 Agent 证书"
+  echo "    Panel=${PANEL_URL%/} Node=${NODE_ID} SAN=${san}"
+  if [[ ! -f "${srv_key}" ]]; then
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "${srv_key}"
+  fi
   {
-    echo "# Panel 节点登记（本文件含敏感信息，权限 640）"
-    echo "# 生成时间: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo
-    echo "Address     : ${addr_hint}"
-    echo "gRPC 端口   : ${GRPC_PORT}"
-    echo "Token       : ${ACTIVE_TOKEN}"
-    if [[ -n "${PANEL_URL}" ]]; then
-      echo "Panel       : ${PANEL_URL} (auto-enroll attempted)"
-    fi
-    echo "TLS         : see LADDER_TLS / ca.crt"
-    echo
-    echo "-----BEGIN PANEL_CA_PEM-----"
-    if [[ -f "${ca_crt}" ]]; then
-      cat "${ca_crt}"
-    fi
-    echo "-----END PANEL_CA_PEM-----"
-  } >"${import_file}"
-  chmod 640 "${import_file}"
-  chown root:"${GROUP_NAME}" "${import_file}"
-  echo "${import_file}"
+    echo "[req]"
+    echo "prompt=no"
+    echo "distinguished_name=dn"
+    echo "req_extensions=req_ext"
+    echo "[dn]"
+    echo "CN=${NODE_ID}"
+    echo "[req_ext]"
+    echo "subjectAltName=${san}"
+  } >"${req_conf}"
+  openssl req -new -key "${srv_key}" -config "${req_conf}" -out "${srv_csr}"
+
+  PANEL_NODE_ID="${NODE_ID}" \
+    PANEL_ADDRESS="$(detect_report_address)" PANEL_PORT="${GRPC_PORT_HINT:-${LISTEN##*:}}" \
+    PANEL_CSR="${srv_csr}" python3 - <<'PY' >"${payload_file}"
+import json, os
+with open(os.environ["PANEL_CSR"], "r", encoding="utf-8") as f:
+    csr = f.read()
+print(json.dumps({
+    "node_id": os.environ["PANEL_NODE_ID"],
+    "csr_pem": csr,
+    "address": os.environ.get("PANEL_ADDRESS", ""),
+    "grpc_port": int(os.environ.get("PANEL_PORT") or "50051"),
+}))
+PY
+
+  local code
+  code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+    -X POST "${PANEL_URL%/}/api/v1/pki/agent-certificates" \
+    -H "Authorization: Bearer ${ENROLL_TOKEN:-${ACTIVE_TOKEN:-${TOKEN}}}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@${payload_file}")" || die "Panel CA 请求失败"
+  if [[ "${code}" != "201" ]]; then
+    die "Panel CA 签发失败 (HTTP ${code}): $(head -c 500 "${response_file}")"
+  fi
+  PANEL_RESPONSE="${response_file}" PANEL_CERT="${srv_crt}" PANEL_CA="${ca_crt}" PANEL_TOKEN_FILE="${token_file}" python3 - <<'PY'
+import json, os
+with open(os.environ["PANEL_RESPONSE"], "r", encoding="utf-8") as f:
+    data = json.load(f)
+for key, path in (("cert_pem", os.environ["PANEL_CERT"]), ("ca_bundle_pem", os.environ["PANEL_CA"])):
+    value = data.get(key, "")
+    if not value:
+        raise SystemExit("Panel response missing " + key)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(value)
+    os.replace(tmp, path)
+token = data.get("control_token", "")
+if token:
+    with open(os.environ["PANEL_TOKEN_FILE"], "w", encoding="utf-8") as f:
+        f.write(token)
+PY
+  if [[ -f "${token_file}" ]]; then
+    TOKEN="$(cat "${token_file}")"
+    ACTIVE_TOKEN="${TOKEN}"
+  fi
+  [[ -n "${TOKEN}" ]] || die "Panel 未返回 Agent 控制令牌"
+  openssl x509 -in "${srv_crt}" -noout -checkend 3600 >/dev/null \
+    || die "Panel 返回的 Agent 证书无效或即将过期"
+  openssl verify -CAfile "${ca_crt}" "${srv_crt}" >/dev/null \
+    || die "Panel 返回的 Agent 证书链校验失败"
+  local key_pub cert_pub
+  key_pub="$(openssl pkey -in "${srv_key}" -pubout 2>/dev/null)"
+  cert_pub="$(openssl x509 -in "${srv_crt}" -pubkey -noout 2>/dev/null)"
+  [[ "${key_pub}" == "${cert_pub}" ]] || die "Panel 返回证书与本地私钥不匹配"
+  rm -f "${srv_csr}" "${req_conf}" "${response_file}" "${payload_file}" "${token_file}"
+  chmod 600 "${srv_key}"
+  chmod 644 "${srv_crt}" "${ca_crt}"
+  chown -R "${USER_NAME}:${GROUP_NAME}" "${TLS_DIR}"
+  chmod 700 "${TLS_DIR}"
 }
 
 # Pick an address Panel should dial (override with LADDER_REPORT_ADDRESS).
@@ -409,80 +411,6 @@ detect_report_address() {
     fi
   fi
   echo ""
-}
-
-# POST address + CA to Panel so operator need not paste manually.
-enroll_to_panel() {
-  local panel="${PANEL_URL%/}"
-  if [[ -z "${panel}" ]]; then
-    echo "==> 未设置 LADDER_PANEL，跳过自动上报（请在 Panel 设置 Public Base URL 后重新生成安装命令）"
-    return 0
-  fi
-  need_cmd curl
-  local addr ca_pem="" tls_json="true" port payload
-  addr="$(detect_report_address)"
-  port="${GRPC_PORT_HINT:-${GRPC_PORT}}"
-  if [[ -z "${addr}" ]]; then
-    echo "WARNING: 无法探测上报地址，跳过 enroll（可设 LADDER_REPORT_ADDRESS）" >&2
-    return 0
-  fi
-  if [[ -f "${TLS_DIR}/ca.crt" ]]; then
-    ca_pem="$(cat "${TLS_DIR}/ca.crt")"
-  else
-    tls_json="false"
-  fi
-  # Private RFC1918 is fine when Panel shares the LAN/VPN; for NAT + port-forward
-  # set LADDER_REPORT_ADDRESS to the public/VPN host Panel should dial, and set
-  # the external mapped port in Panel (enroll will not overwrite non-empty address/port).
-  case "${addr}" in
-    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*)
-      if [[ -z "${REPORT_ADDR}" ]]; then
-        echo "WARNING: 上报地址 ${addr} 看起来是内网 IP。若 Panel 不在同一网络/VPN，请设置 LADDER_REPORT_ADDRESS=公网或可达地址，或在 Panel 节点详情手填控制面地址。" >&2
-        echo "         端口转发时 grpc_port 请在 Panel 填外部映射端口；已有控制面地址时 enroll 不会覆盖。" >&2
-      fi
-      ;;
-  esac
-  echo "==> 向 Panel 自动上报: ${panel}/api/v1/agent/enroll"
-  echo "    address=${addr} port=${port} node_id=${NODE_ID:-auto}"
-
-  if command -v python3 >/dev/null 2>&1; then
-    payload="$(PANEL="${panel}" TOKEN="${ACTIVE_TOKEN}" NODE_ID="${NODE_ID}" \
-      ADDR="${addr}" PORT="${port}" CA="${ca_pem}" TLS="${tls_json}" HOST="$(hostname -f 2>/dev/null || hostname)" \
-      python3 - <<'PY'
-import json, os
-print(json.dumps({
-  "token": os.environ.get("TOKEN", ""),
-  "node_id": os.environ.get("NODE_ID", ""),
-  "address": os.environ.get("ADDR", ""),
-  "grpc_port": int(os.environ.get("PORT") or "50051"),
-  "ca_cert_pem": os.environ.get("CA", ""),
-  "hostname": os.environ.get("HOST", ""),
-  "tls_enabled": os.environ.get("TLS", "true").lower() in ("1", "true", "yes"),
-}))
-PY
-)"
-  else
-    echo "WARNING: 需要 python3 以安全编码 enroll JSON，跳过自动上报" >&2
-    return 0
-  fi
-
-  local resp code body
-  resp="$(curl -fsS -w '\n%{http_code}' -X POST "${panel}/api/v1/agent/enroll" \
-    -H "Authorization: Bearer ${ACTIVE_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "${payload}" 2>&1)" || {
-    echo "WARNING: enroll 请求失败: ${resp}" >&2
-    return 0
-  }
-  code="$(echo "${resp}" | tail -n1)"
-  body="$(echo "${resp}" | sed '$d')"
-  if [[ "${code}" == "200" ]]; then
-    echo "    enroll 成功 (HTTP ${code})"
-    echo "${body}" | head -c 400
-    echo
-  else
-    echo "WARNING: enroll HTTP ${code}: ${body}" >&2
-  fi
 }
 
 ensure_user_and_dirs() {
@@ -518,17 +446,11 @@ install_binary() {
   install -m 0755 "${src}" "${INSTALL_BIN}"
 }
 
-# TLS_CERT_PATH / TLS_KEY_PATH may be set by caller; empty = plaintext unit.
 write_unit() {
-  local tls_exec_args=""
-  if [[ -n "${TLS_CERT_PATH:-}" && -n "${TLS_KEY_PATH:-}" ]]; then
-    tls_exec_args=" -tls-cert \${LADDER_TLS_CERT} -tls-key \${LADDER_TLS_KEY}"
-  fi
-
   echo "==> 写入 systemd: ${SERVICE_DST}"
   cat >"${SERVICE_DST}" <<EOF
 [Unit]
-Description=LadderAirport Agent (sing-box control plane)
+Description=LadderAirport Agent (Panel-managed mTLS)
 After=network-online.target
 Wants=network-online.target
 
@@ -538,14 +460,14 @@ User=${USER_NAME}
 Group=${GROUP_NAME}
 WorkingDirectory=${DATA_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${INSTALL_BIN} -listen \${LADDER_LISTEN} -token \${LADDER_TOKEN} -data-dir \${LADDER_DATA_DIR}${tls_exec_args}
+ExecStart=${INSTALL_BIN} -listen=\${LADDER_LISTEN} -token=\${LADDER_TOKEN} -data-dir=\${LADDER_DATA_DIR} -tls-cert=\${LADDER_TLS_CERT} -tls-key=\${LADDER_TLS_KEY} -tls-client-ca=\${LADDER_TLS_CLIENT_CA} -panel-url=\${LADDER_PANEL_URL} -node-id=\${LADDER_NODE_ID} -report-address=\${LADDER_REPORT_ADDRESS} -tls-sans=\${LADDER_TLS_EXTRA_SANS}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${DATA_DIR}
+ReadWritePaths=${DATA_DIR} ${TLS_DIR}
 ReadOnlyPaths=${CONF_DIR}
 PrivateTmp=true
 
@@ -649,6 +571,7 @@ enable_and_restart() {
 load_tls_from_env() {
   TLS_CERT_PATH=""
   TLS_KEY_PATH=""
+  TLS_CLIENT_CA_PATH=""
   if [[ -f "${ENV_FILE}" ]]; then
     # shellcheck disable=SC1090
     # Prefer grep over source to avoid executing unexpected content
@@ -659,6 +582,20 @@ load_tls_from_env() {
       TLS_CERT_PATH="${cert}"
       TLS_KEY_PATH="${key}"
     fi
+    local client_ca
+    client_ca="$(grep -E '^LADDER_TLS_CLIENT_CA=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    if [[ -n "${client_ca}" && -f "${client_ca}" ]]; then
+      TLS_CLIENT_CA_PATH="${client_ca}"
+    fi
+    local saved_panel saved_node saved_report saved_sans
+    saved_panel="$(grep -E '^LADDER_PANEL_URL=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    saved_node="$(grep -E '^LADDER_NODE_ID=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    saved_report="$(grep -E '^LADDER_REPORT_ADDRESS=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    saved_sans="$(grep -E '^LADDER_TLS_EXTRA_SANS=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    [[ -n "${PANEL_URL}" ]] || PANEL_URL="${saved_panel}"
+    [[ -n "${NODE_ID}" ]] || NODE_ID="${saved_node}"
+    [[ -n "${REPORT_ADDR}" ]] || REPORT_ADDR="${saved_report}"
+    [[ -n "${TLS_EXTRA_SANS}" ]] || TLS_EXTRA_SANS="${saved_sans}"
   fi
 }
 
@@ -670,19 +607,29 @@ require_installed() {
 
 # ---------- install ----------
 do_install() {
-  # --- token (install only; never invent token during upgrade) ---
-  if [[ -z "${TOKEN}" ]]; then
-    if [[ -f "${ENV_FILE}" ]] && grep -q '^LADDER_TOKEN=' "${ENV_FILE}" 2>/dev/null; then
-      TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | head -1 | cut -d= -f2-)"
-      echo "==> 复用已有 agent.env 中的 LADDER_TOKEN"
-    else
-      if command -v openssl >/dev/null 2>&1; then
-        TOKEN="$(openssl rand -hex 16)"
-      else
-        TOKEN="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-      fi
-      echo "==> 已生成 LADDER_TOKEN（请保存到 Panel）: ${TOKEN}"
+  [[ -n "${PANEL_URL}" ]] || die "缺少 LADDER_PANEL；Agent 只支持 Panel 管理 PKI"
+  [[ -n "${NODE_ID}" ]] || die "缺少 LADDER_NODE_ID"
+  if [[ "${PANEL_URL}" != https://* && "${ALLOW_HTTP}" != "1" ]]; then
+    die "LADDER_PANEL 必须使用 HTTPS；仅隔离测试环境可设置 LADDER_ALLOW_HTTP=1"
+  fi
+  if [[ -f "${ENV_FILE}" || -f "${SERVICE_DST}" ]]; then
+    load_tls_from_env
+    if [[ -f "${TLS_DIR}/ca.key" || -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" ||
+      -z "${TLS_CLIENT_CA_PATH}" ]]; then
+      die "检测到旧 Agent；主安装脚本不执行兼容迁移，请使用 Panel 提供的一次性 PKI 迁移命令"
     fi
+  fi
+  if [[ -z "${ENROLL_TOKEN}" ]]; then
+    if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" || -f "${TLS_DIR}/ca.key" ]]; then
+      die "旧 Agent 不允许通过主安装脚本迁移；请执行 Panel 提供的一次性 PKI 迁移命令"
+    fi
+    if [[ -z "${TOKEN}" && -f "${ENV_FILE}" ]]; then
+      TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    fi
+  fi
+  [[ -n "${TOKEN}" || -n "${ENROLL_TOKEN}" ]] || die "缺少 LADDER_ENROLL_TOKEN 或已有 LADDER_TOKEN"
+  if [[ -n "${ENROLL_TOKEN}" ]]; then
+    echo "==> 使用 Panel 一次性注册令牌（成功后换取 Agent 控制令牌）"
   fi
 
   ensure_user_and_dirs
@@ -691,70 +638,56 @@ do_install() {
   src="$(resolve_binary)"
   install_binary "${src}"
 
-  TLS_CERT_PATH=""
-  TLS_KEY_PATH=""
-  case "${TLS_ENABLE}" in
-    1|true|TRUE|yes|YES|on|ON)
-      ensure_tls_material
-      TLS_CERT_PATH="${TLS_DIR}/server.crt"
-      TLS_KEY_PATH="${TLS_DIR}/server.key"
-      ;;
-    0|false|FALSE|no|NO|off|OFF)
-      echo "==> LADDER_TLS=${TLS_ENABLE}: 跳过 TLS（明文 gRPC lab 模式）"
-      ;;
-    *)
-      die "LADDER_TLS 取值无效: ${TLS_ENABLE}（用 1 或 0）"
-      ;;
-  esac
+  ensure_tls_material
+  TLS_CERT_PATH="${TLS_DIR}/server.crt"
+  TLS_KEY_PATH="${TLS_DIR}/server.key"
+  TLS_CLIENT_CA_PATH="${TLS_DIR}/ca.crt"
+  rm -f "${TLS_DIR}/ca.key" "${TLS_DIR}/ca.srl" "${CONF_DIR}/panel-import.txt"
 
   echo "==> 配置 ${ENV_FILE}"
-  if [[ -f "${ENV_FILE}" ]]; then
-    echo "    已存在，不覆盖（改 Token/TLS 请手动编辑后 restart）"
-    # If TLS newly enabled but env lacks cert paths, append once
-    if [[ -n "${TLS_CERT_PATH}" ]]; then
-      if ! grep -q '^LADDER_TLS_CERT=' "${ENV_FILE}" 2>/dev/null; then
-        {
-          echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
-          echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
-        } >>"${ENV_FILE}"
-        echo "    已追加 LADDER_TLS_CERT/KEY"
-      fi
-    fi
-    grep -E '^LADDER_TOKEN=|^LADDER_TLS_' "${ENV_FILE}" || true
-  else
-    {
-      echo "LADDER_LISTEN=${LISTEN}"
-      echo "LADDER_TOKEN=${TOKEN}"
-      echo "LADDER_DATA_DIR=${DATA_DIR}"
-      if [[ -n "${TLS_CERT_PATH}" ]]; then
-        echo "LADDER_TLS_CERT=${TLS_CERT_PATH}"
-        echo "LADDER_TLS_KEY=${TLS_KEY_PATH}"
-      fi
-    } >"${ENV_FILE}"
-    chmod 640 "${ENV_FILE}"
-    chown root:"${GROUP_NAME}" "${ENV_FILE}"
-  fi
-
-  GRPC_PORT="${LISTEN##*:}"
-  ACTIVE_TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
-
-  # Prefer TLS paths actually present in env (may already exist)
-  load_tls_from_env
-  if [[ -z "${TLS_CERT_PATH}" && -f "${TLS_DIR}/server.crt" && -f "${TLS_DIR}/server.key" ]]; then
-    TLS_CERT_PATH="${TLS_DIR}/server.crt"
-    TLS_KEY_PATH="${TLS_DIR}/server.key"
-  fi
+  PANEL_ENV_SOURCE="${ENV_FILE}" PANEL_ENV_OUTPUT="${ENV_FILE}.tmp" \
+  PANEL_TOKEN="${TOKEN}" PANEL_LISTEN="${LISTEN}" PANEL_DATA_DIR="${DATA_DIR}" \
+  PANEL_CERT="${TLS_CERT_PATH}" PANEL_KEY="${TLS_KEY_PATH}" PANEL_CA="${TLS_CLIENT_CA_PATH}" \
+  PANEL_URL_VALUE="${PANEL_URL%/}" PANEL_NODE_VALUE="${NODE_ID}" \
+  PANEL_REPORT_VALUE="${REPORT_ADDR}" PANEL_SANS_VALUE="${TLS_EXTRA_SANS}" \
+    python3 - <<'PY'
+import os
+source = os.environ["PANEL_ENV_SOURCE"]
+output = os.environ["PANEL_ENV_OUTPUT"]
+updates = {
+    "LADDER_LISTEN": os.environ["PANEL_LISTEN"],
+    "LADDER_TOKEN": os.environ["PANEL_TOKEN"],
+    "LADDER_DATA_DIR": os.environ["PANEL_DATA_DIR"],
+    "LADDER_TLS_CERT": os.environ["PANEL_CERT"],
+    "LADDER_TLS_KEY": os.environ["PANEL_KEY"],
+    "LADDER_TLS_CLIENT_CA": os.environ["PANEL_CA"],
+    "LADDER_PANEL_URL": os.environ["PANEL_URL_VALUE"],
+    "LADDER_NODE_ID": os.environ["PANEL_NODE_VALUE"],
+    "LADDER_REPORT_ADDRESS": os.environ.get("PANEL_REPORT_VALUE", ""),
+    "LADDER_TLS_EXTRA_SANS": os.environ.get("PANEL_SANS_VALUE", ""),
+}
+seen, lines = set(), []
+if os.path.exists(source):
+    with open(source, "r", encoding="utf-8") as f:
+        for raw in f:
+            key = raw.split("=", 1)[0] if "=" in raw and not raw.lstrip().startswith("#") else ""
+            if key in updates:
+                if key not in seen:
+                    lines.append(f"{key}={updates[key]}\n")
+                    seen.add(key)
+            else:
+                lines.append(raw)
+for key, value in updates.items():
+    if key not in seen:
+        lines.append(f"{key}={value}\n")
+with open(output, "w", encoding="utf-8") as f:
+    f.writelines(lines)
+PY
+  install -m 0640 -o root -g "${GROUP_NAME}" "${ENV_FILE}.tmp" "${ENV_FILE}"
+  rm -f "${ENV_FILE}.tmp"
 
   write_unit
   enable_and_restart
-
-  IMPORT_FILE=""
-  if [[ -n "${TLS_CERT_PATH}" ]] || [[ -n "${PANEL_URL}" ]]; then
-    IMPORT_FILE="$(write_panel_import)"
-  fi
-
-  # Auto-report address + CA to Panel (no manual paste when LADDER_PANEL is set).
-  enroll_to_panel
 
   echo
   echo "======== 安装完成 ========"
@@ -764,57 +697,35 @@ do_install() {
   echo "  数据:    ${DATA_DIR}"
   echo "  服务:    ${SERVICE_NAME} (已 enable + start)"
   echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
-  if [[ -n "${TLS_CERT_PATH}" ]]; then
-    echo "  TLS:     ON  cert=${TLS_CERT_PATH}"
-  else
-    echo "  TLS:     OFF（明文 gRPC）"
-  fi
-  if [[ -n "${PANEL_URL}" ]]; then
-    echo "  Panel:   ${PANEL_URL}（已尝试自动 enroll）"
-    echo "  请在 Panel 刷新节点 → 探测"
-  else
-    echo "  Panel:   未设置 LADDER_PANEL（无自动上报）"
-    echo "  Token  : ${ACTIVE_TOKEN}"
-    if [[ -n "${IMPORT_FILE}" ]]; then
-      echo "  登记提示: ${IMPORT_FILE}"
-    fi
-  fi
+  echo "  TLS:     Panel CA + strict mTLS"
+  echo "  Panel:   ${PANEL_URL%/}"
+  echo "  请在 Panel 刷新节点 → 探测"
   echo
   echo "运维: systemctl status|restart ladder-agent ; journalctl -u ladder-agent -f"
   echo "升级: curl -fsSL .../install-agent.sh | sudo env LADDER_ACTION=upgrade [LADDER_VERSION=vX.Y.Z] bash"
   echo "卸载: curl -fsSL .../install-agent.sh | sudo env LADDER_ACTION=uninstall bash"
-  echo "强制重签 TLS: 删除 ${TLS_DIR} 后 LADDER_TLS=1 再 install（会再次 enroll）"
+  echo "证书会由 Agent 自动续签；不要删除 ${TLS_DIR}/server.key"
 }
 
 # ---------- upgrade ----------
 # Replace binary + refresh unit + restart. Never touch token/TLS/enroll.
 do_upgrade() {
   require_installed
-  echo "==> 升级 ladder-agent（保留 ${ENV_FILE} 与 TLS）"
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    die "缺少 ${ENV_FILE}"
+  fi
+  load_tls_from_env
+  if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" || -z "${PANEL_URL}" || -z "${NODE_ID}" ]]; then
+    die "检测到旧 Agent TLS；请先执行 Panel 提供的一次性 PKI 迁移命令"
+  fi
+  [[ ! -f "${TLS_DIR}/ca.key" ]] || die "检测到旧节点 CA 私钥；请先执行一次性 PKI 迁移命令"
 
+  echo "==> 升级 ladder-agent（保留 Panel PKI 身份）"
   ensure_user_and_dirs
 
   local src
   src="$(resolve_binary)"
   install_binary "${src}"
-
-  if [[ ! -f "${ENV_FILE}" ]]; then
-    die "缺少 ${ENV_FILE}。无法安全升级（无 Token）。请改用 install 或手动恢复 env。"
-  fi
-
-  load_tls_from_env
-  if [[ -z "${TLS_CERT_PATH}" && -f "${TLS_DIR}/server.crt" && -f "${TLS_DIR}/server.key" ]]; then
-    # env may lack keys after old installs; unit can still use files if we append
-    if ! grep -q '^LADDER_TLS_CERT=' "${ENV_FILE}" 2>/dev/null; then
-      {
-        echo "LADDER_TLS_CERT=${TLS_DIR}/server.crt"
-        echo "LADDER_TLS_KEY=${TLS_DIR}/server.key"
-      } >>"${ENV_FILE}"
-      echo "==> 已向 agent.env 追加 LADDER_TLS_CERT/KEY（证书文件已存在）"
-    fi
-    TLS_CERT_PATH="${TLS_DIR}/server.crt"
-    TLS_KEY_PATH="${TLS_DIR}/server.key"
-  fi
 
   write_unit
   enable_and_restart
@@ -831,11 +742,7 @@ do_upgrade() {
   echo "  配置:    ${ENV_FILE}（未改 Token）"
   echo "  服务:    ${SERVICE_NAME} (已 restart)"
   echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
-  if [[ -n "${TLS_CERT_PATH}" ]]; then
-    echo "  TLS:     ON  cert=${TLS_CERT_PATH}"
-  else
-    echo "  TLS:     OFF 或未配置证书路径"
-  fi
+  echo "  TLS:     Panel CA + strict mTLS"
   echo
   echo "运维: systemctl status ladder-agent ; journalctl -u ladder-agent -f"
   echo "在 Panel 刷新/探测节点以确认 agent_version"

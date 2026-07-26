@@ -98,8 +98,9 @@ export interface Node {
   port_mappings?: PortMapping[]
   token?: string
   labels: string[]
-  tls_skip_verify: boolean
-  ca_cert_pem?: string
+  pki_cert_serial?: string
+  pki_not_after_unix?: number
+  pki_migration_required?: boolean
   /** Host NIC for sing-box direct bind_interface; empty = OS default route. */
   egress_interface?: string
   status: string
@@ -178,6 +179,35 @@ export interface Template {
   protocol: string
   name: string
   fields: Field[]
+}
+
+export interface PKIStatus {
+  enabled: boolean
+  root_subject?: string
+  root_not_after_unix?: number
+  intermediate_subject?: string
+  intermediate_not_after_unix?: number
+  agent_lifetime_seconds?: number
+  directory?: string
+  root_key_online?: boolean
+  active_certificates?: number
+  expiring_certificates?: number
+}
+
+export interface PKICertificate {
+  serial: string
+  node_id?: string
+  profile: string
+  subject: string
+  uri_san: string
+  dns_sans?: string
+  ip_sans?: string
+  not_before_unix: number
+  not_after_unix: number
+  status: 'active' | 'replaced' | 'revoked' | 'expired'
+  revoked_at_unix?: number
+  revoke_reason?: string
+  created_at_unix: number
 }
 
 export interface TaskNodeResult {
@@ -300,8 +330,6 @@ export interface CreateNodeInput {
   public_address?: string
   token?: string
   labels?: string[]
-  tls_skip_verify?: boolean
-  ca_cert_pem?: string
 }
 
 export interface UpdateNodeInput {
@@ -311,8 +339,6 @@ export interface UpdateNodeInput {
   public_address?: string
   token?: string
   labels?: string[]
-  tls_skip_verify?: boolean
-  ca_cert_pem?: string
   egress_interface?: string
   port_mappings?: PortMapping[]
 }
@@ -324,22 +350,18 @@ export interface BootstrapNodeInput {
   public_address?: string
   token?: string
   labels?: string[]
-  enable_tls?: boolean
   agent_version?: string
-  tls_skip_verify?: boolean
-  ca_cert_pem?: string
 }
 
 export interface NodeInstallInfo {
   node: Node
   token: string
-  enable_tls: boolean
   install_command: string
+  migration_command?: string
   upgrade_command?: string
   uninstall_command?: string
   steps: string[]
   panel_base_url?: string
-  enroll_enabled?: boolean
   recommended_agent_version?: string
   outdated?: boolean
 }
@@ -650,6 +672,20 @@ export function getSettings(): Promise<Settings> {
 
 export function putSettings(body: PutSettingsInput): Promise<Settings> {
   return request('PUT', '/settings', body)
+}
+
+// --- Management PKI ---
+
+export function getPKIStatus(): Promise<PKIStatus> {
+  return request('GET', '/pki/status')
+}
+
+export function listPKICertificates(): Promise<PKICertificate[]> {
+  return request('GET', '/pki/certificates')
+}
+
+export function revokePKICertificate(serial: string, reason = ''): Promise<{ ok: boolean }> {
+  return request('POST', `/pki/certificates/${encodeURIComponent(serial)}/revoke`, { reason })
 }
 
 // --- Subscriptions ---

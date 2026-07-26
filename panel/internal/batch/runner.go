@@ -10,6 +10,7 @@ import (
 
 	"github.com/ladderairport/panel/internal/nodeclient"
 	"github.com/ladderairport/panel/internal/nodeconfig"
+	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/panel/internal/store"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
@@ -35,6 +36,7 @@ type Runner struct {
 	Dial           DialFunc
 	ConfigBuilder  *nodeconfig.Builder
 	Coordinator    *sync.Mutex
+	PKI            *pki.Manager
 }
 
 // NewRunner constructs a Runner with sensible defaults.
@@ -54,14 +56,21 @@ func NewRunner(s *store.Store, defaultToken func() string) *Runner {
 }
 
 func (r *Runner) defaultDial(ctx context.Context, n store.Node, token string) (NodeRPC, error) {
-	cfg := nodeclient.DialConfig{
-		Address:       net.JoinHostPort(n.Address, fmt.Sprintf("%d", n.GRPCPort)),
-		Token:         token,
-		Timeout:       r.Timeout,
-		TLSSkipVerify: n.TLSSkipVerify,
+	if r.PKI == nil {
+		return nil, fmt.Errorf("management PKI unavailable")
 	}
-	if n.CACertPEM != "" {
-		cfg.CACertPEM = []byte(n.CACertPEM)
+	if n.PKICertSerial == "" || n.PKICABundlePEM == "" {
+		return nil, fmt.Errorf("node %s requires Panel PKI migration", n.ID)
+	}
+	clientCert := r.PKI.ClientCertificate()
+	cfg := nodeclient.DialConfig{
+		Address:           net.JoinHostPort(n.Address, fmt.Sprintf("%d", n.GRPCPort)),
+		Token:             token,
+		Timeout:           r.Timeout,
+		CACertPEM:         []byte(n.PKICABundlePEM),
+		ClientCertificate: &clientCert,
+		ExpectedPeerURI:   pki.AgentURI(n.ID),
+		ExpectedSerial:    n.PKICertSerial,
 	}
 	return nodeclient.Dial(ctx, cfg)
 }

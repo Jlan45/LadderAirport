@@ -7,22 +7,24 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/ladderairport/pkg/auth"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // DialConfig configures a connection to an agent node.
 type DialConfig struct {
-	Address       string // host:port (or passthrough URI for custom dialers)
-	Token         string
-	Timeout       time.Duration
-	TLSSkipVerify bool
-	CACertPEM     []byte
+	Address           string // host:port (or passthrough URI for custom dialers)
+	Token             string
+	Timeout           time.Duration
+	CACertPEM         []byte
+	ClientCertificate *tls.Certificate
+	ExpectedPeerURI   string
+	ExpectedSerial    string
 
 	// Dialer is optional. When set, used as the gRPC context dialer (e.g. bufconn in tests).
 	Dialer func(ctx context.Context, addr string) (net.Conn, error)
@@ -38,11 +40,8 @@ type Client struct {
 
 // Dial connects to an agent control server.
 //
-// Transport selection:
-//   - When CACertPEM is empty, uses plaintext insecure credentials (lab default;
-//     the agent listens without TLS by default).
-//   - When CACertPEM is non-empty, builds a TLS client config from the CA pool.
-//     TLSSkipVerify, if set, enables InsecureSkipVerify on that TLS config.
+// Panel-managed mTLS is mandatory. The CA bundle, Panel client certificate,
+// Agent URI identity and bound certificate serial must all be present.
 func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 	if cfg.Address == "" {
 		return nil, fmt.Errorf("address required")
@@ -90,21 +89,51 @@ func NewWithAPI(api agentv1.AgentControlClient, token string) *Client {
 
 func transportCredentials(cfg DialConfig) (credentials.TransportCredentials, error) {
 	if len(cfg.CACertPEM) == 0 {
-		// Lab default: agent serves plaintext gRPC.
-		return insecure.NewCredentials(), nil
+		return nil, fmt.Errorf("management CA bundle required")
+	}
+	if cfg.ClientCertificate == nil {
+		return nil, fmt.Errorf("Panel client certificate required")
+	}
+	if cfg.ExpectedPeerURI == "" || cfg.ExpectedSerial == "" {
+		return nil, fmt.Errorf("Agent certificate identity and serial required")
 	}
 
 	tlsCfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{*cfg.ClientCertificate},
 	}
-	if cfg.TLSSkipVerify {
-		tlsCfg.InsecureSkipVerify = true
-	} else {
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(cfg.CACertPEM) {
-			return nil, fmt.Errorf("failed to parse CA certificate PEM")
+	if host, _, err := net.SplitHostPort(cfg.Address); err == nil && !strings.Contains(cfg.Address, "://") {
+		host = strings.Trim(host, "[]")
+		if zone := strings.LastIndex(host, "%"); zone > 0 && strings.Contains(host[:zone], ":") {
+			host = host[:zone]
 		}
-		tlsCfg.RootCAs = pool
+		tlsCfg.ServerName = host
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(cfg.CACertPEM) {
+		return nil, fmt.Errorf("failed to parse CA certificate PEM")
+	}
+	tlsCfg.RootCAs = pool
+	tlsCfg.VerifyConnection = func(state tls.ConnectionState) error {
+		if len(state.PeerCertificates) == 0 {
+			return fmt.Errorf("agent did not present a certificate")
+		}
+		leaf := state.PeerCertificates[0]
+		got := fmt.Sprintf("%032x", leaf.SerialNumber)
+		if got != cfg.ExpectedSerial {
+			return fmt.Errorf("agent certificate serial mismatch")
+		}
+		found := false
+		for _, uri := range leaf.URIs {
+			if uri.String() == cfg.ExpectedPeerURI {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("agent certificate identity mismatch")
+		}
+		return nil
 	}
 	return credentials.NewTLS(tlsCfg), nil
 }

@@ -21,24 +21,31 @@ type nodeBootstrapRequest struct {
 	PublicAddress string   `json:"public_address"` // optional subscription client host
 	Token         string   `json:"token"`          // optional; auto-generated when empty
 	Labels        []string `json:"labels"`
-	EnableTLS     *bool    `json:"enable_tls"` // default true
 	AgentVersion  string   `json:"agent_version"`
 	InstallScript string   `json:"install_script_url"` // optional override
-	TLSSkipVerify *bool    `json:"tls_skip_verify"`    // default: false when TLS, true when plain
-	CACertPEM     string   `json:"ca_cert_pem"`
+}
+
+type nodeCreateRequest struct {
+	Name            string              `json:"name"`
+	Address         string              `json:"address"`
+	GRPCPort        int                 `json:"grpc_port"`
+	Token           string              `json:"token"`
+	Labels          []string            `json:"labels"`
+	PublicAddress   string              `json:"public_address"`
+	PortMappings    []store.PortMapping `json:"port_mappings"`
+	EgressInterface string              `json:"egress_interface"`
 }
 
 // nodeInstallResponse is returned after bootstrap or when regenerating the install command.
 type nodeInstallResponse struct {
 	Node             store.Node `json:"node"`
 	Token            string     `json:"token"`
-	EnableTLS        bool       `json:"enable_tls"`
 	InstallCommand   string     `json:"install_command"`
+	MigrationCommand string     `json:"migration_command,omitempty"`
 	UpgradeCommand   string     `json:"upgrade_command,omitempty"`
 	UninstallCommand string     `json:"uninstall_command,omitempty"`
 	Steps            []string   `json:"steps"`
 	PanelBaseURL     string     `json:"panel_base_url,omitempty"`
-	EnrollEnabled    bool       `json:"enroll_enabled"`
 	// RecommendedAgentVersion is the latest known release tag (may be empty).
 	RecommendedAgentVersion string `json:"recommended_agent_version,omitempty"`
 	// Outdated is true when the node's reported agent_version looks behind recommended.
@@ -55,14 +62,25 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
-	var n store.Node
-	if err := decodeJSON(r, &n); err != nil {
+	var req nodeCreateRequest
+	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if n.Name == "" {
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name required")
 		return
+	}
+	n := store.Node{
+		Name:            req.Name,
+		Address:         strings.TrimSpace(req.Address),
+		GRPCPort:        req.GRPCPort,
+		Token:           strings.TrimSpace(req.Token),
+		Labels:          req.Labels,
+		PublicAddress:   strings.TrimSpace(req.PublicAddress),
+		PortMappings:    req.PortMappings,
+		EgressInterface: strings.TrimSpace(req.EgressInterface),
 	}
 	// Address may be empty when the operator will install first and fill IP later.
 	if n.GRPCPort == 0 {
@@ -95,9 +113,17 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name required")
 		return
 	}
-	enableTLS := true
-	if req.EnableTLS != nil {
-		enableTLS = *req.EnableTLS
+	if s.PKI == nil {
+		writeError(w, http.StatusServiceUnavailable, "management PKI unavailable")
+		return
+	}
+	panelBase := ""
+	if st, err := s.Store.GetSettings(); err == nil {
+		panelBase = panelBaseFromSettings(st.PublicBaseURL)
+	}
+	if panelBase == "" {
+		writeError(w, http.StatusBadRequest, "configure Public Base URL before creating nodes")
+		return
 	}
 	token := strings.TrimSpace(req.Token)
 	if token == "" {
@@ -112,10 +138,6 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 	if port == 0 {
 		port = 50051
 	}
-	tlsSkip := !enableTLS
-	if req.TLSSkipVerify != nil {
-		tlsSkip = *req.TLSSkipVerify
-	}
 	addr := strings.TrimSpace(req.Address)
 	status := "unknown"
 	if addr == "" {
@@ -128,8 +150,6 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		PublicAddress: strings.TrimSpace(req.PublicAddress),
 		Token:         token,
 		Labels:        req.Labels,
-		TLSSkipVerify: tlsSkip,
-		CACertPEM:     req.CACertPEM,
 		Status:        status,
 	}
 	if err := s.Store.CreateNode(&n); err != nil {
@@ -142,36 +162,35 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	panelBase := ""
-	if st, err := s.Store.GetSettings(); err == nil {
-		panelBase = panelBaseFromSettings(st.PublicBaseURL)
+	enrollmentToken, err := s.Store.CreatePKIEnrollmentToken(created.ID, 15*time.Minute)
+	if err != nil {
+		_ = s.Store.DeleteNode(created.ID)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	agentVer := strings.TrimSpace(req.AgentVersion)
 	cmd := buildInstallCommand(installCommandOpts{
-		ScriptURL:    req.InstallScript,
-		Token:        token,
-		AgentVersion: agentVer,
-		EnableTLS:    enableTLS,
-		PanelBaseURL: panelBase,
-		NodeID:       created.ID,
-		GRPCPort:     port,
+		ScriptURL:       req.InstallScript,
+		EnrollmentToken: enrollmentToken,
+		AgentVersion:    agentVer,
+		PanelBaseURL:    panelBase,
+		NodeID:          created.ID,
+		GRPCPort:        port,
+		ReportAddress:   addr,
 	})
 	rec, _, _ := resolveRecommendedAgentVersion()
 	upgradeVer := agentVer
 	if upgradeVer == "" || upgradeVer == "latest" {
 		upgradeVer = rec
 	}
-	enrollOK := panelBase != ""
 	writeJSON(w, http.StatusCreated, nodeInstallResponse{
 		Node:                    *created,
 		Token:                   token,
-		EnableTLS:               enableTLS,
 		InstallCommand:          cmd,
 		UpgradeCommand:          buildUpgradeCommand(installCommandOpts{ScriptURL: req.InstallScript, AgentVersion: upgradeVer}),
 		UninstallCommand:        buildUninstallCommand(installCommandOpts{ScriptURL: req.InstallScript}, false),
-		Steps:                   installSteps(enableTLS, addr, port, panelBase, enrollOK),
+		Steps:                   installSteps(addr, port),
 		PanelBaseURL:            panelBase,
-		EnrollEnabled:           enrollOK,
 		RecommendedAgentVersion: rec,
 		Outdated:                isAgentVersionOutdated(created.AgentVersion, rec),
 	})
@@ -190,29 +209,11 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	token := strings.TrimSpace(n.Token)
-	if token == "" {
-		// Fall back to panel default agent token.
-		st, err := s.Store.GetSettings()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		token = strings.TrimSpace(st.DefaultAgentToken)
-	}
-	if token == "" {
-		writeError(w, http.StatusBadRequest, "node has no token; set node token or default_agent_token in settings")
+	if s.PKI == nil {
+		writeError(w, http.StatusServiceUnavailable, "management PKI unavailable")
 		return
 	}
-	// Transport is TLS whenever a CA is configured. TLSSkipVerify controls
-	// certificate verification only; it must not switch the transport to plaintext.
-	enableTLS := strings.TrimSpace(n.CACertPEM) != ""
 	q := r.URL.Query()
-	if v := q.Get("tls"); v == "0" || v == "false" {
-		enableTLS = false
-	} else if v == "1" || v == "true" {
-		enableTLS = true
-	}
 	version := q.Get("version")
 	panelBase := ""
 	if st, err := s.Store.GetSettings(); err == nil {
@@ -221,32 +222,48 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 	if v := strings.TrimSpace(q.Get("panel")); v != "" {
 		panelBase = panelBaseFromSettings(v)
 	}
+	if panelBase == "" {
+		writeError(w, http.StatusBadRequest, "configure Public Base URL before generating commands")
+		return
+	}
 	scriptURL := q.Get("script_url")
-	cmd := buildInstallCommand(installCommandOpts{
-		ScriptURL:    scriptURL,
-		Token:        token,
-		AgentVersion: version,
-		EnableTLS:    enableTLS,
-		PanelBaseURL: panelBase,
-		NodeID:       n.ID,
-		GRPCPort:     n.GRPCPort,
-	})
+	cmd := ""
+	migrationCommand := ""
+	if n.PKICertSerial == "" || n.PKIMigrationRequired {
+		enrollmentToken, tokenErr := s.Store.CreatePKIEnrollmentToken(n.ID, 15*time.Minute)
+		if tokenErr != nil {
+			writeError(w, http.StatusInternalServerError, tokenErr.Error())
+			return
+		}
+		opts := installCommandOpts{
+			ScriptURL:       scriptURL,
+			EnrollmentToken: enrollmentToken,
+			AgentVersion:    version,
+			PanelBaseURL:    panelBase,
+			NodeID:          n.ID,
+			GRPCPort:        n.GRPCPort,
+			ReportAddress:   n.Address,
+		}
+		if n.PKIMigrationRequired {
+			migrationCommand = buildPKIMigrationCommand(opts)
+		} else {
+			cmd = buildInstallCommand(opts)
+		}
+	}
 	rec, _, _ := resolveRecommendedAgentVersion()
 	upgradeVer := strings.TrimSpace(version)
 	if upgradeVer == "" || upgradeVer == "latest" {
 		upgradeVer = rec
 	}
-	enrollOK := panelBase != ""
 	writeJSON(w, http.StatusOK, nodeInstallResponse{
 		Node:                    *n,
-		Token:                   token,
-		EnableTLS:               enableTLS,
+		Token:                   n.Token,
 		InstallCommand:          cmd,
+		MigrationCommand:        migrationCommand,
 		UpgradeCommand:          buildUpgradeCommand(installCommandOpts{ScriptURL: scriptURL, AgentVersion: upgradeVer}),
 		UninstallCommand:        buildUninstallCommand(installCommandOpts{ScriptURL: scriptURL}, false),
-		Steps:                   installSteps(enableTLS, n.Address, n.GRPCPort, panelBase, enrollOK),
+		Steps:                   installSteps(n.Address, n.GRPCPort),
 		PanelBaseURL:            panelBase,
-		EnrollEnabled:           enrollOK,
 		RecommendedAgentVersion: rec,
 		Outdated:                isAgentVersionOutdated(n.AgentVersion, rec),
 	})

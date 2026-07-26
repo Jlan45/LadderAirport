@@ -18,6 +18,7 @@ import {
   Loader2,
   Sun,
   Moon,
+  ShieldCheck,
 } from 'lucide-react'
 import { ApiError, AUTH_EXPIRED_EVENT, listNodes, logout } from './api/client'
 import { toast } from './lib/toast'
@@ -29,12 +30,14 @@ const Inbounds = lazy(() => import('./pages/Inbounds'))
 const Subscriptions = lazy(() => import('./pages/Subscriptions'))
 const ProxyChains = lazy(() => import('./pages/ProxyChains'))
 const Settings = lazy(() => import('./pages/Settings'))
+const PKI = lazy(() => import('./pages/PKI'))
 
 const NAV = [
   { path: '/', label: '节点', icon: <Server className="h-4 w-4" /> },
   { path: '/inbounds', label: '入站', icon: <Network className="h-4 w-4" /> },
   { path: '/chains', label: '代理链', icon: <Waypoints className="h-4 w-4" /> },
   { path: '/subscriptions', label: '订阅', icon: <Share2 className="h-4 w-4" /> },
+  { path: '/pki', label: '证书', icon: <ShieldCheck className="h-4 w-4" /> },
   { path: '/settings', label: '设置', icon: <SettingsIcon className="h-4 w-4" /> },
 ] as const
 
@@ -111,6 +114,7 @@ function AppLayout() {
     if (path.startsWith('/chains')) return '/chains'
     if (path.startsWith('/subscriptions')) return '/subscriptions'
     if (path.startsWith('/settings')) return '/settings'
+    if (path.startsWith('/pki')) return '/pki'
     return '/'
   }, [location.pathname])
 
@@ -247,6 +251,7 @@ export default function App() {
             <Route path="/chains" element={<ProxyChains />} />
             <Route path="/subscriptions" element={<Subscriptions />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/pki" element={<PKI />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -3,7 +3,7 @@
 自建代理机群控制面：Go Panel（内嵌 React + SQLite）+ 基于 [sing-box](https://github.com/SagerNet/sing-box) 的节点 Agent，通过 gRPC 批量管控。
 
 ```
-浏览器 ──HTTP──► Panel ──gRPC──► Agent × N（进程内 sing-box）
+浏览器 ──HTTP──► Panel ──mTLS gRPC──► Agent × N（进程内 sing-box）
 ```
 
 ## 功能
@@ -29,12 +29,9 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 
 **Agent**
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
-  | sudo LADDER_TOKEN='请换成节点密钥' bash
-```
+在 Panel「设置」配置 HTTPS Public Base URL，再到「节点」添加节点并执行生成的一键安装命令。Agent 强制使用 Panel CA 管理的 mTLS：节点本地生成私钥，Panel 通过 CSR 签发证书并自动续期；不支持明文或节点自签 CA。旧节点请使用详情页生成的一次性 PKI 迁移命令。详见 [deploy/README-agent.md](deploy/README-agent.md) 与 [管理面 PKI](docs/management-pki.md)。
 
-默认开启 TLS。更推荐在 Panel「添加节点」生成一键安装命令。详见 [deploy/README-agent.md](deploy/README-agent.md)。
+从旧版本升级时必须先执行 Panel 专用脚本 `scripts/migrate-panel-to-management-pki.sh`，再逐台执行 Agent 专用脚本 `scripts/migrate-agent-to-panel-pki.sh`。
 
 装完后：创建入站 → 关联到节点 → 下发。NAT 场景可在节点上拆分控制面地址与订阅公网地址。
 
@@ -50,7 +47,6 @@ make test
 ```
 
 ```bash
-./bin/ladder-agent -listen 0.0.0.0:50051 -token test -data-dir /tmp/ladder-agent
 ./bin/panel -listen :8080 -db ./data/panel.db -session-secret 'dev-secret'
 ```
 
@@ -67,7 +63,9 @@ make test
 ## 安全
 
 - 改掉默认管理员密码与节点 Token；Panel 用固定 `LADDER_SESSION_SECRET`
-- 生产启用 Agent TLS，Panel 填入节点 CA；公网 Panel 建议反代 HTTPS
+- 新节点强制使用 Panel 管理 CA 和 mTLS；旧节点必须执行一次性迁移，主程序不保留旧连接实现
+- 首次初始化后离线保存并移走根 CA 私钥；Panel 日常只保留中间 CA 私钥
+- 公网 Panel 必须反代 HTTPS；代理入站公网证书继续使用 ACME，不与管理 CA 混用
 - 浏览器不直连 Agent，仅 Panel 访问控制口
 
 ## 许可证

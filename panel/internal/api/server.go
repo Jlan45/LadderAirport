@@ -14,6 +14,7 @@ import (
 
 	"github.com/ladderairport/panel/internal/batch"
 	"github.com/ladderairport/panel/internal/nodeclient"
+	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/panel/internal/proxychain"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
@@ -54,6 +55,7 @@ type Server struct {
 	// Timeout for probe/metrics/logs dials. Defaults to Runner.Timeout or 10s.
 	Timeout time.Duration
 	Chains  *proxychain.Service
+	PKI     *pki.Manager
 }
 
 // Handler returns an http.Handler with all routes, auth middleware, and embedded SPA.
@@ -130,8 +132,13 @@ func isPublicAPI(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/logout" {
 		return true
 	}
-	// Agent install enrollment (auth via node token, not admin session).
-	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/enroll" {
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/pki/agent-certificates" {
+		return true
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/pki/agent-migrations/complete" {
+		return true
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/pki/bundle" {
 		return true
 	}
 	// Public subscription pull (token in path).
@@ -147,7 +154,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
-	mux.HandleFunc("POST /api/v1/agent/enroll", s.handleAgentEnroll)
+	mux.HandleFunc("POST /api/v1/pki/agent-certificates", s.handleIssueAgentCertificate)
+	mux.HandleFunc("POST /api/v1/pki/agent-migrations/complete", s.handleCompleteAgentPKIMigration)
+	mux.HandleFunc("GET /api/v1/pki/bundle", s.handlePKIBundle)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)
 
@@ -187,6 +196,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/v1/settings", s.handlePutSettings)
 	mux.HandleFunc("GET /api/v1/meta", s.handleGetMeta)
+	mux.HandleFunc("GET /api/v1/pki/status", s.handlePKIStatus)
+	mux.HandleFunc("GET /api/v1/pki/certificates", s.handleListPKICertificates)
+	mux.HandleFunc("POST /api/v1/pki/certificates/{serial}/revoke", s.handleRevokePKICertificate)
+	mux.HandleFunc("GET /api/v1/pki/audit-logs", s.handleListPKIAuditLogs)
 
 	mux.HandleFunc("GET /api/v1/subscriptions", s.handleListSubscriptions)
 	mux.HandleFunc("POST /api/v1/subscriptions", s.handleCreateSubscription)
@@ -220,6 +233,12 @@ func (s *Server) liveDial(ctx context.Context, n store.Node, token string) (Node
 }
 
 func (s *Server) defaultLiveDial(ctx context.Context, n store.Node, token string) (NodeLive, error) {
+	if s.PKI == nil {
+		return nil, fmt.Errorf("management PKI unavailable")
+	}
+	if n.PKICertSerial == "" || n.PKICABundlePEM == "" {
+		return nil, fmt.Errorf("node %s requires Panel PKI migration", n.ID)
+	}
 	timeout := s.Timeout
 	if timeout <= 0 && s.Runner != nil && s.Runner.Timeout > 0 {
 		timeout = s.Runner.Timeout
@@ -227,14 +246,15 @@ func (s *Server) defaultLiveDial(ctx context.Context, n store.Node, token string
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
+	clientCert := s.PKI.ClientCertificate()
 	cfg := nodeclient.DialConfig{
-		Address:       net.JoinHostPort(n.Address, fmt.Sprintf("%d", n.GRPCPort)),
-		Token:         token,
-		Timeout:       timeout,
-		TLSSkipVerify: n.TLSSkipVerify,
-	}
-	if n.CACertPEM != "" {
-		cfg.CACertPEM = []byte(n.CACertPEM)
+		Address:           net.JoinHostPort(n.Address, fmt.Sprintf("%d", n.GRPCPort)),
+		Token:             token,
+		Timeout:           timeout,
+		CACertPEM:         []byte(n.PKICABundlePEM),
+		ClientCertificate: &clientCert,
+		ExpectedPeerURI:   pki.AgentURI(n.ID),
+		ExpectedSerial:    n.PKICertSerial,
 	}
 	return nodeclient.Dial(ctx, cfg)
 }

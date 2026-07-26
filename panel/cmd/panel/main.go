@@ -13,6 +13,7 @@ import (
 
 	"github.com/ladderairport/panel/internal/api"
 	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/panel/internal/proxychain"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
@@ -28,6 +29,9 @@ func main() {
 	bootstrapRetry := flag.Bool("bootstrap-retry", true, "periodically retry apply+start for nodes not yet online/running")
 	bootstrapRetryInterval := flag.Duration("bootstrap-retry-interval", 30*time.Second, "interval between bootstrap retries")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	pkiDir := flag.String("pki-dir", "", "management PKI directory (default: <db-dir>/pki)")
+	migrateManagementPKI := flag.Bool("migrate-management-pki", false, "initialize management PKI and migrate the database, then exit")
+	pkiRotateIntermediate := flag.Bool("pki-rotate-intermediate", false, "rotate the online intermediate CA and Panel client certificate, then exit")
 	flag.Parse()
 
 	if *showVersion {
@@ -50,6 +54,28 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer func() { _ = st.Close() }()
+
+	dir := *pkiDir
+	if dir == "" {
+		dir = filepath.Join(filepath.Dir(*dbPath), "pki")
+	}
+	ca, err := pki.Open(dir)
+	if err != nil {
+		log.Fatalf("open management PKI: %v", err)
+	}
+	if *migrateManagementPKI {
+		log.Printf("management PKI migration complete (db=%s pki=%s)", *dbPath, dir)
+		return
+	}
+	if *pkiRotateIntermediate {
+		if err := ca.RotateIntermediate(time.Now()); err != nil {
+			log.Fatalf("rotate management intermediate CA: %v", err)
+		}
+		log.Printf("management intermediate CA rotated; move %s back to offline storage", filepath.Join(dir, "offline", "root-ca.key"))
+		return
+	}
+	log.Printf("management PKI enabled (dir=%s intermediate_expires=%s)", dir, time.Unix(ca.Status().IntermediateNotAfterUnix, 0).Format(time.RFC3339))
+	go ca.Run(context.Background())
 
 	if err := api.EnsureAdminPassword(st); err != nil {
 		log.Fatalf("ensure admin password: %v", err)
@@ -76,6 +102,7 @@ func main() {
 		}
 		return cur.DefaultAgentToken
 	})
+	runner.PKI = ca
 	if settings.GRPCTimeoutSec > 0 {
 		runner.Timeout = time.Duration(settings.GRPCTimeoutSec) * time.Second
 	}
@@ -85,12 +112,14 @@ func main() {
 
 	agg := subscription.NewAggregator(st)
 	chainService := proxychain.NewService(st, runner.ConfigBuilder, runner.Coordinator)
+	chainService.PKI = ca
 	srv := &api.Server{
 		Store:      st,
 		Runner:     runner,
 		Secret:     secret,
 		Aggregator: agg,
 		Chains:     chainService,
+		PKI:        ca,
 	}
 
 	addr := *listen

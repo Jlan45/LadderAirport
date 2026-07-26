@@ -120,8 +120,6 @@ func (s *Store) migrate() error {
 			grpc_port INTEGER NOT NULL,
 			token TEXT NOT NULL DEFAULT '',
 			labels_json TEXT NOT NULL DEFAULT '[]',
-			tls_skip_verify INTEGER NOT NULL DEFAULT 0,
-			ca_cert_pem TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT '',
 			last_seen_unix INTEGER NOT NULL DEFAULT 0,
 			config_hash TEXT NOT NULL DEFAULT '',
@@ -238,6 +236,45 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sub_ext_src_sub
 			ON subscription_external_sources(subscription_id, sort_order)`,
+		`CREATE TABLE IF NOT EXISTS pki_certificates (
+			serial TEXT PRIMARY KEY,
+			node_id TEXT NOT NULL DEFAULT '',
+			profile TEXT NOT NULL,
+			subject TEXT NOT NULL DEFAULT '',
+			uri_san TEXT NOT NULL DEFAULT '',
+			dns_sans TEXT NOT NULL DEFAULT '',
+			ip_sans TEXT NOT NULL DEFAULT '',
+			not_before_unix INTEGER NOT NULL,
+			not_after_unix INTEGER NOT NULL,
+			status TEXT NOT NULL DEFAULT 'active',
+			revoked_at_unix INTEGER NOT NULL DEFAULT 0,
+			revoke_reason TEXT NOT NULL DEFAULT '',
+			cert_pem TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pki_certificates_node
+			ON pki_certificates(node_id, created_at_unix DESC)`,
+		`CREATE TABLE IF NOT EXISTS pki_audit_logs (
+			id TEXT PRIMARY KEY,
+			action TEXT NOT NULL,
+			node_id TEXT NOT NULL DEFAULT '',
+			serial TEXT NOT NULL DEFAULT '',
+			actor TEXT NOT NULL DEFAULT '',
+			detail TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pki_audit_created
+			ON pki_audit_logs(created_at_unix DESC)`,
+		`CREATE TABLE IF NOT EXISTS pki_enrollment_tokens (
+			token_hash TEXT PRIMARY KEY,
+			node_id TEXT NOT NULL,
+			expires_at_unix INTEGER NOT NULL,
+			used_at_unix INTEGER NOT NULL DEFAULT 0,
+			created_at_unix INTEGER NOT NULL,
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pki_enrollment_node
+			ON pki_enrollment_tokens(node_id, created_at_unix DESC)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -260,6 +297,12 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN port_mappings_json TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE nodes ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE nodes ADD COLUMN pki_ca_bundle_pem TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN pki_cert_serial TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE nodes ADD COLUMN pki_not_after_unix INTEGER NOT NULL DEFAULT 0`,
+		// Existing rows require the standalone migration. CreateNode explicitly
+		// writes false for nodes created by the Panel-PKI implementation.
+		`ALTER TABLE nodes ADD COLUMN pki_migration_required INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
@@ -275,6 +318,14 @@ func (s *Store) migrate() error {
 	}
 	for _, stmt := range alters {
 		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
+	}
+	// These management-TLS columns belonged to the removed node-local CA
+	// implementation and are deliberately not retained.
+	for _, column := range []string{"tls_skip_verify", "ca_cert_pem"} {
+		if _, err := s.db.Exec(`ALTER TABLE nodes DROP COLUMN ` + column); err != nil &&
+			!strings.Contains(strings.ToLower(err.Error()), "no such column") {
+			return fmt.Errorf("drop legacy node column %s: %w", column, err)
+		}
 	}
 	if _, err := s.db.Exec(`
 		UPDATE subscriptions
@@ -369,14 +420,16 @@ func (s *Store) CreateNode(n *Node) error {
 	}
 	_, err = s.db.Exec(`
 		INSERT INTO nodes (
-			id, name, address, grpc_port, token, labels_json, tls_skip_verify, ca_cert_pem,
+			id, name, address, grpc_port, token, labels_json,
+			pki_ca_bundle_pem, pki_cert_serial, pki_not_after_unix, pki_migration_required,
 			status, last_seen_unix, config_hash,
 			runtime_state, agent_version, singbox_version,
 			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
 			metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
 			created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, boolToInt(n.TLSSkipVerify), n.CACertPEM,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, n.PKICABundlePEM,
+		n.PKICertSerial, n.PKINotAfter, boolToInt(n.PKIMigrationRequired),
 		n.Status, n.LastSeenUnix, n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
@@ -413,7 +466,9 @@ func (s *Store) UpdateNode(n *Node) error {
 	res, err := s.db.Exec(`
 		UPDATE nodes SET
 			name = ?, address = ?, grpc_port = ?, token = ?, labels_json = ?,
-			tls_skip_verify = ?, ca_cert_pem = ?, status = ?, last_seen_unix = ?,
+			pki_ca_bundle_pem = ?,
+			status = ?, last_seen_unix = ?,
+			pki_cert_serial = ?, pki_not_after_unix = ?, pki_migration_required = ?,
 			config_hash = ?,
 			runtime_state = ?, agent_version = ?, singbox_version = ?,
 			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
@@ -422,7 +477,8 @@ func (s *Store) UpdateNode(n *Node) error {
 			updated_at_unix = ?
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
-		boolToInt(n.TLSSkipVerify), n.CACertPEM, n.Status, n.LastSeenUnix,
+		n.PKICABundlePEM, n.Status, n.LastSeenUnix,
+		n.PKICertSerial, n.PKINotAfter, boolToInt(n.PKIMigrationRequired),
 		n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
@@ -480,12 +536,6 @@ func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) e
 		}
 		add("labels_json", labelsJSON)
 	}
-	if update.TLSSkipVerify != nil {
-		add("tls_skip_verify", boolToInt(*update.TLSSkipVerify))
-	}
-	if update.CACertPEM != nil {
-		add("ca_cert_pem", *update.CACertPEM)
-	}
 	if update.PublicAddress != nil {
 		add("public_address", *update.PublicAddress)
 	}
@@ -541,9 +591,10 @@ func scanNode(row interface {
 	var labelsJSON string
 	var mappingsJSON string
 	var capabilitiesJSON string
-	var tlsSkip int
+	var pkiMigrationRequired int
 	err := row.Scan(
-		&n.ID, &n.Name, &n.Address, &n.GRPCPort, &n.Token, &labelsJSON, &tlsSkip, &n.CACertPEM,
+		&n.ID, &n.Name, &n.Address, &n.GRPCPort, &n.Token, &labelsJSON, &n.PKICABundlePEM,
+		&n.PKICertSerial, &n.PKINotAfter, &pkiMigrationRequired,
 		&n.Status, &n.LastSeenUnix, &n.ConfigHash,
 		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
 		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
@@ -553,7 +604,7 @@ func scanNode(row interface {
 	if err != nil {
 		return nil, err
 	}
-	n.TLSSkipVerify = tlsSkip != 0
+	n.PKIMigrationRequired = pkiMigrationRequired != 0
 	n.Labels = []string{}
 	if err := unmarshalJSON(labelsJSON, &n.Labels); err != nil {
 		return nil, fmt.Errorf("unmarshal labels: %w", err)
@@ -570,7 +621,8 @@ func scanNode(row interface {
 	return &n, nil
 }
 
-const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, tls_skip_verify, ca_cert_pem,
+const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, pki_ca_bundle_pem,
+	pki_cert_serial, pki_not_after_unix, pki_migration_required,
 	status, last_seen_unix, config_hash,
 	runtime_state, agent_version, singbox_version,
 	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,

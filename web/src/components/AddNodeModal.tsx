@@ -8,7 +8,6 @@ import {
 } from './ui/dialog'
 import { Button } from './ui/button'
 import { Alert, AlertDescription } from './ui/alert'
-import { Checkbox } from './ui/checkbox'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Copy, Check, Info } from 'lucide-react'
@@ -29,7 +28,6 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
   const [grpcPort, setGrpcPort] = useState(50051)
   const [publicAddress, setPublicAddress] = useState('')
   const [labels, setLabels] = useState('')
-  const [enableTLS, setEnableTLS] = useState(true)
   const [agentVersion, setAgentVersion] = useState('latest')
   const [busy, setBusy] = useState(false)
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
@@ -43,7 +41,6 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
     setGrpcPort(50051)
     setPublicAddress('')
     setLabels('')
-    setEnableTLS(true)
     setAgentVersion('latest')
     setBusy(false)
     setInstallInfo(null)
@@ -88,7 +85,6 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
               .filter(Boolean),
           ),
         ),
-        enable_tls: enableTLS,
         agent_version: agentVersion.trim() || 'latest',
       })
       setInstallInfo(info)
@@ -127,8 +123,8 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
             <div className="flex gap-2.5 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 text-xs text-zinc-400 leading-relaxed">
               <Info className="h-4 w-4 shrink-0 text-zinc-500 mt-0.5" />
               <div>
-                创建节点并生成安装命令。目标机执行后会<strong>自动向 Panel 上报地址与 CA</strong>
-                （需在「设置」填写 Public Base URL）。控制面地址可留空由 Agent 探测；若已预填则 enroll 不会覆盖。
+                创建节点并生成一次性注册命令。目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。
+                请先在「设置」填写 HTTPS Public Base URL；控制面地址可留空由 Agent 探测。
               </div>
             </div>
 
@@ -159,7 +155,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                   id="add-node-address"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder="可先留空；已填则 enroll 不覆盖"
+                  placeholder="可先留空；已填则注册不会覆盖"
                   className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
@@ -209,27 +205,13 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                   className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
-
-              <div className="flex items-center space-x-2 pt-2">
-                <Checkbox
-                  id="add-node-tls"
-                  checked={enableTLS}
-                  onCheckedChange={(c) => setEnableTLS(Boolean(c))}
-                />
-                <Label htmlFor="add-node-tls" className="text-zinc-300 cursor-pointer">
-                  安装时启用 TLS（推荐）
-                </Label>
-              </div>
             </div>
           </div>
         ) : (
           <div className="space-y-4 my-2">
             <div className="text-sm text-zinc-400 leading-relaxed">
-              Token 已写入节点；命令含 <code className="px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-300 font-mono text-xs">LADDER_TOKEN</code>
-              {installInfo.enable_tls ? ' + TLS' : '（明文）'}
-              {installInfo.enroll_enabled
-                ? `；装机后自动 enroll 到 ${installInfo.panel_base_url || 'Panel'}。`
-                : '。未配置 Public Base URL 时无法自动上报，请先到「设置」填写。'}
+              命令只包含 15 分钟有效的一次性注册令牌；长期控制 Token 不会写入安装命令，由证书接口返回给 Agent。
+              安装后将使用 {installInfo.panel_base_url || 'Panel'} 管理的 mTLS。
             </div>
 
             <div className="flex items-center justify-between">

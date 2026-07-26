@@ -2,15 +2,24 @@ package nodeclient_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/ladderairport/panel/internal/nodeclient"
+	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/pkg/auth"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -91,151 +100,121 @@ func (f *fakeAgent) GetMetrics(context.Context, *agentv1.GetMetricsRequest) (*ag
 	}, nil
 }
 
-func startBufServer(t *testing.T, token string, srv agentv1.AgentControlServer) (*bufconn.Listener, func()) {
-	t.Helper()
-	lis := bufconn.Listen(bufSize)
-	s := grpc.NewServer(
-		grpc.UnaryInterceptor(auth.UnaryServerInterceptor(token)),
-		grpc.StreamInterceptor(auth.StreamServerInterceptor(token)),
-	)
-	agentv1.RegisterAgentControlServer(s, srv)
-	go func() {
-		_ = s.Serve(lis)
-	}()
-	return lis, func() {
-		s.Stop()
-		_ = lis.Close()
-	}
-}
-
-func dialBuf(t *testing.T, lis *bufconn.Listener, token string) *nodeclient.Client {
-	t.Helper()
-	client, err := nodeclient.Dial(context.Background(), nodeclient.DialConfig{
-		Address: "passthrough:///bufnet",
-		Token:   token,
-		Timeout: 5 * time.Second,
-		Dialer: func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		},
-	})
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-	return client
-}
-
-func TestPingAndApplyConfig(t *testing.T) {
-	fa := &fakeAgent{state: "stopped"}
-	lis, cleanup := startBufServer(t, testToken, fa)
-	defer cleanup()
-
-	client := dialBuf(t, lis, testToken)
-
-	ping, err := client.Ping(context.Background())
-	if err != nil {
-		t.Fatalf("Ping: %v", err)
-	}
-	if ping.AgentVersion != "0.1.0-test" || ping.SingboxVersion != "sing-box-test" {
-		t.Fatalf("unexpected ping: %+v", ping)
-	}
-
-	cfgJSON := `{"log":{"level":"info"},"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`
-	resp, err := client.ApplyConfig(context.Background(), cfgJSON, "hash-abc", true)
-	if err != nil {
-		t.Fatalf("ApplyConfig: %v", err)
-	}
-	if !resp.Ok || resp.AppliedHash != "hash-abc" {
-		t.Fatalf("ApplyConfig resp: %+v", resp)
-	}
-
-	st, err := client.GetStatus(context.Background())
-	if err != nil {
-		t.Fatalf("GetStatus: %v", err)
-	}
-	if st.State != "running" || st.ConfigHash != "hash-abc" {
-		t.Fatalf("status: %+v", st)
-	}
-}
-
-func TestAuthRequired(t *testing.T) {
-	fa := &fakeAgent{state: "stopped"}
-	lis, cleanup := startBufServer(t, testToken, fa)
-	defer cleanup()
-
-	// Wrong token must fail.
-	bad := dialBuf(t, lis, "wrong")
-	_, err := bad.Ping(context.Background())
-	if err == nil {
-		t.Fatal("expected unauthenticated with wrong token")
-	}
-
-	// Empty token must fail.
-	empty, err := nodeclient.Dial(context.Background(), nodeclient.DialConfig{
-		Address: "passthrough:///bufnet",
-		Token:   "",
-		Dialer: func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		},
-	})
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	defer empty.Close()
-	_, err = empty.Ping(context.Background())
-	if err == nil {
-		t.Fatal("expected unauthenticated with empty token")
-	}
-}
-
-func TestStartStopMetrics(t *testing.T) {
-	fa := &fakeAgent{
-		state:       "stopped",
-		connections: 3,
-		uplink:      100,
-		downlink:    200,
-	}
-	lis, cleanup := startBufServer(t, testToken, fa)
-	defer cleanup()
-
-	client := dialBuf(t, lis, testToken)
-
-	startResp, err := client.Start(context.Background())
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if !startResp.Ok {
-		t.Fatalf("Start not ok: %+v", startResp)
-	}
-
-	m, err := client.GetMetrics(context.Background())
-	if err != nil {
-		t.Fatalf("GetMetrics: %v", err)
-	}
-	if m.Connections != 3 || m.UplinkBytes != 100 || m.DownlinkBytes != 200 {
-		t.Fatalf("metrics: %+v", m)
-	}
-
-	stopResp, err := client.Stop(context.Background())
-	if err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-	if !stopResp.Ok {
-		t.Fatalf("Stop not ok: %+v", stopResp)
-	}
-
-	st, err := client.GetStatus(context.Background())
-	if err != nil {
-		t.Fatalf("GetStatus: %v", err)
-	}
-	if st.State != "stopped" {
-		t.Fatalf("expected stopped, got %s", st.State)
-	}
-}
-
 func TestDialRequiresAddress(t *testing.T) {
 	_, err := nodeclient.Dial(context.Background(), nodeclient.DialConfig{})
 	if err == nil {
 		t.Fatal("expected error for empty address")
+	}
+}
+
+func TestDialRequiresManagedPKI(t *testing.T) {
+	_, err := nodeclient.Dial(context.Background(), nodeclient.DialConfig{Address: "agent:50051"})
+	if err == nil {
+		t.Fatal("expected missing management PKI to be rejected")
+	}
+}
+
+func TestMutualTLSIdentityAndSerial(t *testing.T) {
+	ca, err := pki.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: "node-mtls"},
+		DNSNames: []string{"bufnet"},
+	}, agentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := ca.SignAgentCSR("node-mtls", pem.EncodeToMemory(&pem.Block{
+		Type: "CERTIFICATE REQUEST", Bytes: csrDER,
+	}), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, _ := x509.MarshalPKCS8PrivateKey(agentKey)
+	agentPair, err := tls.X509KeyPair(issued.CertPEM, pem.EncodeToMemory(&pem.Block{
+		Type: "PRIVATE KEY", Bytes: keyDER,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientRoots := x509.NewCertPool()
+	if !clientRoots.AppendCertsFromPEM(ca.BundlePEM()) {
+		t.Fatal("parse client CA")
+	}
+	serverTLS := &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{agentPair},
+		ClientCAs:    clientRoots,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+	}
+	lis := bufconn.Listen(bufSize)
+	server := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(serverTLS)),
+		grpc.UnaryInterceptor(auth.UnaryServerInterceptor(testToken)),
+	)
+	agentv1.RegisterAgentControlServer(server, &fakeAgent{
+		state:       "stopped",
+		connections: 3,
+		uplink:      100,
+		downlink:    200,
+	})
+	go func() { _ = server.Serve(lis) }()
+	defer server.Stop()
+	defer lis.Close()
+
+	panelClient := ca.ClientCertificate()
+	cfg := nodeclient.DialConfig{
+		Address:           "passthrough:///bufnet",
+		Token:             testToken,
+		CACertPEM:         ca.BundlePEM(),
+		ClientCertificate: &panelClient,
+		ExpectedPeerURI:   pki.AgentURI("node-mtls"),
+		ExpectedSerial:    issued.Serial,
+		Dialer: func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		},
+	}
+	client, err := nodeclient.Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.Ping(context.Background()); err != nil {
+		t.Fatalf("mTLS Ping: %v", err)
+	}
+	applied, err := client.ApplyConfig(context.Background(), `{"inbounds":[]}`, "hash-abc", true)
+	if err != nil || !applied.Ok {
+		t.Fatalf("mTLS ApplyConfig: response=%+v err=%v", applied, err)
+	}
+	metrics, err := client.GetMetrics(context.Background())
+	if err != nil || metrics.Connections != 3 {
+		t.Fatalf("mTLS GetMetrics: response=%+v err=%v", metrics, err)
+	}
+
+	cfg.ExpectedSerial = "00000000000000000000000000000001"
+	wrong, err := nodeclient.Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrong.Close()
+	if _, err := wrong.Ping(context.Background()); err == nil {
+		t.Fatal("expected certificate serial mismatch")
+	}
+
+	cfg.ExpectedSerial = issued.Serial
+	cfg.Token = "wrong"
+	badToken, err := nodeclient.Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badToken.Close()
+	if _, err := badToken.Ping(context.Background()); err == nil {
+		t.Fatal("expected bearer token authentication failure")
 	}
 }

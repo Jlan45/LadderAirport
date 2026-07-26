@@ -185,8 +185,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [editAddress, setEditAddress] = useState('')
   const [editPort, setEditPort] = useState<number | string>(50051)
   const [editPublic, setEditPublic] = useState('')
-  const [editCA, setEditCA] = useState('')
-  const [editTLSSkip, setEditTLSSkip] = useState(false)
   const [editEgress, setEditEgress] = useState('')
   const [connectionErrors, setConnectionErrors] = useState<ConnectionErrors>({})
   const [ifaces, setIfaces] = useState<NetworkInterface[]>([])
@@ -195,6 +193,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
   const [copiedUpgrade, setCopiedUpgrade] = useState(false)
+  const [copiedMigration, setCopiedMigration] = useState(false)
 
   const isCurrentNode = useCallback(
     (targetId: string, generation: number) =>
@@ -270,8 +269,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         setEditAddress(n.address || '')
         setEditPort(n.grpc_port || 50051)
         setEditPublic(n.public_address || '')
-        setEditCA(n.ca_cert_pem || '')
-        setEditTLSSkip(!!n.tls_skip_verify)
         setEditEgress(n.egress_interface || '')
         setConnectionErrors({})
       }
@@ -331,8 +328,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       editAddress !== (node.address || '') ||
       String(editPort) !== String(node.grpc_port) ||
       editPublic !== (node.public_address || '') ||
-      editCA !== (node.ca_cert_pem || '') ||
-      editTLSSkip !== (!!node.tls_skip_verify) ||
       editEgress !== (node.egress_interface || '')
     )
   })()
@@ -367,6 +362,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setInstallInfo(null)
     setCopied(false)
     setCopiedUpgrade(false)
+    setCopiedMigration(false)
 
     void load(id, currentGeneration, { syncConnection: true, syncInbounds: true, fatal: true })
     void loadInterfaces(id, currentGeneration)
@@ -510,8 +506,6 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         address: address || undefined,
         grpc_port: port,
         public_address: publicAddress || undefined,
-        ca_cert_pem: editCA || undefined,
-        tls_skip_verify: editTLSSkip,
         egress_interface: editEgress || undefined,
       }
       if (editTokenChanged) input.token = editToken
@@ -673,6 +667,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     const current = generationRef.current
     setCopied(false)
     setCopiedUpgrade(false)
+    setCopiedMigration(false)
     try {
       const info = await getNodeInstallCommand(id)
       if (isCurrentNode(id, current)) setInstallInfo(info)
@@ -703,6 +698,18 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       setCopiedUpgrade(true)
       toast.success('已复制升级命令')
       setTimeout(() => setCopiedUpgrade(false), 2000)
+    } catch {
+      toast.error('复制失败')
+    }
+  }
+
+  async function copyMigration() {
+    if (!installInfo?.migration_command) return
+    try {
+      await copyText(installInfo.migration_command)
+      setCopiedMigration(true)
+      toast.success('已复制一次性 PKI 迁移命令')
+      setTimeout(() => setCopiedMigration(false), 2000)
     } catch {
       toast.error('复制失败')
     }
@@ -1021,35 +1028,25 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                       </div>
                     </div>
 
-                    {/* TLS & Egress */}
+                    {/* Management PKI & Egress */}
                     <div className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900/20 p-5">
                       <div className="space-y-1">
-                        <h3 className="text-sm font-semibold text-zinc-200">TLS 与出口</h3>
-                        <p className="text-xs text-zinc-500">粘贴节点 ca.crt；出口网卡修改后需下发配置生效。</p>
+                        <h3 className="text-sm font-semibold text-zinc-200">管理面 PKI 与出口</h3>
+                        <p className="text-xs text-zinc-500">管理证书由 Panel CA 自动维护，不允许手工 CA 或跳过验证。</p>
                       </div>
                       <div className="space-y-4">
-                        <div className="flex flex-col space-y-1.5">
-                          <Label htmlFor="node-edit-ca" className="text-zinc-400">CA 证书</Label>
-                          <textarea
-                            id="node-edit-ca"
-                            value={editCA}
-                            disabled={busy}
-                            onChange={(e) => setEditCA(e.target.value)}
-                            placeholder="-----BEGIN CERTIFICATE----- ..."
-                            rows={4}
-                            className="flex w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-mono text-zinc-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                          />
-                        </div>
-
-                        <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id="node-edit-tls-skip"
-                            checked={editTLSSkip}
-                            onCheckedChange={(c) => setEditTLSSkip(Boolean(c))}
-                          />
-                          <Label htmlFor="node-edit-tls-skip" className="text-zinc-300 cursor-pointer">
-                            跳过 TLS 证书验证 (仅用于测试环境)
-                          </Label>
+                        <div className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2">
+                          <div>
+                            <div className="text-sm text-zinc-300">Panel 管理 mTLS</div>
+                            <div className="font-mono text-xs text-zinc-500">
+                              {node?.pki_cert_serial
+                                ? `${node.pki_cert_serial.slice(0, 8)}…${node.pki_cert_serial.slice(-8)}${node.pki_migration_required ? ' · 待确认' : ''}`
+                                : node?.pki_migration_required ? '尚未迁移' : '尚未注册'}
+                            </div>
+                          </div>
+                          <Badge variant={node?.pki_cert_serial && !node.pki_migration_required ? 'success' : 'warning'}>
+                            {node?.pki_migration_required ? '需要迁移' : node?.pki_cert_serial ? '已启用' : '待注册'}
+                          </Badge>
                         </div>
 
                         <div className="flex flex-col space-y-1.5">
@@ -1115,21 +1112,48 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     {/* One-click install commands */}
                     {installInfo && !connectionDirty && (
                       <div className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900/30 p-5 mt-4">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-semibold text-zinc-200">一键安装</h3>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1"
-                            onClick={() => void copyInstall()}
-                          >
-                            {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                            {copied ? '已复制' : '复制'}
-                          </Button>
-                        </div>
-                        <pre className="p-3 bg-zinc-900 border border-zinc-800/80 rounded-md overflow-x-auto text-xs font-mono text-zinc-300 max-h-[140px]">
-                          {installInfo.install_command}
-                        </pre>
+                        {installInfo.install_command && (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-semibold text-zinc-200">一键安装</h3>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1"
+                                onClick={() => void copyInstall()}
+                              >
+                                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                                {copied ? '已复制' : '复制'}
+                              </Button>
+                            </div>
+                            <pre className="p-3 bg-zinc-900 border border-zinc-800/80 rounded-md overflow-x-auto text-xs font-mono text-zinc-300 max-h-[140px]">
+                              {installInfo.install_command}
+                            </pre>
+                          </>
+                        )}
+
+                        {installInfo.migration_command && (
+                          <div className="space-y-2 mt-4 pt-4 border-t border-amber-900/40">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-semibold text-amber-300">一次性 PKI 升级迁移</h3>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-amber-900/60 text-amber-300 hover:bg-amber-950/30 gap-1"
+                                onClick={() => void copyMigration()}
+                              >
+                                {copiedMigration ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                                {copiedMigration ? '已复制' : '复制'}
+                              </Button>
+                            </div>
+                            <p className="text-xs text-zinc-500 leading-normal">
+                              仅供旧节点执行一次。成功后会删除节点自签 CA 和旧 systemd 实现，不保留旧证书或回滚副本。
+                            </p>
+                            <pre className="p-3 bg-zinc-900 border border-amber-900/40 rounded-md overflow-x-auto text-xs font-mono text-amber-200 max-h-[140px]">
+                              {installInfo.migration_command}
+                            </pre>
+                          </div>
+                        )}
 
                         {installInfo.upgrade_command && (
                           <div className="space-y-2 mt-4 pt-4 border-t border-zinc-800/60">

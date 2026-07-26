@@ -19,6 +19,74 @@ func openTestStore(t *testing.T) *Store {
 	return s
 }
 
+func TestLegacyNodeRequiresStandalonePKIMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-node.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE nodes (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			address TEXT NOT NULL,
+			grpc_port INTEGER NOT NULL,
+			token TEXT NOT NULL DEFAULT '',
+			labels_json TEXT NOT NULL DEFAULT '[]',
+			tls_skip_verify INTEGER NOT NULL DEFAULT 0,
+			ca_cert_pem TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			last_seen_unix INTEGER NOT NULL DEFAULT 0,
+			config_hash TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		);
+		INSERT INTO nodes VALUES (
+			'legacy-node', 'legacy', '192.0.2.10', 50051, 'token', '[]',
+			1, 'old-local-ca', 'online', 1, '', 1, 1
+		);
+	`)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	n, err := s.GetNode("legacy-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !n.PKIMigrationRequired {
+		t.Fatalf("legacy node was not marked for standalone migration: %+v", n)
+	}
+	if n.PKICABundlePEM != "" || n.PKICertSerial != "" {
+		t.Fatalf("legacy management trust leaked into Panel PKI fields: %+v", n)
+	}
+	rows, err := s.db.Query(`PRAGMA table_info(nodes)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		if name == "tls_skip_verify" || name == "ca_cert_pem" {
+			t.Fatalf("legacy management TLS column was not removed: %s", name)
+		}
+	}
+}
+
 func TestSubscriptionInboundModeMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", path)
@@ -106,6 +174,9 @@ func TestCreateAndListNodes(t *testing.T) {
 	got := nodes[0]
 	if got.ID != n.ID || got.Name != "node-a" || got.Address != "10.0.0.1" || got.GRPCPort != 9090 {
 		t.Fatalf("unexpected node: %+v", got)
+	}
+	if got.PKIMigrationRequired {
+		t.Fatalf("new Panel-PKI node incorrectly requires legacy migration: %+v", got)
 	}
 	if len(got.Labels) != 2 || got.Labels[0] != "edge" || got.Labels[1] != "prod" {
 		t.Fatalf("unexpected labels: %v", got.Labels)
