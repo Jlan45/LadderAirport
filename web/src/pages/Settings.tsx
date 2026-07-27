@@ -184,19 +184,19 @@ export default function Settings() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-5">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">系统设置</h1>
-          <p className="text-sm text-zinc-400 mt-1">管理节点默认连接令牌、系统超时时长、Panel 自身监听接口及控制台访问密码</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">系统设置</h1>
+          <p className="text-sm text-muted-foreground mt-1">管理节点默认连接令牌、系统超时时长、Panel 自身监听接口及控制台访问密码</p>
           {meta?.panel_version && (
-            <p className="text-xs text-zinc-500 mt-2 flex flex-wrap gap-2 items-center">
-              <span>Panel <code className="font-mono text-zinc-400">{meta.panel_version}</code></span>
+            <p className="text-xs text-muted-foreground mt-2 flex flex-wrap gap-2 items-center">
+              <span>Panel <code className="font-mono text-muted-foreground">{meta.panel_version}</code></span>
               {meta.panel_commit && meta.panel_commit !== 'unknown' && (
                 <span>({meta.panel_commit})</span>
               )}
               {meta.recommended_agent_version && (
                 <>
-                  <span className="text-zinc-800">•</span>
+                  <span className="text-muted-foreground">•</span>
                   <span>推荐 Agent {meta.recommended_agent_version}</span>
                 </>
               )}
@@ -215,7 +215,7 @@ export default function Settings() {
             loading={loading}
             disabled={busy}
             onClick={requestReload}
-            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5 h-9"
+            className="border-border text-foreground hover:bg-muted gap-1.5 h-9"
           >
             {dirty ? '放弃修改并重载' : '重新加载'}
           </Button>
@@ -234,7 +234,7 @@ export default function Settings() {
         <Alert variant="destructive">
           <AlertTitle>系统设置加载失败</AlertTitle>
           <AlertDescription>{loadError}</AlertDescription>
-          <Button size="sm" variant="outline" className="mt-2 text-red-400 border-red-900/30 hover:bg-red-950/20" onClick={() => void load()}>
+          <Button size="sm" variant="outline" className="mt-2 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => void load()}>
             重试
           </Button>
         </Alert>
@@ -249,25 +249,25 @@ export default function Settings() {
 
       {loading && savedDraft === null ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <RefreshCw className="h-6 w-6 animate-spin text-zinc-500" />
-          <span className="text-sm text-zinc-400">正在加载系统设置…</span>
+          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">正在加载系统设置…</span>
         </div>
       ) : savedDraft ? (
         <div className="grid grid-cols-1 gap-6">
           {/* Card 1: Connection & Tasks */}
-          <Card className="border-zinc-900 bg-zinc-900/30">
+          <Card className="border-border bg-card">
             <CardHeader className="p-5 pb-3">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Key className="h-4 w-4 text-zinc-400" />
+                <Key className="h-4 w-4 text-muted-foreground" />
                 连接与任务参数
               </CardTitle>
-              <CardDescription className="text-xs text-zinc-500">
+              <CardDescription className="text-xs text-muted-foreground">
                 定义节点连接的默认 Agent 令牌与连接/部署的并发数量
               </CardDescription>
             </CardHeader>
             <CardContent className="p-5 pt-0 space-y-4">
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="settings-token" className="text-zinc-300">默认 Agent 访问令牌</Label>
+                <Label htmlFor="settings-token">默认 Agent 访问令牌</Label>
                 <Input
                   id="settings-token"
                   type="password"
@@ -276,13 +276,12 @@ export default function Settings() {
                   autoComplete="off"
                   onChange={(e) => updateDraft({ token: e.target.value })}
                   placeholder="新建节点未指定令牌时默认填补此项，请使用强随机串"
-                  className="bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="settings-grpc-timeout" className="text-zinc-300">gRPC 管控超时（秒）</Label>
+                  <Label htmlFor="settings-grpc-timeout">gRPC 管控超时（秒）</Label>
                   <div className="relative">
                     <Input
                       id="settings-grpc-timeout"
@@ -292,19 +291,17 @@ export default function Settings() {
                       value={draft.timeoutSec}
                       disabled={formDisabled}
                       onChange={(e) => updateDraft({ timeoutSec: e.target.value })}
-                      className={`bg-zinc-950 border-zinc-800 pr-10 focus-visible:ring-zinc-700 ${
-                        errors.timeoutSec ? 'border-red-500 focus-visible:ring-red-500' : ''
-                      }`}
+                      className={`pr-10 ${errors.timeoutSec ? 'border-destructive focus-visible:ring-destructive' : ''}`}
                     />
-                    <span className="absolute right-3 top-2.5 text-xs text-zinc-500 select-none">秒</span>
+                    <span className="absolute right-3 top-2.5 text-xs text-muted-foreground select-none">秒</span>
                   </div>
                   {errors.timeoutSec && (
-                    <p className="text-xs text-red-500 font-medium">{errors.timeoutSec}</p>
+                    <p className="text-xs text-destructive font-medium">{errors.timeoutSec}</p>
                   )}
                 </div>
 
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="settings-max-concurrency" className="text-zinc-300">最大并发任务数</Label>
+                  <Label htmlFor="settings-max-concurrency">最大并发任务数</Label>
                   <Input
                     id="settings-max-concurrency"
                     type="number"
@@ -313,119 +310,114 @@ export default function Settings() {
                     value={draft.concurrency}
                     disabled={formDisabled}
                     onChange={(e) => updateDraft({ concurrency: e.target.value })}
-                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
-                      errors.concurrency ? 'border-red-500 focus-visible:ring-red-500' : ''
-                    }`}
+                    className={errors.concurrency ? 'border-destructive focus-visible:ring-destructive' : ''}
                   />
                   {errors.concurrency && (
-                    <p className="text-xs text-red-500 font-medium">{errors.concurrency}</p>
+                    <p className="text-xs text-destructive font-medium">{errors.concurrency}</p>
                   )}
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-zinc-900 bg-zinc-900/30">
+          <Card className="border-border bg-card">
             <CardHeader className="p-5 pb-3">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Network className="h-4 w-4 text-zinc-400" />
+                <Network className="h-4 w-4 text-muted-foreground" />
                 链路健康探测
               </CardTitle>
-              <CardDescription className="text-xs text-zinc-500">
+              <CardDescription className="text-xs text-muted-foreground">
                 入口 Agent 经完整代理链访问该 URL，并周期更新延迟与故障跳
               </CardDescription>
             </CardHeader>
             <CardContent className="p-5 pt-0 space-y-4">
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="settings-probe-url" className="text-zinc-300">探测 URL</Label>
+                <Label htmlFor="settings-probe-url">探测 URL</Label>
                 <Input
                   id="settings-probe-url"
                   value={draft.probeURL}
                   disabled={formDisabled}
                   onChange={(e) => updateDraft({ probeURL: e.target.value })}
-                  className={`bg-zinc-950 border-zinc-800 ${errors.probeURL ? 'border-red-500' : ''}`}
+                  className={errors.probeURL ? 'border-destructive' : ''}
                 />
-                {errors.probeURL && <p className="text-xs text-red-500">{errors.probeURL}</p>}
+                {errors.probeURL && <p className="text-xs text-destructive">{errors.probeURL}</p>}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="settings-probe-interval" className="text-zinc-300">探测间隔（秒）</Label>
+                  <Label htmlFor="settings-probe-interval">探测间隔（秒）</Label>
                   <Input id="settings-probe-interval" type="number" min={10} value={draft.probeIntervalSec}
                     disabled={formDisabled} onChange={(e) => updateDraft({ probeIntervalSec: e.target.value })}
-                    className={`bg-zinc-950 border-zinc-800 ${errors.probeIntervalSec ? 'border-red-500' : ''}`} />
-                  {errors.probeIntervalSec && <p className="text-xs text-red-500">{errors.probeIntervalSec}</p>}
+                    className={errors.probeIntervalSec ? 'border-destructive' : ''} />
+                  {errors.probeIntervalSec && <p className="text-xs text-destructive">{errors.probeIntervalSec}</p>}
                 </div>
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="settings-probe-timeout" className="text-zinc-300">单次超时（秒）</Label>
+                  <Label htmlFor="settings-probe-timeout">单次超时（秒）</Label>
                   <Input id="settings-probe-timeout" type="number" min={1} max={60} value={draft.probeTimeoutSec}
                     disabled={formDisabled} onChange={(e) => updateDraft({ probeTimeoutSec: e.target.value })}
-                    className={`bg-zinc-950 border-zinc-800 ${errors.probeTimeoutSec ? 'border-red-500' : ''}`} />
-                  {errors.probeTimeoutSec && <p className="text-xs text-red-500">{errors.probeTimeoutSec}</p>}
+                    className={errors.probeTimeoutSec ? 'border-destructive' : ''} />
+                  {errors.probeTimeoutSec && <p className="text-xs text-destructive">{errors.probeTimeoutSec}</p>}
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Card 2: Services & Subscriptions */}
-          <Card className="border-zinc-900 bg-zinc-900/30">
+          <Card className="border-border bg-card">
             <CardHeader className="p-5 pb-3">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Network className="h-4 w-4 text-zinc-400" />
+                <Network className="h-4 w-4 text-muted-foreground" />
                 服务监听与订阅公开地址
               </CardTitle>
-              <CardDescription className="text-xs text-zinc-500">
+              <CardDescription className="text-xs text-muted-foreground">
                 配置面板的本地监听端口和外部客户端用以访问订阅的公开地址
               </CardDescription>
             </CardHeader>
             <CardContent className="p-5 pt-0 space-y-4">
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="settings-public-base" className="text-zinc-300">Public Base URL</Label>
+                <Label htmlFor="settings-public-base">Public Base URL</Label>
                 <Input
                   id="settings-public-base"
                   value={draft.publicBase}
                   disabled={formDisabled}
                   onChange={(e) => updateDraft({ publicBase: e.target.value })}
                   placeholder="例如: https://panel.example.com"
-                  className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
-                    errors.publicBase ? 'border-red-500 focus-visible:ring-red-500' : ''
-                  }`}
+                  className={errors.publicBase ? 'border-destructive focus-visible:ring-destructive' : ''}
                 />
-                <span className="text-[10px] text-zinc-500">用于生成安装命令中 Agent 的上报端点以及分发 Clash/sing-box 订阅解析文件的 base 根路径</span>
+                <span className="text-[10px] text-muted-foreground">用于生成安装命令中 Agent 的上报端点以及分发 Clash/sing-box 订阅解析文件的 base 根路径</span>
                 {errors.publicBase && (
-                  <p className="text-xs text-red-500 font-medium">{errors.publicBase}</p>
+                  <p className="text-xs text-destructive font-medium">{errors.publicBase}</p>
                 )}
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="settings-listen-address" className="text-zinc-300">面板网络监听地址</Label>
+                <Label htmlFor="settings-listen-address">面板网络监听地址</Label>
                 <Input
                   id="settings-listen-address"
                   value={draft.listenAddr}
                   disabled={formDisabled}
                   onChange={(e) => updateDraft({ listenAddr: e.target.value })}
                   placeholder="例如: :8080 或 127.0.0.1:8080"
-                  className="bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700"
                 />
-                <span className="text-[10px] text-zinc-500">本配置仅保存在设置文件中。修改后，您通常需要重启后端面板程序才会正式生效</span>
+                <span className="text-[10px] text-muted-foreground">本配置仅保存在设置文件中。修改后，您通常需要重启后端面板程序才会正式生效</span>
               </div>
             </CardContent>
           </Card>
 
           {/* Card 3: Security & Credentials */}
-          <Card className="border-zinc-900 bg-zinc-900/30">
+          <Card className="border-border bg-card">
             <CardHeader className="p-5 pb-3">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Shield className="h-4 w-4 text-zinc-400" />
+                <Shield className="h-4 w-4 text-muted-foreground" />
                 安全管理
               </CardTitle>
-              <CardDescription className="text-xs text-zinc-500">
+              <CardDescription className="text-xs text-muted-foreground">
                 更新后端 Web 运维控制台的管理员登录凭证
               </CardDescription>
             </CardHeader>
             <CardContent className="p-5 pt-0 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="settings-new-password" className="text-zinc-300">新管理员密码</Label>
+                  <Label htmlFor="settings-new-password">新管理员密码</Label>
                   <Input
                     id="settings-new-password"
                     type="password"
@@ -434,17 +426,15 @@ export default function Settings() {
                     autoComplete="new-password"
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="留空表示不修改管理员登录密码"
-                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
-                      errors.newPassword ? 'border-red-500 focus-visible:ring-red-500' : ''
-                    }`}
+                    className={errors.newPassword ? 'border-destructive focus-visible:ring-destructive' : ''}
                   />
                   {errors.newPassword && (
-                    <p className="text-xs text-red-500 font-medium">{errors.newPassword}</p>
+                    <p className="text-xs text-destructive font-medium">{errors.newPassword}</p>
                   )}
                 </div>
 
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="settings-confirm-password" className="text-zinc-300">确认新密码</Label>
+                  <Label htmlFor="settings-confirm-password">确认新密码</Label>
                   <Input
                     id="settings-confirm-password"
                     type="password"
@@ -453,12 +443,10 @@ export default function Settings() {
                     autoComplete="new-password"
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="请再次输入以确认新管理员密码"
-                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 ${
-                      errors.confirmPassword ? 'border-red-500 focus-visible:ring-red-500' : ''
-                    }`}
+                    className={errors.confirmPassword ? 'border-destructive focus-visible:ring-destructive' : ''}
                   />
                   {errors.confirmPassword && (
-                    <p className="text-xs text-red-500 font-medium">{errors.confirmPassword}</p>
+                    <p className="text-xs text-destructive font-medium">{errors.confirmPassword}</p>
                   )}
                 </div>
               </div>

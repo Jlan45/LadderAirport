@@ -563,11 +563,11 @@ export default function Subscriptions() {
       {/* Header Title Section */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-100 flex items-center gap-2.5">
-            <Rss className="h-6 w-6 text-cyan-400" />
+          <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
+            <Rss className="h-6 w-6 text-primary" />
             订阅配置管理
           </h1>
-          <p className="text-sm text-zinc-400 mt-1 leading-normal">
+          <p className="text-sm text-muted-foreground mt-1 leading-normal">
             发布面向客户端的代理订阅分发链接 · 聚合与解析第三方外部订阅源
           </p>
         </div>
@@ -577,7 +577,7 @@ export default function Subscriptions() {
             onClick={() => void load()}
             loading={loading}
             disabled={saving || pending.size > 0}
-            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5 h-9 cursor-pointer"
+            className="border-border text-foreground hover:bg-muted gap-1.5 h-9 cursor-pointer"
           >
             <RefreshCw className="h-4 w-4" /> 刷新
           </Button>
@@ -594,19 +594,19 @@ export default function Subscriptions() {
       {/* Primary Tabs */}
       <Tabs defaultValue="publish" className="w-full space-y-6">
         <div>
-          <TabsList className="inline-flex h-10 items-center justify-center rounded-lg bg-zinc-950 p-1 border border-zinc-800 text-zinc-400">
+          <TabsList className="inline-flex h-10 items-center justify-center rounded-lg bg-muted p-1 border border-border text-muted-foreground">
             <TabsTrigger
               value="publish"
-              className="inline-flex items-center justify-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-md transition-all cursor-pointer data-[state=active]:bg-zinc-900 data-[state=active]:text-zinc-100 text-zinc-400 hover:text-zinc-200 data-[state=active]:shadow-xs"
+              className="inline-flex items-center justify-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-md transition-all cursor-pointer data-[state=active]:bg-background data-[state=active]:text-foreground text-muted-foreground hover:text-foreground data-[state=active]:shadow-xs"
             >
-              <Radio className="h-4 w-4 text-cyan-400" />
+              <Radio className="h-4 w-4 text-primary" />
               发布订阅 ({subscriptions.length})
             </TabsTrigger>
             <TabsTrigger
               value="sources"
-              className="inline-flex items-center justify-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-md transition-all cursor-pointer data-[state=active]:bg-zinc-900 data-[state=active]:text-zinc-100 text-zinc-400 hover:text-zinc-200 data-[state=active]:shadow-xs"
+              className="inline-flex items-center justify-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-md transition-all cursor-pointer data-[state=active]:bg-background data-[state=active]:text-foreground text-muted-foreground hover:text-foreground data-[state=active]:shadow-xs"
             >
-              <Globe className="h-4 w-4 text-violet-400" />
+              <Globe className="h-4 w-4 text-primary" />
               外部订阅源 ({sources.length})
             </TabsTrigger>
           </TabsList>
@@ -657,18 +657,18 @@ export default function Subscriptions() {
                 return (
                   <Card
                     key={sub.id}
-                    className="relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-700/80 hover:bg-zinc-900/60 shadow-sm border"
+                    className="relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] border-border bg-card shadow-sm"
                   >
                     <CardHeader className="p-5 pb-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2.5">
-                            <CardTitle className="text-base font-bold text-zinc-100">
+                            <CardTitle className="text-base font-bold text-foreground">
                               {sub.name}
                             </CardTitle>
                             <Badge
                               variant="outline"
-                              className="border-indigo-500/30 bg-indigo-500/10 text-indigo-400 font-mono text-[11px]"
+                              className="border-primary/30 bg-primary/10 text-primary font-mono text-[11px]"
                             >
                               通用分发 (Clash / sing-box / V2Ray)
                             </Badge>
@@ -688,9 +688,9 @@ export default function Subscriptions() {
                     <CardContent className="p-5 pt-0 space-y-4">
                       {/* Subscription URL Box */}
                       <div className="space-y-1.5">
-                        <span className="text-[11px] font-medium text-zinc-400 block">公网订阅地址</span>
-                        <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-950 border border-zinc-800">
-                          <code className="text-xs font-mono text-zinc-200 truncate flex-1 select-all px-1">
+                        <span className="text-[11px] font-medium text-muted-foreground block">公网订阅地址</span>
+                        <div className="flex items-center gap-2 p-2 rounded-lg bg-background border border-border">
+                          <code className="text-xs font-mono text-foreground truncate flex-1 select-all px-1">
                             {fullUrl}
                           </code>
                           <TooltipProvider>
@@ -700,10 +700,10 @@ export default function Subscriptions() {
                                   size="sm"
                                   variant="ghost"
                                   onClick={() => void copySubscriptionUrl(sub.url, sub.id)}
-                                  className="h-7 px-2.5 text-xs text-zinc-300 hover:text-zinc-100 hover:bg-zinc-900 shrink-0 cursor-pointer"
+                                  className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
                                 >
                                   {copiedId === sub.id ? (
-                                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                    <Check className="h-3.5 w-3.5 text-success" />
                                   ) : (
                                     <Copy className="h-3.5 w-3.5" />
                                   )}
@@ -722,18 +722,18 @@ export default function Subscriptions() {
                           size="sm"
                           variant="outline"
                           onClick={() => setQrModal({ open: true, title: sub.name, url: fullUrl })}
-                          className="h-8 text-xs border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 gap-1.5 cursor-pointer"
+                          className="h-8 text-xs border-border bg-background hover:bg-muted text-foreground gap-1.5 cursor-pointer"
                         >
-                          <QrCode className="h-3.5 w-3.5 text-emerald-400" /> 扫码
+                          <QrCode className="h-3.5 w-3.5 text-success" /> 扫码
                         </Button>
 
                         <a
                           href={clashScheme}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 h-8 px-3 transition-colors gap-1.5 cursor-pointer"
+                          className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-border bg-background hover:bg-muted text-foreground h-8 px-3 transition-colors gap-1.5 cursor-pointer"
                         >
-                          <ExternalLink className="h-3.5 w-3.5 text-cyan-400" />
+                          <ExternalLink className="h-3.5 w-3.5 text-primary" />
                           导入 Clash
                         </a>
 
@@ -741,9 +741,9 @@ export default function Subscriptions() {
                           href={singboxScheme}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-200 h-8 px-3 transition-colors gap-1.5 cursor-pointer"
+                          className="inline-flex items-center justify-center rounded-md text-xs font-medium border border-border bg-background hover:bg-muted text-foreground h-8 px-3 transition-colors gap-1.5 cursor-pointer"
                         >
-                          <ExternalLink className="h-3.5 w-3.5 text-violet-400" />
+                          <ExternalLink className="h-3.5 w-3.5 text-primary" />
                           导入 sing-box
                         </a>
 
@@ -753,18 +753,18 @@ export default function Subscriptions() {
                           onClick={() => void onPreviewSubscription(sub)}
                           loading={subPending}
                           disabled={subPending}
-                          className="h-8 text-xs text-zinc-400 hover:text-zinc-200 gap-1.5 ml-auto cursor-pointer"
+                          className="h-8 text-xs text-muted-foreground hover:text-foreground gap-1.5 ml-auto cursor-pointer"
                         >
                           <Eye className="h-3.5 w-3.5" /> 预览结构
                         </Button>
                       </div>
 
                       {/* Content Aggregation Summary */}
-                      <div className="grid grid-cols-2 gap-2 pt-3 border-t border-zinc-900/80 text-xs">
+                      <div className="grid grid-cols-2 gap-2 pt-3 border-t border-border text-xs">
                         <div className="space-y-0.5">
-                          <span className="text-[10px] text-zinc-500 block">服务端代理链</span>
-                          <span className="text-zinc-200 font-medium flex items-center gap-1">
-                            <Server className="h-3 w-3 text-zinc-500" />
+                          <span className="text-[10px] text-muted-foreground block">服务端代理链</span>
+                          <span className="text-foreground font-medium flex items-center gap-1">
+                            <Server className="h-3 w-3 text-muted-foreground" />
                             {sub.include_all_chains
                               ? `全部已启用链 (${chains.filter((chain) => chain.enabled).length} 条)`
                               : (sub.chain_ids?.length ?? 0) > 0
@@ -773,9 +773,9 @@ export default function Subscriptions() {
                           </span>
                         </div>
                         <div className="space-y-0.5">
-                          <span className="text-[10px] text-zinc-500 block">原始节点与外部源</span>
-                          <span className="text-zinc-200 font-medium flex items-center gap-1">
-                            <Layers className="h-3 w-3 text-zinc-500" />
+                          <span className="text-[10px] text-muted-foreground block">原始节点与外部源</span>
+                          <span className="text-foreground font-medium flex items-center gap-1">
+                            <Layers className="h-3 w-3 text-muted-foreground" />
                             {sub.include_standalone
                               ? (sub.include_all_inbounds ? '全部原始节点' : `指定 ${sub.inbound_ids.length} 个入站`)
                               : '不含原始节点'}
@@ -787,14 +787,14 @@ export default function Subscriptions() {
                       </div>
 
                       {/* Footer Actions */}
-                      <div className="flex items-center justify-between pt-3 border-t border-zinc-900/80 text-xs text-zinc-400">
+                      <div className="flex items-center justify-between pt-3 border-t border-border text-xs text-muted-foreground">
                         <Button
                           size="sm"
                           variant="ghost"
                           onClick={() => void rotateSubscriptionToken(sub)}
                           loading={subPending}
                           disabled={subPending}
-                          className="h-7 text-xs text-zinc-500 hover:text-amber-400 px-2 cursor-pointer gap-1"
+                          className="h-7 text-xs text-muted-foreground hover:text-warning px-2 cursor-pointer gap-1"
                         >
                           <RotateCw className="h-3 w-3" /> 重置 Token
                         </Button>
@@ -805,7 +805,7 @@ export default function Subscriptions() {
                             variant="ghost"
                             onClick={() => openEditSubscription(sub)}
                             disabled={subPending}
-                            className="h-7 text-xs text-zinc-400 hover:text-zinc-200 px-2.5 cursor-pointer gap-1"
+                            className="h-7 text-xs text-muted-foreground hover:text-foreground px-2.5 cursor-pointer gap-1"
                           >
                             <Edit className="h-3.5 w-3.5" /> 编辑
                           </Button>
@@ -814,7 +814,7 @@ export default function Subscriptions() {
                             variant="ghost"
                             onClick={() => void onDeleteSubscription(sub)}
                             disabled={subPending}
-                            className="h-7 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/20 px-2.5 cursor-pointer gap-1"
+                            className="h-7 text-xs text-destructive hover:text-destructive/80 px-2.5 cursor-pointer gap-1"
                           >
                             <Trash2 className="h-3.5 w-3.5" /> 删除
                           </Button>

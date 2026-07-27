@@ -1,12 +1,12 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { StatusBadge } from '@/components/ui/status-badge'
 import { Loader2, Play, Plus, RefreshCw, TestTube2, Trash2 } from 'lucide-react'
 import {
   createACMEAccount,
@@ -135,12 +135,12 @@ export default function DNSCertificates() {
             <CardContent><Table><TableHeader><TableRow><TableHead>名称</TableHead><TableHead>供应商</TableHead><TableHead>管理区域</TableHead><TableHead>状态</TableHead><TableHead>最近测试</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
               <TableBody>{dnsAccounts.map((account) => <TableRow key={account.id}>
                 <TableCell className="font-medium">{account.name}</TableCell><TableCell>{account.provider}</TableCell>
-                <TableCell className="font-mono text-xs">{account.zone || <span className="text-amber-400">待配置</span>}</TableCell>
+                <TableCell className="font-mono text-xs">{account.zone || <span className="text-warning-foreground font-medium">待配置</span>}</TableCell>
                 <TableCell><StatusBadge value={account.enabled ? (account.last_test_error ? 'error' : 'enabled') : 'disabled'} /></TableCell>
-                <TableCell>{account.last_test_unix ? formatTime(account.last_test_unix) : '未测试'}{account.last_test_error && <div className="max-w-[360px] truncate text-xs text-red-400">{account.last_test_error}</div>}</TableCell>
+                <TableCell>{account.last_test_unix ? formatTime(account.last_test_unix) : '未测试'}{account.last_test_error && <div className="max-w-[360px] truncate text-xs text-destructive">{account.last_test_error}</div>}</TableCell>
                 <TableCell className="text-right"><div className="flex justify-end gap-1">
                   <Button variant="ghost" size="sm" loading={busy === `dns-test-${account.id}`} disabled={busy === `dns-delete-${account.id}`} onClick={() => void action(`dns-test-${account.id}`, () => testDNSAccount(account.id), 'DNS 连接测试通过')}><TestTube2 className="mr-2 h-4 w-4" />测试</Button>
-                  <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-300" loading={busy === `dns-delete-${account.id}`} disabled={busy === `dns-test-${account.id}`} onClick={() => removeDNSAccount(account)}><Trash2 className="mr-2 h-4 w-4" />删除</Button>
+                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" loading={busy === `dns-delete-${account.id}`} disabled={busy === `dns-test-${account.id}`} onClick={() => removeDNSAccount(account)}><Trash2 className="mr-2 h-4 w-4" />删除</Button>
                 </div></TableCell>
               </TableRow>)}</TableBody></Table></CardContent>
           </Card>
@@ -150,9 +150,9 @@ export default function DNSCertificates() {
           <DomainForm nodes={nodes} accounts={dnsAccounts} onCreate={(body) => action('domain-create', () => createManagedDomain(body), '托管域名已创建并进入同步队列')} busy={busy === 'domain-create'} />
           <Card><CardHeader><CardTitle>托管域名</CardTitle><CardDescription>观测值会定期与 DNS 供应商重新对账。</CardDescription></CardHeader>
             <CardContent><Table><TableHeader><TableRow><TableHead>域名</TableHead><TableHead>地址</TableHead><TableHead>状态</TableHead><TableHead>下次同步</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-              <TableBody>{domains.map((domain) => <TableRow key={domain.id}><TableCell><div className="font-medium">{domain.fqdn}</div><div className="text-xs text-zinc-500">{domain.zone} · {domain.record_mode.toUpperCase()}</div></TableCell>
+              <TableBody>{domains.map((domain) => <TableRow key={domain.id}><TableCell><div className="font-medium">{domain.fqdn}</div><div className="text-xs text-muted-foreground">{domain.zone} · {domain.record_mode.toUpperCase()}</div></TableCell>
                 <TableCell className="font-mono text-xs">{[domain.desired_ipv4, domain.desired_ipv6].filter(Boolean).join(' / ') || '等待探测'}</TableCell>
-                <TableCell><StatusBadge value={domain.state} />{domain.last_error && <div className="mt-1 max-w-[300px] truncate text-xs text-red-400">{domain.last_error}</div>}</TableCell>
+                <TableCell><StatusBadge value={domain.state} />{domain.last_error && <div className="mt-1 max-w-[300px] truncate text-xs text-destructive">{domain.last_error}</div>}</TableCell>
                 <TableCell>{domain.next_reconcile_unix ? formatTime(domain.next_reconcile_unix) : '立即'}</TableCell>
                 <TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `reconcile-${domain.id}`} onClick={() => void action(`reconcile-${domain.id}`, () => reconcileManagedDomain(domain.id), '已提交 DNS 同步')}><RefreshCw className="mr-2 h-4 w-4" />同步</Button></TableCell>
               </TableRow>)}</TableBody></Table></CardContent>
@@ -171,7 +171,7 @@ export default function DNSCertificates() {
           </CardContent></Card>
           <Card><CardHeader><CardTitle>协议证书</CardTitle><CardDescription>签发完成后可在节点入站中切换到托管 TLS。</CardDescription></CardHeader><CardContent>
             <Table><TableHeader><TableRow><TableHead>域名</TableHead><TableHead>状态</TableHead><TableHead>有效期</TableHead><TableHead>版本</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>
-              {certificates.map((cert) => <TableRow key={cert.id}><TableCell className="font-medium">{cert.domains.join(', ')}</TableCell><TableCell><StatusBadge value={cert.status} />{cert.last_error && <div className="max-w-[320px] truncate text-xs text-red-400">{cert.last_error}</div>}</TableCell><TableCell>{cert.not_after_unix ? formatTime(cert.not_after_unix) : '尚未签发'}</TableCell><TableCell>r{cert.revision}</TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `issue-${cert.id}`} onClick={() => void action(`issue-${cert.id}`, () => issueProtocolCertificate(cert.id), '已提交签发/续期')}><RefreshCw className="mr-2 h-4 w-4" />签发 / 续期</Button></TableCell></TableRow>)}
+              {certificates.map((cert) => <TableRow key={cert.id}><TableCell className="font-medium">{cert.domains.join(', ')}</TableCell><TableCell><StatusBadge value={cert.status} />{cert.last_error && <div className="max-w-[320px] truncate text-xs text-destructive">{cert.last_error}</div>}</TableCell><TableCell>{cert.not_after_unix ? formatTime(cert.not_after_unix) : '尚未签发'}</TableCell><TableCell>r{cert.revision}</TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `issue-${cert.id}`} onClick={() => void action(`issue-${cert.id}`, () => issueProtocolCertificate(cert.id), '已提交签发/续期')}><RefreshCw className="mr-2 h-4 w-4" />签发 / 续期</Button></TableCell></TableRow>)}
             </TableBody></Table>
           </CardContent></Card>
         </TabsContent>
@@ -179,7 +179,7 @@ export default function DNSCertificates() {
         <TabsContent value="jobs">
           <Card><CardHeader><CardTitle>持久化自动化任务</CardTitle><CardDescription>Panel 重启后会自动接管过期租约并继续执行。</CardDescription></CardHeader><CardContent>
             <Table><TableHeader><TableRow><TableHead>类型</TableHead><TableHead>目标</TableHead><TableHead>状态</TableHead><TableHead>尝试</TableHead><TableHead>更新时间</TableHead></TableRow></TableHeader><TableBody>
-              {jobs.map((job) => <TableRow key={job.id}><TableCell>{job.type}</TableCell><TableCell className="max-w-[280px] truncate font-mono text-xs">{job.target_id}</TableCell><TableCell><StatusBadge value={job.state} />{job.last_error && <div className="max-w-[360px] truncate text-xs text-red-400">{job.last_error}</div>}</TableCell><TableCell>{job.attempt}</TableCell><TableCell>{formatTime(job.updated_at_unix)}</TableCell></TableRow>)}
+              {jobs.map((job) => <TableRow key={job.id}><TableCell>{job.type}</TableCell><TableCell className="max-w-[280px] truncate font-mono text-xs">{job.target_id}</TableCell><TableCell><StatusBadge value={job.state} />{job.last_error && <div className="max-w-[360px] truncate text-xs text-destructive">{job.last_error}</div>}</TableCell><TableCell>{job.attempt}</TableCell><TableCell>{formatTime(job.updated_at_unix)}</TableCell></TableRow>)}
             </TableBody></Table>
           </CardContent></Card>
         </TabsContent>
@@ -250,12 +250,4 @@ function CertificateForm({ domains, accounts, onCreate, busy }: { domains: Manag
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div className="space-y-1.5"><Label>{label}</Label>{children}</div>
-}
-
-function StatusBadge({ value }: { value: string }) {
-  const success = ['active', 'ready', 'success', 'enabled'].includes(value)
-  const danger = ['error', 'failed', 'disabled'].includes(value)
-  const variant = success ? 'success' : danger ? 'destructive' : ['pending', 'running', 'authorizing', 'installing'].includes(value) ? 'info' : 'warning'
-  const labels: Record<string, string> = { active: '有效', ready: '就绪', success: '成功', enabled: '启用', error: '错误', failed: '失败', disabled: '禁用', pending: '等待', running: '执行中', retry_wait: '等待重试', authorizing: '验证中', installing: '安装中' }
-  return <Badge variant={variant}>{labels[value] ?? value}</Badge>
 }

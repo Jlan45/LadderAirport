@@ -518,19 +518,19 @@ export default function Fleet() {
       {/* Page Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">节点列表</h1>
-          <p className="text-sm text-zinc-400 mt-1 leading-normal flex flex-wrap items-center gap-x-2 gap-y-1">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">节点列表</h1>
+          <p className="text-sm text-muted-foreground mt-1 leading-normal flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>状态监控 · 批量运维 · 安装与配置</span>
             {meta?.panel_version && (
               <>
-                <span className="text-zinc-700">•</span>
-                <span>Panel <code className="font-mono text-zinc-300">{meta.panel_version}</code></span>
+                <span className="text-muted-foreground">•</span>
+                <span>Panel <code className="font-mono text-muted-foreground">{meta.panel_version}</code></span>
               </>
             )}
             {recommended && (
               <>
-                <span className="text-zinc-700">•</span>
-                <span>推荐 Agent <code className="font-mono text-zinc-300">{recommended}</code></span>
+                <span className="text-muted-foreground">•</span>
+                <span>推荐 Agent <code className="font-mono text-muted-foreground">{recommended}</code></span>
                 {outdatedNodes.length > 0 ? (
                   <Badge variant="warning">{outdatedNodes.length} 个节点可升级</Badge>
                 ) : (
@@ -543,11 +543,11 @@ export default function Fleet() {
 
         {/* Global Toolbar */}
         <div className="flex flex-wrap items-center gap-3 shrink-0">
-          <div className="flex border border-zinc-800 rounded-md bg-zinc-900/50 p-0.5">
+          <div className="flex border border-border rounded-md bg-secondary p-0.5">
             <button
               onClick={() => setViewMode('cards')}
               className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
-                view === 'cards' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+                view === 'cards' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               <Grid className="h-3.5 w-3.5" /> 卡片
@@ -555,14 +555,14 @@ export default function Fleet() {
             <button
               onClick={() => setViewMode('table')}
               className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
-                view === 'table' ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-400 hover:text-zinc-200'
+                view === 'table' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               <List className="h-3.5 w-3.5" /> 表格
             </button>
           </div>
 
-          <div className="flex items-center space-x-2 border border-zinc-800 bg-zinc-900/40 rounded-md px-3 py-1.5 text-xs text-zinc-400">
+          <div className="flex items-center space-x-2 border border-border bg-card rounded-md px-3 py-1.5 text-xs text-muted-foreground">
             <Switch
               id="auto-refresh"
               checked={auto}
@@ -602,15 +602,15 @@ export default function Fleet() {
 
       {/* Version alerts */}
       {outdatedNodes.length > 0 && recommended && (
-        <Card className="border-zinc-800 bg-zinc-900/10">
+        <Card className="border-border bg-card">
           <CardHeader className="p-5 pb-3">
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Info className="h-4 w-4 text-amber-500" />
+              <Info className="h-4 w-4 text-warning" />
               版本提醒 (推荐 Agent {recommended})
             </CardTitle>
           </CardHeader>
           <CardContent className="px-5 pb-5 space-y-3">
-            <p className="text-xs text-zinc-400 leading-relaxed">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               以下节点版本落后或未知。优先点击节点触发远程升级，如果远程方式不支持，可复制命令手动执行：
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -620,14 +620,14 @@ export default function Fleet() {
                   key={n.id}
                   disabled={batchBusy || Boolean(activeActions[n.id])}
                   onClick={() => void showUpgrade(n.id)}
-                  className="px-2.5 py-1 rounded bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300 hover:border-zinc-700 disabled:opacity-50 cursor-pointer"
+                  className="px-2.5 py-1 rounded bg-secondary border border-border text-xs font-mono text-foreground hover:bg-muted disabled:opacity-50 cursor-pointer"
                 >
                   {n.name} ({n.agent_version || '未知'})
                 </button>
               ))}
             </div>
             {meta?.agent_upgrade_command && (
-              <pre className="p-3 bg-zinc-900 border border-zinc-800 rounded-md overflow-x-auto text-[10px] font-mono text-zinc-400">
+              <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[10px] font-mono text-foreground">
                 {meta.agent_upgrade_command}
               </pre>
             )}
@@ -637,9 +637,9 @@ export default function Fleet() {
 
       {/* Manual upgrade command banner */}
       {upgradeBanner && (
-        <Card className="border-amber-900/30 bg-amber-950/5 relative">
+        <Card className="border-warning/30 bg-warning/10 relative">
           <CardHeader className="p-5 pb-2 flex flex-row items-center justify-between">
-            <CardTitle className="text-sm font-semibold text-amber-300">
+            <CardTitle className="text-sm font-semibold text-warning-foreground">
               手动升级命令 · {upgradeBanner.node.name}
               {upgradeBanner.recommended ? ` (→ ${upgradeBanner.recommended})` : ''}
             </CardTitle>
@@ -648,7 +648,7 @@ export default function Fleet() {
                 size="sm"
                 variant="outline"
                 onClick={() => void copyUpgradeBanner()}
-                className="h-8 border-amber-900/30 text-amber-400 hover:bg-amber-950/20"
+                className="h-8 border-warning/30 text-warning-foreground hover:bg-warning/20"
               >
                 {upgradeCopied ? '已复制' : '复制命令'}
               </Button>
@@ -660,17 +660,17 @@ export default function Fleet() {
                   setUpgradeBanner(null)
                   setUpgradeCopied(false)
                 }}
-                className="h-8 w-8 text-zinc-500 hover:text-zinc-300"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
               >
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </CardHeader>
           <CardContent className="p-5 pt-1 space-y-3">
-            <p className="text-xs text-zinc-400 leading-normal">
-              当前 Agent 版本为 <code className="font-mono text-zinc-300">{upgradeBanner.node.agent_version || '—'}</code>。在目标服务器以 root 用户执行以下升级命令（会自动保留现有的 Token、TLS 和业务配置）：
+            <p className="text-xs text-muted-foreground leading-normal">
+              当前 Agent 版本为 <code className="font-mono text-foreground">{upgradeBanner.node.agent_version || '—'}</code>。在目标服务器以 root 用户执行以下升级命令（会自动保留现有的 Token、TLS 和业务配置）：
             </p>
-            <pre className="p-3 bg-zinc-950 border border-zinc-900 rounded-md overflow-x-auto text-[10px] font-mono text-zinc-300">
+            <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[10px] font-mono text-foreground">
               {upgradeBanner.command}
             </pre>
           </CardContent>
@@ -679,7 +679,7 @@ export default function Fleet() {
 
       {/* Install command banner */}
       {installBanner && (
-        <Card className="border-zinc-800 bg-zinc-900/20 relative">
+        <Card className="border-border bg-card relative">
           <CardHeader className="p-5 pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-semibold">安装命令 · {installBanner.node.name}</CardTitle>
             <div className="flex items-center gap-2 shrink-0">
@@ -687,7 +687,7 @@ export default function Fleet() {
                 size="sm"
                 variant="outline"
                 onClick={() => void copyInstallBanner()}
-                className="h-8 border-zinc-800 text-zinc-300 hover:bg-zinc-900"
+                className="h-8 border-border text-foreground hover:bg-muted"
               >
                 {installCopied ? '已复制' : '复制命令'}
               </Button>
@@ -699,20 +699,20 @@ export default function Fleet() {
                   setInstallBanner(null)
                   setInstallCopied(false)
                 }}
-                className="h-8 w-8 text-zinc-500 hover:text-zinc-300"
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
               >
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </CardHeader>
           <CardContent className="p-5 pt-1 space-y-3">
-            <pre className="p-3 bg-zinc-950 border border-zinc-900 rounded-md overflow-x-auto text-[10px] font-mono text-zinc-300">
+            <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[10px] font-mono text-foreground">
               {installBanner.install_command}
             </pre>
             {installBanner.upgrade_command && (
               <div className="space-y-1 mt-2">
-                <span className="text-xs text-zinc-500 block">已装机环境的快速升级命令：</span>
-                <pre className="p-3 bg-zinc-950 border border-zinc-900 rounded-md overflow-x-auto text-[10px] font-mono text-zinc-300">
+                <span className="text-xs text-muted-foreground block">已装机环境的快速升级命令：</span>
+                <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[10px] font-mono text-foreground">
                   {installBanner.upgrade_command}
                 </pre>
               </div>
@@ -722,18 +722,18 @@ export default function Fleet() {
       )}
 
       {/* Main List Container */}
-      <Card className="border-zinc-900 bg-zinc-900/30">
+      <Card className="border-border bg-card">
         <CardContent className="p-5">
           {/* Sub Toolbar */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 pb-4 border-b border-zinc-900/60">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 pb-4 border-b border-border">
             <div className="flex flex-1 items-center gap-2 max-w-sm">
               <div className="relative flex-1">
-                <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-zinc-500" />
+                <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   value={labelFilter}
                   onChange={(e) => setLabelFilter(e.target.value)}
                   placeholder="按标签筛选..."
-                  className="pl-9 bg-zinc-950 border-zinc-900 focus-visible:ring-zinc-800"
+                  className="pl-9 bg-background border-border"
                 />
               </div>
               <Button
@@ -741,23 +741,23 @@ export default function Fleet() {
                 variant="outline"
                 onClick={toggleAllVisible}
                 disabled={nodes.length === 0}
-                className="border-zinc-800 text-zinc-400 hover:bg-zinc-900 shrink-0"
+                className="border-border text-muted-foreground hover:bg-muted shrink-0"
               >
                 {visibleAllSelected ? '取消全选' : '全选可见'}
               </Button>
             </div>
 
             {/* Batch actions container */}
-            <div className="flex items-center gap-3 bg-zinc-950/40 border border-zinc-900 px-3 py-1.5 rounded-md text-xs shrink-0">
-              <span className="text-zinc-500 font-medium">已选择 <strong className="text-zinc-300">{selected.size}</strong> 个节点</span>
-              <div className="h-3 w-px bg-zinc-800" />
+            <div className="flex items-center gap-3 bg-background border border-border px-3 py-1.5 rounded-md text-xs shrink-0">
+              <span className="text-muted-foreground font-medium">已选择 <strong className="text-foreground">{selected.size}</strong> 个节点</span>
+              <div className="h-3 w-px bg-border" />
               <div className="flex items-center gap-1.5">
                 <Button
                   size="sm"
                   variant="ghost"
                   disabled={busy || selected.size === 0}
                   onClick={() => void runBatch('apply')}
-                  className="h-7 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50 gap-1"
+                  className="h-7 text-muted-foreground hover:text-foreground hover:bg-muted gap-1"
                 >
                   <UploadCloud className="h-3.5 w-3.5" /> 下发配置
                 </Button>
@@ -766,18 +766,18 @@ export default function Fleet() {
                   variant="ghost"
                   disabled={busy || selected.size === 0}
                   onClick={() => void runBatch('start')}
-                  className="h-7 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50 gap-1"
+                  className="h-7 text-muted-foreground hover:text-foreground hover:bg-muted gap-1"
                 >
-                  <Play className="h-3.5 w-3.5 text-emerald-500" /> 启动
+                  <Play className="h-3.5 w-3.5 text-success" /> 启动
                 </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   disabled={busy || selected.size === 0}
                   onClick={() => void runBatch('stop')}
-                  className="h-7 text-zinc-400 hover:text-red-400 hover:bg-zinc-900/50 gap-1"
+                  className="h-7 text-muted-foreground hover:text-destructive hover:bg-muted gap-1"
                 >
-                  <Square className="h-3.5 w-3.5 text-red-500" /> 停止
+                  <Square className="h-3.5 w-3.5 text-destructive" /> 停止
                 </Button>
               </div>
             </div>

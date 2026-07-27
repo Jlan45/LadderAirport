@@ -290,8 +290,8 @@ export default function Inbounds() {
       {/* Page Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">入站配置管理</h1>
-          <p className="text-sm text-zinc-400 mt-1">创建协议传输模板并生成密钥凭据，再关联到业务节点下发启动</p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">入站配置管理</h1>
+          <p className="text-sm text-muted-foreground mt-1">创建协议传输模板并生成密钥凭据，再关联到业务节点下发启动</p>
         </div>
       </div>
 
@@ -302,7 +302,7 @@ export default function Inbounds() {
           <Button
             size="sm"
             variant="outline"
-            className="mt-2 text-red-400 border-red-900/30 hover:bg-red-950/20"
+            className="mt-2 text-destructive border-destructive/30 hover:bg-destructive/10"
             loading={loading}
             disabled={busy || pendingIds.size > 0}
             onClick={() => void load()}
@@ -314,19 +314,19 @@ export default function Inbounds() {
 
       {/* Editor Panel */}
       <section id="inbound-editor" className="scroll-mt-6">
-        <Card className="border-zinc-900 bg-zinc-900/30">
+        <Card className="border-border bg-card">
           <CardHeader className="p-5 pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold">
               {editingId ? '编辑入站配置' : '创建入站配置'}
             </CardTitle>
             {editingId && (
-              <Button variant="ghost" className="text-zinc-400 hover:text-zinc-200 h-8 px-3" disabled={busy} onClick={() => resetEditor()}>
+              <Button variant="ghost" className="text-muted-foreground hover:text-foreground h-8 px-3" disabled={busy} onClick={() => resetEditor()}>
                 取消编辑
               </Button>
             )}
           </CardHeader>
           <CardContent className="p-5 pt-0 space-y-6">
-            <p className="text-xs text-zinc-500 leading-relaxed">
+            <p className="text-xs text-muted-foreground leading-relaxed">
               {editingId
                 ? '修改公开的自定义参数不会重置服务端已生成的密码、UUID、证书或 Reality 密钥。保存后需至节点详情页重新下发同步。'
                 : '只需填写名称、协议和监听端口等基础项。系统会在服务端自动配置并生成对应的强密码、UUID、自签名 TLS 证书或 Reality 混淆密钥。'}
@@ -341,8 +341,8 @@ export default function Inbounds() {
             >
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="inbound-name" className="text-zinc-300">
-                    配置名称 <span className="text-red-500">*</span>
+                  <Label htmlFor="inbound-name">
+                    配置名称 <span className="text-destructive">*</span>
                   </Label>
                   <Input
                     id="inbound-name"
@@ -354,48 +354,48 @@ export default function Inbounds() {
                       if (nameError) setNameError('')
                     }}
                     placeholder="例如: ss-edge-1"
-                    className={`bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 h-9 ${
-                      nameError ? 'border-red-500 focus-visible:ring-red-500' : ''
+                    className={`h-9 ${
+                      nameError ? 'border-destructive focus-visible:ring-destructive' : ''
                     }`}
                   />
-                  {nameError && <p className="text-xs text-red-500 font-medium">{nameError}</p>}
+                  {nameError && <p className="text-xs text-destructive font-medium">{nameError}</p>}
                 </div>
 
                 <div className="flex flex-col space-y-1.5">
-                  <Label htmlFor="inbound-protocol" className="text-zinc-300">
-                    传输协议 <span className="text-red-500">*</span>
+                  <Label htmlFor="inbound-protocol">
+                    传输协议 <span className="text-destructive">*</span>
                   </Label>
                   <Select
                     disabled={busy || loading || !!editingId}
                     value={protocol}
                     onValueChange={(val) => onProtocolChange(val)}
                   >
-                    <SelectTrigger className="bg-zinc-950 border-zinc-800 h-9" id="inbound-protocol">
+                    <SelectTrigger className="h-9" id="inbound-protocol">
                       <SelectValue placeholder={loading ? '加载中…' : '请选择协议'} />
                     </SelectTrigger>
-                    <SelectContent className="bg-zinc-900 border-zinc-800">
+                    <SelectContent className="bg-popover border-border">
                       {templates.map((template) => (
-                        <SelectItem key={template.protocol} value={template.protocol} className="text-zinc-200">
+                        <SelectItem key={template.protocol} value={template.protocol} className="text-foreground">
                           {template.name} ({template.protocol})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   {editingId && (
-                    <p className="text-[10px] text-zinc-500">为保护现有凭证安全，编辑时无法修改传输协议</p>
+                    <p className="text-[10px] text-muted-foreground">为保护现有凭证安全，编辑时无法修改传输协议</p>
                   )}
                 </div>
 
                 <div className="flex flex-col space-y-1.5">
                   <Label className="text-transparent select-none" aria-hidden="true">状态</Label>
-                  <div className="flex items-center space-x-2 border border-zinc-800 bg-zinc-950 rounded-md px-3 h-9">
+                  <div className="flex items-center space-x-2 border border-border bg-background rounded-md px-3 h-9">
                     <Checkbox
                       id="inbound-enabled-chk"
                       checked={enabled}
                       disabled={busy}
                       onCheckedChange={(c) => setEnabled(Boolean(c))}
                     />
-                    <Label htmlFor="inbound-enabled-chk" className="text-xs text-zinc-300 cursor-pointer select-none">
+                    <Label htmlFor="inbound-enabled-chk" className="text-xs cursor-pointer select-none">
                       {editingId ? '保存后保持启用此配置' : '创建后立即启用配置'}
                     </Label>
                   </div>
@@ -403,9 +403,9 @@ export default function Inbounds() {
               </div>
 
               {selectedTemplate ? (
-                <div className="space-y-4 pt-4 border-t border-zinc-900">
-                  <h3 className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
-                    <Info className="h-4 w-4 text-zinc-500" />
+                <div className="space-y-4 pt-4 border-t border-border">
+                  <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                    <Info className="h-4 w-4 text-muted-foreground" />
                     {selectedTemplate.name} 特有参数配置
                   </h3>
                   <DynamicForm
@@ -427,7 +427,7 @@ export default function Inbounds() {
                 </Alert>
               ) : null}
 
-              <div className="flex gap-2 pt-2 border-t border-zinc-900">
+              <div className="flex gap-2 pt-2 border-t border-border">
                 <Button
                   type="submit"
                   loading={busy}
@@ -436,7 +436,7 @@ export default function Inbounds() {
                   {editingId ? '保存配置修改' : '生成入站配置'}
                 </Button>
                 {editingId && (
-                  <Button type="button" variant="outline" className="border-zinc-800 hover:bg-zinc-900" disabled={busy} onClick={() => resetEditor()}>
+                  <Button type="button" variant="outline" className="border-border hover:bg-muted" disabled={busy} onClick={() => resetEditor()}>
                     取消
                   </Button>
                 )}
@@ -445,30 +445,30 @@ export default function Inbounds() {
 
             {/* Generated credentials block */}
             {lastCreated && (
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5 mt-4 space-y-3">
+              <div className="rounded-lg border border-border bg-background p-5 mt-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-zinc-200">自动生成的凭据 · {lastCreated.name}</span>
+                  <span className="text-sm font-semibold text-foreground">自动生成的凭据 · {lastCreated.name}</span>
                   <div className="flex items-center gap-1.5">
                     <Button
                       size="sm"
                       variant="outline"
-                      className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5"
+                      className="border-border text-foreground hover:bg-muted gap-1.5"
                       onClick={() => void copyCredentials()}
                     >
-                      {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                       {copied ? '已复制' : '复制凭据'}
                     </Button>
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-8 w-8 text-zinc-500 hover:text-zinc-300"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={() => setLastCreated(null)}
                     >
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
-                <pre className="p-4 bg-zinc-950 border border-zinc-900 rounded-md overflow-x-auto text-xs font-mono text-zinc-300 leading-relaxed max-h-[220px]">
+                <pre className="p-4 bg-muted border border-border rounded-md overflow-x-auto text-xs font-mono text-foreground leading-relaxed max-h-[220px]">
                   {formatSecrets(lastCreated.params)}
                 </pre>
               </div>
@@ -478,14 +478,14 @@ export default function Inbounds() {
       </section>
 
       {/* Inbounds list table */}
-      <Card className="border-zinc-900 bg-zinc-900/30">
+      <Card className="border-border bg-card">
         <CardHeader className="p-5 pb-3 flex flex-row items-center justify-between">
           <CardTitle className="text-base font-semibold">
             已有配置{inbounds.length > 0 ? ` (${inbounds.length})` : ''}
           </CardTitle>
           <Button
             variant="outline"
-            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 h-8 px-3 gap-1.5"
+            className="border-border text-foreground hover:bg-muted h-8 px-3 gap-1.5"
             loading={loading}
             disabled={busy || pendingIds.size > 0}
             onClick={() => void load()}
@@ -496,7 +496,7 @@ export default function Inbounds() {
         <CardContent className="p-5 pt-0">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader className="bg-zinc-900/40 border-zinc-800">
+              <TableHeader className="bg-muted/40 border-border">
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="w-[180px]">配置名称</TableHead>
                   <TableHead className="w-[120px]">传输协议</TableHead>
@@ -505,10 +505,10 @@ export default function Inbounds() {
                   <TableHead className="w-[280px] text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody className="divide-y divide-zinc-900 border-zinc-900">
+              <TableBody className="divide-y divide-border border-border">
                 {inbounds.length === 0 ? (
                   <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={5} className="text-center py-12 text-zinc-500 font-medium">
+                    <TableCell colSpan={5} className="text-center py-12 text-muted-foreground font-medium">
                       暂无入站配置，请使用上方表单创建第一个。
                     </TableCell>
                   </TableRow>
@@ -516,12 +516,12 @@ export default function Inbounds() {
                   inbounds.map((row) => {
                     const rowPending = pendingIds.has(row.id)
                     return (
-                      <TableRow key={row.id} className="hover:bg-zinc-900/20 border-zinc-900/60">
-                        <TableCell className="font-semibold text-zinc-200">
+                      <TableRow key={row.id} className="hover:bg-muted/30 border-border">
+                        <TableCell className="font-semibold text-foreground">
                           {row.name}
                         </TableCell>
                         <TableCell>
-                          <code className="text-xs font-mono text-zinc-300">{row.protocol}</code>
+                          <code className="text-xs font-mono text-foreground">{row.protocol}</code>
                         </TableCell>
                         <TableCell>
                           <Badge variant={row.enabled ? 'success' : 'secondary'}>
@@ -530,11 +530,11 @@ export default function Inbounds() {
                         </TableCell>
                         <TableCell>
                           <div className="space-y-2">
-                            <code className="text-xs font-mono text-zinc-400 break-all block">
+                            <code className="text-xs font-mono text-muted-foreground break-all block">
                               {summarizeParams(row.params)}
                             </code>
                             {expandedId === row.id && (
-                              <pre className="p-3 bg-zinc-950 border border-zinc-900 rounded text-[10px] font-mono text-zinc-300 leading-normal max-h-[160px] overflow-y-auto">
+                              <pre className="p-3 bg-muted border border-border rounded text-[10px] font-mono text-foreground leading-normal max-h-[160px] overflow-y-auto">
                                 {formatSecrets(row.params)}
                               </pre>
                             )}
@@ -547,7 +547,7 @@ export default function Inbounds() {
                               variant="ghost"
                               disabled={rowPending}
                               onClick={() => startEdit(row)}
-                              className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                             >
                               <Edit className="h-3.5 w-3.5 mr-1" /> 编辑
                             </Button>
@@ -556,7 +556,7 @@ export default function Inbounds() {
                               variant="ghost"
                               loading={rowPending}
                               onClick={() => void onToggle(row)}
-                              className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                             >
                               {row.enabled ? '禁用' : '启用'}
                             </Button>
@@ -565,7 +565,7 @@ export default function Inbounds() {
                               variant="ghost"
                               disabled={rowPending}
                               onClick={() => setExpandedId(expandedId === row.id ? null : row.id)}
-                              className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                             >
                               {expandedId === row.id ? '隐藏凭据' : '查看凭据'}
                             </Button>
@@ -574,7 +574,7 @@ export default function Inbounds() {
                               variant="ghost"
                               disabled={rowPending}
                               onClick={() => onDelete(row)}
-                              className="h-8 px-2 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/20 cursor-pointer"
+                              className="h-8 px-2 text-xs text-destructive hover:text-destructive/80 cursor-pointer"
                             >
                               删除
                             </Button>

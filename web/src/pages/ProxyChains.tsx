@@ -3,6 +3,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { StatusBadge } from '@/components/ui/status-badge'
 import {
   Dialog,
   DialogContent,
@@ -258,15 +259,15 @@ export default function ProxyChains() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-5">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">服务端代理链</h1>
-          <p className="text-sm text-zinc-400 mt-1">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">服务端代理链</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             将 2–8 个 Agent 按顺序串联；客户端只连接入口节点，任一跳失败都会阻断流量
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void load()} loading={loading} className="border-zinc-800 gap-1.5">
+          <Button variant="outline" onClick={() => void load()} loading={loading} className="gap-1.5">
             <RefreshCw className="h-4 w-4" /> 刷新
           </Button>
           <Button onClick={openCreate} className="gap-1.5">
@@ -281,24 +282,24 @@ export default function ProxyChains() {
         </Alert>
       )}
 
-      <Alert className="border-amber-900/40 bg-amber-950/10">
-        <ShieldCheck className="h-4 w-4 text-amber-400" />
-        <AlertDescription className="text-xs text-zinc-400">
+      <Alert variant="warning">
+        <ShieldCheck className="h-4 w-4" />
+        <AlertDescription className="text-xs">
           启用前会检查所有 Agent 是否支持链式代理。部署按出口到入口逆序进行；失败时自动回滚已变更节点。
           部署成功但数据探测失败时保留配置并标记为“降级”。
         </AlertDescription>
       </Alert>
 
       {loading && chains.length === 0 ? (
-        <div className="flex items-center justify-center py-20 gap-3 text-sm text-zinc-400">
+        <div className="flex items-center justify-center py-20 gap-3 text-sm text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" /> 正在加载代理链…
         </div>
       ) : chains.length === 0 ? (
-        <Card className="border-zinc-900 bg-zinc-900/20">
+        <Card className="border-border bg-card">
           <CardContent className="py-16 text-center space-y-3">
-            <Link2 className="h-10 w-10 text-zinc-700 mx-auto" />
-            <h2 className="font-semibold text-zinc-300">暂无代理链</h2>
-            <p className="text-xs text-zinc-500">先为至少两个节点绑定入站，再创建第一条链。</p>
+            <Link2 className="h-10 w-10 text-muted-foreground mx-auto" />
+            <h2 className="font-semibold text-foreground">暂无代理链</h2>
+            <p className="text-xs text-muted-foreground">先为至少两个节点绑定入站，再创建第一条链。</p>
             <Button onClick={openCreate} className="gap-1.5"><Plus className="h-4 w-4" /> 新建代理链</Button>
           </CardContent>
         </Card>
@@ -307,21 +308,21 @@ export default function ProxyChains() {
           {chains.map((chain) => {
             const busy = pending.has(chain.id)
             return (
-              <Card key={chain.id} className="border-zinc-900 bg-zinc-900/30">
+              <Card key={chain.id} className="border-border bg-card">
                 <CardContent className="p-5 space-y-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <h2 className="font-semibold text-zinc-100">{chain.name}</h2>
-                        <StateBadge chain={chain} />
+                        <h2 className="font-semibold text-foreground">{chain.name}</h2>
+                        <StatusBadge value={chain.enabled ? chain.state : 'disabled'} />
                       </div>
-                      <p className="text-[11px] text-zinc-500 mt-1 font-mono">{chain.hops.length} hops · {chain.id}</p>
+                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">{chain.hops.length} hops · {chain.id}</p>
                     </div>
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" disabled={busy} onClick={() => openEdit(chain)} className="h-8 px-2">
                         <Edit className="h-3.5 w-3.5" />
                       </Button>
-                      <Button size="sm" variant="ghost" disabled={busy || chain.enabled} onClick={() => void operate(chain, 'delete')} className="h-8 px-2 text-red-500">
+                      <Button size="sm" variant="ghost" disabled={busy || chain.enabled} onClick={() => void operate(chain, 'delete')} className="h-8 px-2 text-destructive hover:text-destructive/80">
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -330,29 +331,29 @@ export default function ProxyChains() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     {chain.hops.map((hop, index) => (
                       <div key={`${hop.node_id}-${index}`} className="contents">
-                        <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2.5 py-2 min-w-[105px]">
-                          <span className="text-[10px] text-zinc-500 block">第 {index + 1} 跳{index === 0 ? ' · 入口' : index === chain.hops.length - 1 ? ' · 出口' : ''}</span>
-                          <span className="text-xs text-zinc-200 font-medium block truncate max-w-[145px]">
+                        <div className="rounded-md border border-border bg-background px-2.5 py-2 min-w-[105px]">
+                          <span className="text-[10px] text-muted-foreground block">第 {index + 1} 跳{index === 0 ? ' · 入口' : index === chain.hops.length - 1 ? ' · 出口' : ''}</span>
+                          <span className="text-xs text-foreground font-medium block truncate max-w-[145px]">
                             {nodeByID.get(hop.node_id)?.name ?? hop.node_id}
                           </span>
-                          <span className="text-[10px] text-zinc-500 font-mono block truncate max-w-[145px]">
+                          <span className="text-[10px] text-muted-foreground font-mono block truncate max-w-[145px]">
                             {inboundName(inbounds, hop.inbound_id)}
                           </span>
                         </div>
-                        {index < chain.hops.length - 1 && <ArrowDown className="h-3.5 w-3.5 text-zinc-600 -rotate-90" />}
+                        {index < chain.hops.length - 1 && <ArrowDown className="h-3.5 w-3.5 text-muted-foreground -rotate-90" />}
                       </div>
                     ))}
                   </div>
 
                   {(chain.last_probe_unix > 0 || chain.last_probe_error) && (
-                    <div className="rounded-md bg-zinc-950/50 border border-zinc-900 px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
-                      <span className="text-zinc-400 flex items-center gap-1">
+                    <div className="rounded-md bg-background border border-border px-3 py-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
+                      <span className="text-muted-foreground flex items-center gap-1">
                         <Gauge className="h-3.5 w-3.5" />
                         {chain.last_probe_delay_ms > 0 ? `${chain.last_probe_delay_ms} ms` : '无延迟数据'}
                       </span>
-                      <span className="text-zinc-500">{formatTime(chain.last_probe_unix)}</span>
+                      <span className="text-muted-foreground">{formatTime(chain.last_probe_unix)}</span>
                       {chain.last_probe_error && (
-                        <span className="basis-full text-red-400">
+                        <span className="basis-full text-destructive">
                           {chain.failed_hop_index >= 0 ? `疑似第 ${chain.failed_hop_index + 1} 跳：` : ''}
                           {chain.last_probe_error}
                         </span>
@@ -360,9 +361,9 @@ export default function ProxyChains() {
                     </div>
                   )}
 
-                  <div className="flex flex-wrap gap-2 pt-1 border-t border-zinc-900">
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
                     {chain.enabled ? (
-                      <Button size="sm" variant="outline" loading={busy} disabled={busy} onClick={() => void operate(chain, 'disable')} className="h-8 gap-1.5 border-zinc-800">
+                      <Button size="sm" variant="outline" loading={busy} disabled={busy} onClick={() => void operate(chain, 'disable')} className="h-8 gap-1.5">
                         <Power className="h-3.5 w-3.5" /> 停用
                       </Button>
                     ) : (
@@ -370,7 +371,7 @@ export default function ProxyChains() {
                         <CirclePlay className="h-3.5 w-3.5" /> 部署并启用
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" loading={busy} disabled={busy || !chain.enabled} onClick={() => void operate(chain, 'probe')} className="h-8 gap-1.5 border-zinc-800">
+                    <Button size="sm" variant="outline" loading={busy} disabled={busy || !chain.enabled} onClick={() => void operate(chain, 'probe')} className="h-8 gap-1.5">
                       <Gauge className="h-3.5 w-3.5" /> 完整链路探测
                     </Button>
                   </div>
@@ -381,97 +382,89 @@ export default function ProxyChains() {
         </div>
       )}
 
-      <Dialog open={editor.open} onOpenChange={(open) => !open && !saving && setEditor((current) => ({ ...current, open: false }))}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5">
+      <Dialog open={editor.open} onOpenChange={(open) => setEditor((current) => ({ ...current, open }))}>
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto bg-background border-border text-foreground p-6 space-y-5">
           <DialogHeader>
             <DialogTitle>{editor.id ? '编辑代理链' : '新建代理链'}</DialogTitle>
           </DialogHeader>
           {editorError && <Alert variant="destructive"><AlertDescription>{editorError}</AlertDescription></Alert>}
-          <div className="space-y-1.5">
-            <Label htmlFor="chain-name">链名称</Label>
-            <Input id="chain-name" value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} placeholder="例：上海入口 → 香港中继 → 日本出口" className="bg-zinc-900 border-zinc-800" />
+          <div className="space-y-2">
+            <Label htmlFor="chain-name">代理链名称</Label>
+            <Input id="chain-name" value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} placeholder="例：上海入口 → 香港中继 → 日本出口" />
           </div>
 
           <div className="space-y-3">
-            {editor.hops.map((hop, index) => {
-              const available = inbounds.filter((inbound) => inbound.enabled)
-              return (
-                <div key={index} className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-4 space-y-3">
+            <Label>链路跳序 (Hops)</Label>
+            <div className="space-y-3">
+              {editor.hops.map((hop, index) => (
+                <div key={index} className="rounded-lg border border-border bg-card p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="border-zinc-700">第 {index + 1} 跳</Badge>
-                      <span className="text-xs text-zinc-500">{index === 0 ? '客户端入口' : index === editor.hops.length - 1 ? '公网出口' : '中继节点'}</span>
+                      <Badge variant="outline" className="border-border">第 {index + 1} 跳</Badge>
+                      <span className="text-xs text-muted-foreground">{index === 0 ? '客户端入口' : index === editor.hops.length - 1 ? '公网出口' : '中继节点'}</span>
                     </div>
-                    <div className="flex gap-1">
-                      <Button type="button" size="sm" variant="ghost" disabled={index === 0} onClick={() => moveHop(index, -1)} className="h-7 px-2"><ArrowUp className="h-3.5 w-3.5" /></Button>
-                      <Button type="button" size="sm" variant="ghost" disabled={index === editor.hops.length - 1} onClick={() => moveHop(index, 1)} className="h-7 px-2"><ArrowDown className="h-3.5 w-3.5" /></Button>
-                      <Button type="button" size="sm" variant="ghost" disabled={editor.hops.length <= 2} onClick={() => removeHop(index)} className="h-7 px-2 text-red-500"><Trash2 className="h-3.5 w-3.5" /></Button>
+                    <div className="flex items-center gap-1">
+                      <Button type="button" size="sm" variant="ghost" disabled={index === 0} onClick={() => moveHop(index, -1)} className="h-7 w-7 p-0"><ArrowUp className="h-3.5 w-3.5" /></Button>
+                      <Button type="button" size="sm" variant="ghost" disabled={index === editor.hops.length - 1} onClick={() => moveHop(index, 1)} className="h-7 w-7 p-0"><ArrowDown className="h-3.5 w-3.5" /></Button>
+                      <Button type="button" size="sm" variant="ghost" disabled={editor.hops.length <= 2} onClick={() => removeHop(index)} className="h-7 w-7 p-0 text-destructive"><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <Label className="text-xs text-zinc-400">节点</Label>
+                      <Label className="text-xs text-muted-foreground">节点</Label>
                       <select
                         value={hop.node_id}
                         onChange={(event) => updateHop(index, { node_id: event.target.value, inbound_id: '' })}
-                        className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100"
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"
                       >
-                        <option value="">选择节点</option>
-                        {nodes.map((node) => <option key={node.id} value={node.id}>{node.name} · {node.address}</option>)}
+                        <option value="">请选择节点…</option>
+                        {nodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-zinc-400">链专用入站</Label>
+                      <Label className="text-xs text-muted-foreground">链专用入站</Label>
                       <select
                         value={hop.inbound_id}
                         disabled={!hop.node_id}
                         onChange={(event) => updateHop(index, { inbound_id: event.target.value })}
-                        className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 disabled:opacity-50"
+                        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground disabled:opacity-50"
                       >
-                        <option value="">{available.length === 0 ? '暂无可用链专用入站' : '选择入站'}</option>
-                        {available.map((inbound) => <option key={inbound.id} value={inbound.id}>{inbound.name} · {inbound.protocol}</option>)}
+                        <option value="">请选择本节点专用入站…</option>
+                        {inbounds.map((inbound) => <option key={inbound.id} value={inbound.id}>{inbound.name} ({inbound.protocol.toUpperCase()})</option>)}
                       </select>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-zinc-400">本跳接入地址（可选覆盖）</Label>
-                      <Input value={hop.dial_address} onChange={(event) => updateHop(index, { dial_address: event.target.value })} placeholder="留空使用本节点公网地址" className="bg-zinc-950 border-zinc-800" />
+                      <Label className="text-xs text-muted-foreground">本跳接入地址（可选覆盖）</Label>
+                      <Input value={hop.dial_address} onChange={(event) => updateHop(index, { dial_address: event.target.value })} placeholder="留空使用本节点公网地址" />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-zinc-400">本跳接入端口（可选覆盖）</Label>
-                      <Input type="number" min={0} max={65535} value={hop.dial_port || ''} onChange={(event) => updateHop(index, { dial_port: Number(event.target.value) || 0 })} placeholder="留空使用入站公网端口" className="bg-zinc-950 border-zinc-800" />
+                      <Label className="text-xs text-muted-foreground">本跳接入端口（可选覆盖）</Label>
+                      <Input type="number" min={0} max={65535} value={hop.dial_port || ''} onChange={(event) => updateHop(index, { dial_port: Number(event.target.value) || 0 })} placeholder="留空使用入站公网端口" />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2">
+                  <div className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2">
                     <div>
-                      <Label htmlFor={`skip-tls-${index}`} className="text-xs text-zinc-300">连接本跳时跳过 TLS 证书校验</Label>
-                      <p className="text-[10px] text-zinc-500">默认关闭；仅用于自签名或测试证书</p>
+                      <Label htmlFor={`skip-tls-${index}`} className="text-xs text-foreground">连接本跳时跳过 TLS 证书校验</Label>
+                      <p className="text-[10px] text-muted-foreground">默认关闭；仅用于自签名或测试证书</p>
                     </div>
                     <Switch id={`skip-tls-${index}`} checked={hop.tls_skip_verify} onCheckedChange={(value) => updateHop(index, { tls_skip_verify: value })} />
                   </div>
                 </div>
-              )
-            })}
-            <Button type="button" variant="outline" disabled={editor.hops.length >= 8} onClick={() => setEditor((current) => ({ ...current, hops: [...current.hops, { ...EMPTY_HOP }] }))} className="w-full border-dashed border-zinc-700 gap-1.5">
-              <Plus className="h-4 w-4" /> 添加一跳（最多 8 跳）
+              ))}
+            </div>
+            <Button type="button" variant="outline" disabled={editor.hops.length >= 8} onClick={() => setEditor((current) => ({ ...current, hops: [...current.hops, { ...EMPTY_HOP }] }))} className="w-full border-dashed border-border gap-1.5">
+              <Plus className="h-4 w-4" /> 添加下一跳
             </Button>
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" disabled={saving} onClick={() => setEditor((current) => ({ ...current, open: false }))} className="border-zinc-800">取消</Button>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" disabled={saving} onClick={() => setEditor((current) => ({ ...current, open: false }))} className="border-border">取消</Button>
             <Button loading={saving} onClick={() => void save()}>{editor.id ? '保存并按需重新部署' : '创建代理链'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   )
-}
-
-function StateBadge({ chain }: { chain: ProxyChain }) {
-  if (!chain.enabled || chain.state === 'disabled') return <Badge variant="secondary">已停用</Badge>
-  if (chain.state === 'healthy') return <Badge variant="success">健康</Badge>
-  if (chain.state === 'degraded') return <Badge variant="destructive">降级</Badge>
-  if (chain.state === 'deploying') return <Badge variant="warning">部署中</Badge>
-  return <Badge variant="outline">{chain.state}</Badge>
 }
 
 function inboundName(inbounds: InboundConfig[] | undefined, id: string): string {

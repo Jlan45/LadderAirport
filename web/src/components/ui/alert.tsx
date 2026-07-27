@@ -11,10 +11,10 @@ export const Alert = React.forwardRef<
     className={cn(
       'relative w-full rounded-lg border px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground [&>svg~*]:pl-7',
       {
-        'bg-background text-foreground': variant === 'default',
-        'border-red-900/50 bg-red-950/20 text-red-500 [&>svg]:text-red-500': variant === 'destructive',
-        'border-amber-900/50 bg-amber-950/20 text-amber-500 [&>svg]:text-amber-500': variant === 'warning',
-        'border-emerald-900/50 bg-emerald-950/20 text-emerald-500 [&>svg]:text-emerald-500': variant === 'success',
+        'bg-background text-foreground border-border': variant === 'default',
+        'border-destructive/30 bg-destructive/10 text-destructive [&>svg]:text-destructive': variant === 'destructive',
+        'border-warning/30 bg-warning/10 text-warning-foreground [&>svg]:text-warning': variant === 'warning',
+        'border-success/30 bg-success/10 text-success-foreground [&>svg]:text-success': variant === 'success',
       },
       className
     )}

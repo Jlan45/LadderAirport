@@ -36,10 +36,10 @@ export function statusLabel(s?: string): string {
   }
 }
 
-/** Map connectivity status to TDesign Tag theme. */
-export function statusTheme(s?: string): 'success' | 'danger' | 'warning' | 'default' {
+/** Map connectivity status to Badge theme. */
+export function statusTheme(s?: string): 'success' | 'destructive' | 'warning' | 'default' {
   if (s === 'online' || s === 'running') return 'success'
-  if (s === 'unreachable' || s === 'unauthorized') return 'danger'
+  if (s === 'unreachable' || s === 'unauthorized') return 'destructive'
   if (s === 'pending') return 'warning'
   return 'default'
 }
@@ -61,9 +61,9 @@ export function runtimeLabel(s?: string): string {
   }
 }
 
-export function runtimeTheme(s?: string): 'success' | 'danger' | 'default' {
+export function runtimeTheme(s?: string): 'success' | 'destructive' | 'default' {
   if (s === 'running') return 'success'
-  if (s === 'error') return 'danger'
+  if (s === 'error') return 'destructive'
   return 'default'
 }
 

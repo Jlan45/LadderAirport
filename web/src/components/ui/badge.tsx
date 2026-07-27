@@ -13,11 +13,11 @@ export function Badge({ className, variant = 'default', ...props }: BadgeProps) 
         {
           'border-transparent bg-primary text-primary-foreground shadow': variant === 'default',
           'border-transparent bg-secondary text-secondary-foreground': variant === 'secondary',
-          'border-transparent bg-red-950/80 text-red-400 border border-red-900/50': variant === 'destructive',
-          'border-transparent bg-emerald-950/80 text-emerald-400 border border-emerald-900/50': variant === 'success',
-          'border-transparent bg-blue-950/80 text-blue-400 border border-blue-900/50': variant === 'info',
-          'border-transparent bg-amber-950/80 text-amber-400 border border-amber-900/50': variant === 'warning',
-          'text-foreground': variant === 'outline',
+          'bg-destructive/15 text-destructive border-destructive/30': variant === 'destructive',
+          'bg-success/15 text-success-foreground border-success/30': variant === 'success',
+          'bg-info/15 text-info-foreground border-info/30': variant === 'info',
+          'bg-warning/15 text-warning-foreground border-warning/30': variant === 'warning',
+          'text-foreground border-border': variant === 'outline',
         },
         className
       )}

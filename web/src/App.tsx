@@ -153,8 +153,8 @@ function AppLayout() {
 
   if (!ready) {
     return (
-      <div className="flex flex-col gap-3 items-center justify-center min-h-screen bg-zinc-950 text-zinc-400">
-        <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
+      <div className="flex flex-col gap-3 items-center justify-center min-h-screen bg-background text-muted-foreground">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         <span className="text-sm font-medium">正在验证会话…</span>
       </div>
     )
@@ -163,14 +163,14 @@ function AppLayout() {
   if (!authed) return null
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col selection:bg-zinc-800 selection:text-zinc-100">
+    <div className="min-h-screen bg-background text-foreground flex flex-col selection:bg-accent selection:text-foreground">
       <a className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-primary text-primary-foreground p-3 rounded-md z-50" href="#main-content">
         跳到主要内容
       </a>
-      <header className="sticky top-0 z-40 w-full border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-md">
+      <header className="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
           <div className="flex items-center gap-6">
-            <Link className="flex items-center gap-2.5 text-sm font-bold tracking-tight text-zinc-100 hover:opacity-90 group" to="/" aria-label="Ladder Airport 节点管理">
+            <Link className="flex items-center gap-2.5 text-sm font-bold tracking-tight text-foreground hover:opacity-90 group" to="/" aria-label="Ladder Airport 节点管理">
               <div className="relative flex items-center justify-center rounded-md overflow-hidden transition-all duration-300 group-hover:scale-105 shadow-[0_0_10px_rgba(6,182,212,0.4)] dark:shadow-[0_0_12px_rgba(168,85,247,0.45)]">
                 <img src={theme === 'dark' ? LOGO_DARK_BASE64 : LOGO_LIGHT_BASE64} alt="Logo" className="w-8 h-8 object-contain" />
               </div>
@@ -183,8 +183,8 @@ function AppLayout() {
                   to={item.path}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                     active === item.path
-                      ? 'bg-zinc-900 text-zinc-100 border border-zinc-800/60'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+                      ? 'bg-secondary text-secondary-foreground border border-border/60'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}
                   aria-current={active === item.path ? 'page' : undefined}
                 >
@@ -202,14 +202,14 @@ function AppLayout() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50 cursor-pointer"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer"
                     onClick={toggleTheme}
                     aria-label={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
                   >
                     {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent className="bg-zinc-900 border-zinc-800 text-zinc-200">
+                <TooltipContent className="bg-popover border-border text-popover-foreground">
                   {theme === 'dark' ? '浅色模式' : '深色模式'}
                 </TooltipContent>
               </Tooltip>
@@ -219,7 +219,7 @@ function AppLayout() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer"
                     loading={loggingOut}
                     onClick={() => void onLogout()}
                     aria-label="退出登录"
@@ -227,7 +227,7 @@ function AppLayout() {
                     {!loggingOut && <LogOut className="h-4 w-4" />}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent className="bg-zinc-900 border-zinc-800 text-zinc-200">退出登录</TooltipContent>
+                <TooltipContent className="bg-popover border-border text-popover-foreground">退出登录</TooltipContent>
               </Tooltip>
             </div>
           </TooltipProvider>

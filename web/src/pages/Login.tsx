@@ -69,16 +69,16 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 selection:bg-zinc-800 selection:text-zinc-100">
-      <Card className="w-full max-w-md bg-zinc-900 border-zinc-800 shadow-xl overflow-hidden">
-        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-zinc-800 via-zinc-400 to-zinc-800" />
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 selection:bg-accent selection:text-foreground">
+      <Card className="w-full max-w-md bg-card border-border shadow-xl overflow-hidden relative">
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-primary/20 via-primary to-primary/20" />
         <CardHeader className="space-y-4 pt-8 pb-4 text-center">
           <div className="flex justify-center" aria-hidden="true">
             <img src={logo} alt="Logo" className="w-12 h-12 object-contain rounded-lg" />
           </div>
           <div className="space-y-1.5">
-            <CardTitle className="text-2xl font-bold tracking-tight text-zinc-100">Ladder Airport</CardTitle>
-            <CardDescription className="text-sm text-zinc-400">登录运维控制台</CardDescription>
+            <CardTitle className="text-2xl font-bold tracking-tight text-foreground">Ladder Airport</CardTitle>
+            <CardDescription className="text-sm text-muted-foreground">登录运维控制台</CardDescription>
           </div>
         </CardHeader>
 
@@ -97,7 +97,7 @@ export default function Login() {
             className="space-y-4"
           >
             <div className="space-y-1.5">
-              <Label htmlFor="login-password font-medium" className="text-zinc-300">
+              <Label htmlFor="login-password font-medium">
                 密码
               </Label>
               <Input
@@ -109,7 +109,6 @@ export default function Login() {
                 placeholder="请输入管理员密码"
                 autoFocus
                 disabled={busy}
-                className="bg-zinc-950 border-zinc-800 focus-visible:ring-zinc-700 text-zinc-100"
               />
             </div>
 

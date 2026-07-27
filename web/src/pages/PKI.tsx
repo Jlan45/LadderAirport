@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { StatusBadge } from '@/components/ui/status-badge'
 import {
   Table,
   TableBody,
@@ -77,7 +77,7 @@ export default function PKI() {
 
   if (loading && status === null) {
     return (
-      <div className="flex min-h-[320px] items-center justify-center text-zinc-500">
+      <div className="flex min-h-[320px] items-center justify-center text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" />
       </div>
     )
@@ -88,7 +88,7 @@ export default function PKI() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">管理面证书中心</h1>
-          <p className="mt-1 text-sm text-zinc-500">统一签发 Panel ↔ Agent mTLS 证书；不用于代理入站或公网域名。</p>
+          <p className="mt-1 text-sm text-muted-foreground">统一签发 Panel ↔ Agent mTLS 证书；不用于代理入站或公网域名。</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void load()} loading={loading}>
           {!loading && <RefreshCw className="mr-2 h-4 w-4" />}
@@ -115,19 +115,19 @@ export default function PKI() {
 
       <div className="grid gap-4 md:grid-cols-3">
         <StatusCard
-          icon={<ShieldCheck className="h-5 w-5 text-emerald-400" />}
+          icon={<ShieldCheck className="h-5 w-5 text-success" />}
           title="有效证书"
           value={String(status?.active_certificates ?? 0)}
           detail={`7 天内到期 ${status?.expiring_certificates ?? 0}`}
         />
         <StatusCard
-          icon={<KeyRound className="h-5 w-5 text-blue-400" />}
+          icon={<KeyRound className="h-5 w-5 text-info" />}
           title="中间 CA 到期"
           value={formatTime(status?.intermediate_not_after_unix ?? 0)}
           detail={status?.intermediate_subject ?? '—'}
         />
         <StatusCard
-          icon={<ShieldCheck className="h-5 w-5 text-violet-400" />}
+          icon={<ShieldCheck className="h-5 w-5 text-primary" />}
           title="根 CA 到期"
           value={formatTime(status?.root_not_after_unix ?? 0)}
           detail={status?.root_subject ?? '—'}
@@ -141,7 +141,7 @@ export default function PKI() {
         </CardHeader>
         <CardContent>
           {certificates.length === 0 ? (
-            <div className="py-10 text-center text-sm text-zinc-500">尚未签发 Agent 管理证书。</div>
+            <div className="py-10 text-center text-sm text-muted-foreground">尚未签发 Agent 管理证书。</div>
           ) : (
             <Table>
               <TableHeader>
@@ -158,20 +158,20 @@ export default function PKI() {
                   <TableRow key={cert.serial}>
                     <TableCell>
                       <div className="font-medium">{nodeNames.get(cert.node_id ?? '') || cert.node_id || cert.subject}</div>
-                      <div className="mt-1 max-w-[360px] truncate font-mono text-xs text-zinc-500">{cert.uri_san}</div>
+                      <div className="mt-1 max-w-[360px] truncate font-mono text-xs text-muted-foreground">{cert.uri_san}</div>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{shortSerial(cert.serial)}</TableCell>
                     <TableCell>
                       <div>{formatTime(cert.not_after_unix)}</div>
-                      <div className="mt-1 text-xs text-zinc-500">签发 {formatTime(cert.created_at_unix)}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">签发 {formatTime(cert.created_at_unix)}</div>
                     </TableCell>
-                    <TableCell><CertificateBadge status={cert.status} /></TableCell>
+                    <TableCell><StatusBadge value={cert.status} /></TableCell>
                     <TableCell className="text-right">
                       {cert.status === 'active' && (
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="text-red-400 hover:text-red-300"
+                          className="text-destructive hover:text-destructive/80"
                           loading={revoking === cert.serial}
                           onClick={() => void revoke(cert)}
                         >
@@ -202,17 +202,10 @@ function StatusCard({ icon, title, value, detail }: { icon: React.ReactNode; tit
       </CardHeader>
       <CardContent>
         <div className="text-xl font-semibold">{value}</div>
-        <div className="mt-2 truncate text-xs text-zinc-500" title={detail}>{detail}</div>
+        <div className="mt-2 truncate text-xs text-muted-foreground" title={detail}>{detail}</div>
       </CardContent>
     </Card>
   )
-}
-
-function CertificateBadge({ status }: { status: PKICertificate['status'] }) {
-  if (status === 'active') return <Badge variant="success">有效</Badge>
-  if (status === 'revoked') return <Badge variant="destructive">已吊销</Badge>
-  if (status === 'replaced') return <Badge variant="secondary">已替换</Badge>
-  return <Badge variant="warning">已过期</Badge>
 }
 
 function shortSerial(serial: string) {
