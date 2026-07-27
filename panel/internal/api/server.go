@@ -12,10 +12,13 @@ import (
 	"strings"
 	"time"
 
+	acmeservice "github.com/ladderairport/panel/internal/acme"
 	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/dnsprovider"
 	"github.com/ladderairport/panel/internal/nodeclient"
 	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/panel/internal/proxychain"
+	"github.com/ladderairport/panel/internal/secretstore"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
 	"github.com/ladderairport/panel/web"
@@ -56,6 +59,10 @@ type Server struct {
 	Timeout time.Duration
 	Chains  *proxychain.Service
 	PKI     *pki.Manager
+	// Secrets encrypts DNS provider and ACME account credentials.
+	Secrets      *secretstore.Store
+	DNSProviders *dnsprovider.Registry
+	ACME         *acmeservice.Service
 }
 
 // Handler returns an http.Handler with all routes, auth middleware, and embedded SPA.
@@ -196,6 +203,31 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/pki/certificates", s.handleListPKICertificates)
 	mux.HandleFunc("POST /api/v1/pki/certificates/{serial}/revoke", s.handleRevokePKICertificate)
 	mux.HandleFunc("GET /api/v1/pki/audit-logs", s.handleListPKIAuditLogs)
+
+	mux.HandleFunc("GET /api/v1/dns/providers", s.handleListDNSProviders)
+	mux.HandleFunc("GET /api/v1/dns/accounts", s.handleListDNSAccounts)
+	mux.HandleFunc("POST /api/v1/dns/accounts", s.handleCreateDNSAccount)
+	mux.HandleFunc("PUT /api/v1/dns/accounts/{id}", s.handleUpdateDNSAccount)
+	mux.HandleFunc("DELETE /api/v1/dns/accounts/{id}", s.handleDeleteDNSAccount)
+	mux.HandleFunc("POST /api/v1/dns/accounts/{id}/test", s.handleTestDNSAccount)
+	mux.HandleFunc("GET /api/v1/managed-domains", s.handleListManagedDomains)
+	mux.HandleFunc("POST /api/v1/managed-domains", s.handleCreateManagedDomain)
+	mux.HandleFunc("PUT /api/v1/managed-domains/{id}", s.handleUpdateManagedDomain)
+	mux.HandleFunc("DELETE /api/v1/managed-domains/{id}", s.handleDeleteManagedDomain)
+	mux.HandleFunc("POST /api/v1/managed-domains/{id}/reconcile", s.handleReconcileManagedDomain)
+	mux.HandleFunc("GET /api/v1/acme/accounts", s.handleListACMEAccounts)
+	mux.HandleFunc("POST /api/v1/acme/accounts", s.handleCreateACMEAccount)
+	mux.HandleFunc("PUT /api/v1/acme/accounts/{id}", s.handleUpdateACMEAccount)
+	mux.HandleFunc("DELETE /api/v1/acme/accounts/{id}", s.handleDeleteACMEAccount)
+	mux.HandleFunc("POST /api/v1/acme/accounts/{id}/register", s.handleRegisterACMEAccount)
+	mux.HandleFunc("GET /api/v1/protocol-certificates", s.handleListProtocolCertificates)
+	mux.HandleFunc("POST /api/v1/protocol-certificates", s.handleCreateProtocolCertificate)
+	mux.HandleFunc("DELETE /api/v1/protocol-certificates/{id}", s.handleDeleteProtocolCertificate)
+	mux.HandleFunc("POST /api/v1/protocol-certificates/{id}/issue", s.handleIssueProtocolCertificate)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/inbounds/{inbound_id}/tls", s.handleGetNodeInboundTLS)
+	mux.HandleFunc("PUT /api/v1/nodes/{id}/inbounds/{inbound_id}/tls", s.handlePutNodeInboundTLS)
+	mux.HandleFunc("GET /api/v1/automation/jobs", s.handleListAutomationJobs)
+	mux.HandleFunc("GET /api/v1/automation/audit-logs", s.handleListAutomationAudits)
 
 	mux.HandleFunc("GET /api/v1/subscriptions", s.handleListSubscriptions)
 	mux.HandleFunc("POST /api/v1/subscriptions", s.handleCreateSubscription)

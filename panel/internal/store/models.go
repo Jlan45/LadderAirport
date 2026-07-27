@@ -278,3 +278,137 @@ type PKIAuditLog struct {
 	Detail        string `json:"detail,omitempty"`
 	CreatedAtUnix int64  `json:"created_at_unix"`
 }
+
+// DNSAccount is a provider credential container. CredentialsCiphertext is an
+// encrypted envelope and is never serialized to API clients.
+type DNSAccount struct {
+	ID                    string         `json:"id"`
+	Name                  string         `json:"name"`
+	Provider              string         `json:"provider"`
+	CredentialsCiphertext string         `json:"-"`
+	HasCredentials        bool           `json:"has_credentials"`
+	Settings              map[string]any `json:"settings"`
+	Enabled               bool           `json:"enabled"`
+	LastTestUnix          int64          `json:"last_test_unix"`
+	LastTestError         string         `json:"last_test_error,omitempty"`
+	CreatedAtUnix         int64          `json:"created_at_unix"`
+	UpdatedAtUnix         int64          `json:"updated_at_unix"`
+}
+
+// ManagedDomain describes the desired DNS endpoint for one node.
+type ManagedDomain struct {
+	ID                   string   `json:"id"`
+	NodeID               string   `json:"node_id"`
+	DNSAccountID         string   `json:"dns_account_id"`
+	Zone                 string   `json:"zone"`
+	FQDN                 string   `json:"fqdn"`
+	RecordMode           string   `json:"record_mode"`    // a | aaaa | dual
+	AddressSource        string   `json:"address_source"` // manual | node_address | agent_public
+	ManualIPv4           string   `json:"manual_ipv4,omitempty"`
+	ManualIPv6           string   `json:"manual_ipv6,omitempty"`
+	TTL                  int      `json:"ttl"`
+	Enabled              bool     `json:"enabled"`
+	State                string   `json:"state"`
+	DesiredIPv4          string   `json:"desired_ipv4,omitempty"`
+	DesiredIPv6          string   `json:"desired_ipv6,omitempty"`
+	ObservedIPv4         []string `json:"observed_ipv4"`
+	ObservedIPv6         []string `json:"observed_ipv6"`
+	ProviderRecordAID    string   `json:"provider_record_a_id,omitempty"`
+	ProviderRecordAAAAID string   `json:"provider_record_aaaa_id,omitempty"`
+	CreatedAByPanel      bool     `json:"created_a_by_panel"`
+	CreatedAAAAByPanel   bool     `json:"created_aaaa_by_panel"`
+	LastReconcileUnix    int64    `json:"last_reconcile_unix"`
+	NextReconcileUnix    int64    `json:"next_reconcile_unix"`
+	RetryCount           int      `json:"retry_count"`
+	LastError            string   `json:"last_error,omitempty"`
+	CreatedAtUnix        int64    `json:"created_at_unix"`
+	UpdatedAtUnix        int64    `json:"updated_at_unix"`
+}
+
+// ACMEAccount stores public registration metadata and encrypted account/EAB keys.
+type ACMEAccount struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	DirectoryURL         string `json:"directory_url"`
+	Email                string `json:"email,omitempty"`
+	AccountKeyCiphertext string `json:"-"`
+	HasAccountKey        bool   `json:"has_account_key"`
+	RegistrationURI      string `json:"registration_uri,omitempty"`
+	EABKeyID             string `json:"eab_key_id,omitempty"`
+	EABHMACCiphertext    string `json:"-"`
+	HasEABHMAC           bool   `json:"has_eab_hmac"`
+	TermsAcceptedUnix    int64  `json:"terms_accepted_unix"`
+	Status               string `json:"status"`
+	LastError            string `json:"last_error,omitempty"`
+	CreatedAtUnix        int64  `json:"created_at_unix"`
+	UpdatedAtUnix        int64  `json:"updated_at_unix"`
+}
+
+// ProtocolCertificate tracks public certificate state. Its private key is
+// represented only by an opaque Agent key ID and Agent-local paths.
+type ProtocolCertificate struct {
+	ID                   string   `json:"id"`
+	NodeID               string   `json:"node_id"`
+	ManagedDomainID      string   `json:"managed_domain_id"`
+	ACMEAccountID        string   `json:"acme_account_id"`
+	Domains              []string `json:"domains"`
+	Status               string   `json:"status"`
+	AgentKeyID           string   `json:"agent_key_id,omitempty"`
+	PublicKeyFingerprint string   `json:"public_key_fingerprint,omitempty"`
+	CandidateCertPath    string   `json:"candidate_cert_path,omitempty"`
+	CandidateKeyPath     string   `json:"candidate_key_path,omitempty"`
+	ActiveCertPath       string   `json:"active_cert_path,omitempty"`
+	ActiveKeyPath        string   `json:"active_key_path,omitempty"`
+	CertPEM              string   `json:"-"`
+	Serial               string   `json:"serial,omitempty"`
+	Fingerprint          string   `json:"fingerprint,omitempty"`
+	NotBeforeUnix        int64    `json:"not_before_unix"`
+	NotAfterUnix         int64    `json:"not_after_unix"`
+	RenewAfterUnix       int64    `json:"renew_after_unix"`
+	Revision             int64    `json:"revision"`
+	RetryCount           int      `json:"retry_count"`
+	NextRetryUnix        int64    `json:"next_retry_unix"`
+	LastError            string   `json:"last_error,omitempty"`
+	CreatedAtUnix        int64    `json:"created_at_unix"`
+	UpdatedAtUnix        int64    `json:"updated_at_unix"`
+}
+
+// NodeInboundTLSBinding selects legacy or Panel-managed TLS for one concrete
+// node/inbound deployment.
+type NodeInboundTLSBinding struct {
+	NodeID          string `json:"node_id"`
+	InboundID       string `json:"inbound_id"`
+	Mode            string `json:"mode"` // legacy | managed
+	ManagedDomainID string `json:"managed_domain_id,omitempty"`
+	CertificateID   string `json:"certificate_id,omitempty"`
+	CreatedAtUnix   int64  `json:"created_at_unix"`
+	UpdatedAtUnix   int64  `json:"updated_at_unix"`
+}
+
+// AutomationJob is a persistent, leased DNS/certificate operation.
+type AutomationJob struct {
+	ID               string         `json:"id"`
+	Type             string         `json:"type"`
+	TargetType       string         `json:"target_type"`
+	TargetID         string         `json:"target_id"`
+	State            string         `json:"state"`
+	Payload          map[string]any `json:"payload"`
+	Attempt          int            `json:"attempt"`
+	NextRunUnix      int64          `json:"next_run_unix"`
+	LeaseOwner       string         `json:"lease_owner,omitempty"`
+	LeaseExpiresUnix int64          `json:"lease_expires_unix,omitempty"`
+	LastError        string         `json:"last_error,omitempty"`
+	CreatedAtUnix    int64          `json:"created_at_unix"`
+	UpdatedAtUnix    int64          `json:"updated_at_unix"`
+}
+
+type AutomationAuditLog struct {
+	ID            string `json:"id"`
+	Action        string `json:"action"`
+	TargetType    string `json:"target_type,omitempty"`
+	TargetID      string `json:"target_id,omitempty"`
+	Actor         string `json:"actor,omitempty"`
+	Outcome       string `json:"outcome,omitempty"`
+	Detail        string `json:"detail,omitempty"`
+	CreatedAtUnix int64  `json:"created_at_unix"`
+}

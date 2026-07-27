@@ -91,6 +91,10 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 			})
 		}
 	}
+	inbounds, err = b.applyManagedTLS(nodeID, inbounds)
+	if err != nil {
+		return Result{}, err
+	}
 	raw, err := converter.Convert(inbounds, converter.ConvertOptions{
 		BindInterface: node.EgressInterface,
 		AllowEmpty:    true,
@@ -100,6 +104,101 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 		return Result{}, err
 	}
 	return Result{JSON: string(raw), Hash: hashutil.SHA256Hex(raw)}, nil
+}
+
+func (b *Builder) applyManagedTLS(nodeID string, inbounds []store.InboundConfig) ([]store.InboundConfig, error) {
+	out := make([]store.InboundConfig, len(inbounds))
+	copy(out, inbounds)
+	for i := range out {
+		resolved, _, _, err := b.ResolveManagedTLS(nodeID, out[i])
+		if err != nil {
+			return nil, err
+		}
+		out[i] = resolved
+	}
+	return out, nil
+}
+
+// ResolveManagedTLS overlays the per-node binding on a copy of inbound and
+// returns the managed client-facing hostname when enabled.
+func (b *Builder) ResolveManagedTLS(
+	nodeID string,
+	inbound store.InboundConfig,
+) (store.InboundConfig, string, bool, error) {
+	bindings, err := b.Store.ListNodeInboundTLSBindings(nodeID)
+	if err != nil {
+		return inbound, "", false, err
+	}
+	var binding *store.NodeInboundTLSBinding
+	for i := range bindings {
+		if bindings[i].InboundID == inbound.ID && bindings[i].Mode == "managed" {
+			binding = &bindings[i]
+			break
+		}
+	}
+	if binding == nil {
+		return inbound, "", false, nil
+	}
+	domain, err := b.Store.GetManagedDomain(binding.ManagedDomainID)
+	if err != nil {
+		return inbound, "", false, err
+	}
+	certificate, err := b.Store.GetProtocolCertificate(binding.CertificateID)
+	if err != nil {
+		return inbound, "", false, err
+	}
+	if domain.NodeID != nodeID || certificate.NodeID != nodeID ||
+		certificate.ManagedDomainID != domain.ID {
+		return inbound, "", false, fmt.Errorf("入站 %s 的托管 TLS 绑定归属不一致", inbound.Name)
+	}
+	if (certificate.Status != "active" && certificate.Status != "deploying") ||
+		certificate.ActiveCertPath == "" || certificate.ActiveKeyPath == "" {
+		return inbound, "", false, fmt.Errorf("入站 %s 的托管证书尚未就绪", inbound.Name)
+	}
+	if !supportsManagedTLS(inbound) {
+		return inbound, "", false, fmt.Errorf("入站 %s 的协议 %s 不支持托管 TLS", inbound.Name, inbound.Protocol)
+	}
+	certPath := certificate.ActiveCertPath
+	keyPath := certificate.ActiveKeyPath
+	if certificate.Status == "deploying" {
+		certPath = certificate.CandidateCertPath
+		keyPath = certificate.CandidateKeyPath
+	}
+	if certPath == "" || keyPath == "" {
+		return inbound, "", false, fmt.Errorf("入站 %s 的托管证书文件尚未就绪", inbound.Name)
+	}
+	params := cloneParams(inbound.Params)
+	delete(params, "tls_cert_pem")
+	delete(params, "tls_key_pem")
+	params["tls_cert_path"] = certPath
+	params["tls_key_path"] = keyPath
+	params["server_name"] = domain.FQDN
+	switch inbound.Protocol {
+	case "vless", "vmess":
+		params["tls_mode"] = "tls"
+	}
+	inbound.Params = params
+	return inbound, domain.FQDN, true, nil
+}
+
+func supportsManagedTLS(inbound store.InboundConfig) bool {
+	switch inbound.Protocol {
+	case "trojan", "hysteria2", "tuic", "anytls":
+		return true
+	case "vless", "vmess":
+		mode, _ := inbound.Params["tls_mode"].(string)
+		return mode != "reality"
+	default:
+		return false
+	}
+}
+
+func cloneParams(params map[string]any) map[string]any {
+	out := make(map[string]any, len(params)+3)
+	for key, value := range params {
+		out[key] = value
+	}
+	return out
 }
 
 func enabledChains(chains []store.ProxyChain) []store.ProxyChain {
@@ -134,7 +233,15 @@ func (b *Builder) ResolveHopEndpoint(chain store.ProxyChain, position int) (subs
 	if err != nil {
 		return subscription.ProxyEndpoint{}, err
 	}
+	resolvedInbound, managedHostname, managed, err := b.ResolveManagedTLS(hop.NodeID, *in)
+	if err != nil {
+		return subscription.ProxyEndpoint{}, err
+	}
+	in = &resolvedInbound
 	address := strings.TrimSpace(hop.DialAddress)
+	if address == "" && managed {
+		address = managedHostname
+	}
 	if address == "" {
 		address = strings.TrimSpace(node.PublicAddress)
 	}

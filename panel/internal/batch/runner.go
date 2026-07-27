@@ -56,6 +56,12 @@ func NewRunner(s *store.Store, defaultToken func() string) *Runner {
 }
 
 func (r *Runner) defaultDial(ctx context.Context, n store.Node, token string) (NodeRPC, error) {
+	return r.DialClient(ctx, n, token)
+}
+
+// DialClient returns a full Agent client for subsystems that need capabilities
+// beyond the batch lifecycle RPCs.
+func (r *Runner) DialClient(ctx context.Context, n store.Node, token string) (*nodeclient.Client, error) {
 	if r.PKI == nil {
 		return nil, fmt.Errorf("管理 PKI 不可用")
 	}

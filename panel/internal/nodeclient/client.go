@@ -199,6 +199,54 @@ func (c *Client) ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesRes
 	return c.api.ListInterfaces(c.withAuth(ctx), &agentv1.ListInterfacesRequest{})
 }
 
+func (c *Client) GetPublicAddresses(ctx context.Context, ipv4, ipv6 bool) (*agentv1.GetPublicAddressesResponse, error) {
+	return c.api.GetPublicAddresses(c.withAuth(ctx), &agentv1.GetPublicAddressesRequest{
+		Ipv4: ipv4, Ipv6: ipv6,
+	})
+}
+
+func (c *Client) PrepareProtocolCertificate(
+	ctx context.Context,
+	certificateID, generationID string,
+	dnsNames []string,
+) (*agentv1.PrepareProtocolCertificateResponse, error) {
+	return c.api.PrepareProtocolCertificate(c.withAuth(ctx), &agentv1.PrepareProtocolCertificateRequest{
+		CertificateId: certificateID, GenerationId: generationID, DnsNames: dnsNames,
+	})
+}
+
+func (c *Client) InstallProtocolCertificate(
+	ctx context.Context,
+	certificateID, generationID, keyID, certificatePEM string,
+	dnsNames []string,
+) (*agentv1.InstallProtocolCertificateResponse, error) {
+	return c.api.InstallProtocolCertificate(c.withAuth(ctx), &agentv1.InstallProtocolCertificateRequest{
+		CertificateId: certificateID, GenerationId: generationID, KeyId: keyID,
+		CertificatePem: certificatePEM, DnsNames: dnsNames,
+	})
+}
+
+func (c *Client) GetProtocolCertificateStatus(
+	ctx context.Context,
+	certificateID, generationID string,
+) (*agentv1.GetProtocolCertificateStatusResponse, error) {
+	return c.api.GetProtocolCertificateStatus(c.withAuth(ctx), &agentv1.GetProtocolCertificateStatusRequest{
+		CertificateId: certificateID, GenerationId: generationID,
+	})
+}
+
+func (c *Client) DeleteProtocolCertificateGeneration(
+	ctx context.Context,
+	certificateID, generationID string,
+) (*agentv1.DeleteProtocolCertificateGenerationResponse, error) {
+	return c.api.DeleteProtocolCertificateGeneration(
+		c.withAuth(ctx),
+		&agentv1.DeleteProtocolCertificateGenerationRequest{
+			CertificateId: certificateID, GenerationId: generationID,
+		},
+	)
+}
+
 // UpgradeAgent stages a new agent binary on the node for the root upgrade helper.
 func (c *Client) UpgradeAgent(ctx context.Context, version, repo, downloadURL, sha256 string) (*agentv1.UpgradeAgentResponse, error) {
 	return c.api.UpgradeAgent(c.withAuth(ctx), &agentv1.UpgradeAgentRequest{

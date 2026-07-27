@@ -19,16 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentControl_Ping_FullMethodName           = "/agent.v1.AgentControl/Ping"
-	AgentControl_ApplyConfig_FullMethodName    = "/agent.v1.AgentControl/ApplyConfig"
-	AgentControl_Start_FullMethodName          = "/agent.v1.AgentControl/Start"
-	AgentControl_Stop_FullMethodName           = "/agent.v1.AgentControl/Stop"
-	AgentControl_GetStatus_FullMethodName      = "/agent.v1.AgentControl/GetStatus"
-	AgentControl_GetMetrics_FullMethodName     = "/agent.v1.AgentControl/GetMetrics"
-	AgentControl_StreamLogs_FullMethodName     = "/agent.v1.AgentControl/StreamLogs"
-	AgentControl_ListInterfaces_FullMethodName = "/agent.v1.AgentControl/ListInterfaces"
-	AgentControl_UpgradeAgent_FullMethodName   = "/agent.v1.AgentControl/UpgradeAgent"
-	AgentControl_ProbeOutbound_FullMethodName  = "/agent.v1.AgentControl/ProbeOutbound"
+	AgentControl_Ping_FullMethodName                                = "/agent.v1.AgentControl/Ping"
+	AgentControl_ApplyConfig_FullMethodName                         = "/agent.v1.AgentControl/ApplyConfig"
+	AgentControl_Start_FullMethodName                               = "/agent.v1.AgentControl/Start"
+	AgentControl_Stop_FullMethodName                                = "/agent.v1.AgentControl/Stop"
+	AgentControl_GetStatus_FullMethodName                           = "/agent.v1.AgentControl/GetStatus"
+	AgentControl_GetMetrics_FullMethodName                          = "/agent.v1.AgentControl/GetMetrics"
+	AgentControl_StreamLogs_FullMethodName                          = "/agent.v1.AgentControl/StreamLogs"
+	AgentControl_ListInterfaces_FullMethodName                      = "/agent.v1.AgentControl/ListInterfaces"
+	AgentControl_UpgradeAgent_FullMethodName                        = "/agent.v1.AgentControl/UpgradeAgent"
+	AgentControl_ProbeOutbound_FullMethodName                       = "/agent.v1.AgentControl/ProbeOutbound"
+	AgentControl_GetPublicAddresses_FullMethodName                  = "/agent.v1.AgentControl/GetPublicAddresses"
+	AgentControl_PrepareProtocolCertificate_FullMethodName          = "/agent.v1.AgentControl/PrepareProtocolCertificate"
+	AgentControl_InstallProtocolCertificate_FullMethodName          = "/agent.v1.AgentControl/InstallProtocolCertificate"
+	AgentControl_GetProtocolCertificateStatus_FullMethodName        = "/agent.v1.AgentControl/GetProtocolCertificateStatus"
+	AgentControl_DeleteProtocolCertificateGeneration_FullMethodName = "/agent.v1.AgentControl/DeleteProtocolCertificateGeneration"
 )
 
 // AgentControlClient is the client API for AgentControl service.
@@ -48,6 +53,11 @@ type AgentControlClient interface {
 	// The RPC returns after staging (before restart). Panel should re-probe for the new version.
 	UpgradeAgent(ctx context.Context, in *UpgradeAgentRequest, opts ...grpc.CallOption) (*UpgradeAgentResponse, error)
 	ProbeOutbound(ctx context.Context, in *ProbeOutboundRequest, opts ...grpc.CallOption) (*ProbeOutboundResponse, error)
+	GetPublicAddresses(ctx context.Context, in *GetPublicAddressesRequest, opts ...grpc.CallOption) (*GetPublicAddressesResponse, error)
+	PrepareProtocolCertificate(ctx context.Context, in *PrepareProtocolCertificateRequest, opts ...grpc.CallOption) (*PrepareProtocolCertificateResponse, error)
+	InstallProtocolCertificate(ctx context.Context, in *InstallProtocolCertificateRequest, opts ...grpc.CallOption) (*InstallProtocolCertificateResponse, error)
+	GetProtocolCertificateStatus(ctx context.Context, in *GetProtocolCertificateStatusRequest, opts ...grpc.CallOption) (*GetProtocolCertificateStatusResponse, error)
+	DeleteProtocolCertificateGeneration(ctx context.Context, in *DeleteProtocolCertificateGenerationRequest, opts ...grpc.CallOption) (*DeleteProtocolCertificateGenerationResponse, error)
 }
 
 type agentControlClient struct {
@@ -167,6 +177,56 @@ func (c *agentControlClient) ProbeOutbound(ctx context.Context, in *ProbeOutboun
 	return out, nil
 }
 
+func (c *agentControlClient) GetPublicAddresses(ctx context.Context, in *GetPublicAddressesRequest, opts ...grpc.CallOption) (*GetPublicAddressesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPublicAddressesResponse)
+	err := c.cc.Invoke(ctx, AgentControl_GetPublicAddresses_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentControlClient) PrepareProtocolCertificate(ctx context.Context, in *PrepareProtocolCertificateRequest, opts ...grpc.CallOption) (*PrepareProtocolCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PrepareProtocolCertificateResponse)
+	err := c.cc.Invoke(ctx, AgentControl_PrepareProtocolCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentControlClient) InstallProtocolCertificate(ctx context.Context, in *InstallProtocolCertificateRequest, opts ...grpc.CallOption) (*InstallProtocolCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InstallProtocolCertificateResponse)
+	err := c.cc.Invoke(ctx, AgentControl_InstallProtocolCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentControlClient) GetProtocolCertificateStatus(ctx context.Context, in *GetProtocolCertificateStatusRequest, opts ...grpc.CallOption) (*GetProtocolCertificateStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProtocolCertificateStatusResponse)
+	err := c.cc.Invoke(ctx, AgentControl_GetProtocolCertificateStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *agentControlClient) DeleteProtocolCertificateGeneration(ctx context.Context, in *DeleteProtocolCertificateGenerationRequest, opts ...grpc.CallOption) (*DeleteProtocolCertificateGenerationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteProtocolCertificateGenerationResponse)
+	err := c.cc.Invoke(ctx, AgentControl_DeleteProtocolCertificateGeneration_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentControlServer is the server API for AgentControl service.
 // All implementations must embed UnimplementedAgentControlServer
 // for forward compatibility.
@@ -184,6 +244,11 @@ type AgentControlServer interface {
 	// The RPC returns after staging (before restart). Panel should re-probe for the new version.
 	UpgradeAgent(context.Context, *UpgradeAgentRequest) (*UpgradeAgentResponse, error)
 	ProbeOutbound(context.Context, *ProbeOutboundRequest) (*ProbeOutboundResponse, error)
+	GetPublicAddresses(context.Context, *GetPublicAddressesRequest) (*GetPublicAddressesResponse, error)
+	PrepareProtocolCertificate(context.Context, *PrepareProtocolCertificateRequest) (*PrepareProtocolCertificateResponse, error)
+	InstallProtocolCertificate(context.Context, *InstallProtocolCertificateRequest) (*InstallProtocolCertificateResponse, error)
+	GetProtocolCertificateStatus(context.Context, *GetProtocolCertificateStatusRequest) (*GetProtocolCertificateStatusResponse, error)
+	DeleteProtocolCertificateGeneration(context.Context, *DeleteProtocolCertificateGenerationRequest) (*DeleteProtocolCertificateGenerationResponse, error)
 	mustEmbedUnimplementedAgentControlServer()
 }
 
@@ -223,6 +288,21 @@ func (UnimplementedAgentControlServer) UpgradeAgent(context.Context, *UpgradeAge
 }
 func (UnimplementedAgentControlServer) ProbeOutbound(context.Context, *ProbeOutboundRequest) (*ProbeOutboundResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProbeOutbound not implemented")
+}
+func (UnimplementedAgentControlServer) GetPublicAddresses(context.Context, *GetPublicAddressesRequest) (*GetPublicAddressesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPublicAddresses not implemented")
+}
+func (UnimplementedAgentControlServer) PrepareProtocolCertificate(context.Context, *PrepareProtocolCertificateRequest) (*PrepareProtocolCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PrepareProtocolCertificate not implemented")
+}
+func (UnimplementedAgentControlServer) InstallProtocolCertificate(context.Context, *InstallProtocolCertificateRequest) (*InstallProtocolCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InstallProtocolCertificate not implemented")
+}
+func (UnimplementedAgentControlServer) GetProtocolCertificateStatus(context.Context, *GetProtocolCertificateStatusRequest) (*GetProtocolCertificateStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProtocolCertificateStatus not implemented")
+}
+func (UnimplementedAgentControlServer) DeleteProtocolCertificateGeneration(context.Context, *DeleteProtocolCertificateGenerationRequest) (*DeleteProtocolCertificateGenerationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteProtocolCertificateGeneration not implemented")
 }
 func (UnimplementedAgentControlServer) mustEmbedUnimplementedAgentControlServer() {}
 func (UnimplementedAgentControlServer) testEmbeddedByValue()                      {}
@@ -418,6 +498,96 @@ func _AgentControl_ProbeOutbound_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentControl_GetPublicAddresses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPublicAddressesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).GetPublicAddresses(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_GetPublicAddresses_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).GetPublicAddresses(ctx, req.(*GetPublicAddressesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentControl_PrepareProtocolCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PrepareProtocolCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).PrepareProtocolCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_PrepareProtocolCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).PrepareProtocolCertificate(ctx, req.(*PrepareProtocolCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentControl_InstallProtocolCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InstallProtocolCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).InstallProtocolCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_InstallProtocolCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).InstallProtocolCertificate(ctx, req.(*InstallProtocolCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentControl_GetProtocolCertificateStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProtocolCertificateStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).GetProtocolCertificateStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_GetProtocolCertificateStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).GetProtocolCertificateStatus(ctx, req.(*GetProtocolCertificateStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AgentControl_DeleteProtocolCertificateGeneration_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteProtocolCertificateGenerationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).DeleteProtocolCertificateGeneration(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_DeleteProtocolCertificateGeneration_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).DeleteProtocolCertificateGeneration(ctx, req.(*DeleteProtocolCertificateGenerationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentControl_ServiceDesc is the grpc.ServiceDesc for AgentControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -460,6 +630,26 @@ var AgentControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ProbeOutbound",
 			Handler:    _AgentControl_ProbeOutbound_Handler,
+		},
+		{
+			MethodName: "GetPublicAddresses",
+			Handler:    _AgentControl_GetPublicAddresses_Handler,
+		},
+		{
+			MethodName: "PrepareProtocolCertificate",
+			Handler:    _AgentControl_PrepareProtocolCertificate_Handler,
+		},
+		{
+			MethodName: "InstallProtocolCertificate",
+			Handler:    _AgentControl_InstallProtocolCertificate_Handler,
+		},
+		{
+			MethodName: "GetProtocolCertificateStatus",
+			Handler:    _AgentControl_GetProtocolCertificateStatus_Handler,
+		},
+		{
+			MethodName: "DeleteProtocolCertificateGeneration",
+			Handler:    _AgentControl_DeleteProtocolCertificateGeneration_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

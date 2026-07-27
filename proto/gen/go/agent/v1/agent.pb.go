@@ -1168,6 +1168,662 @@ func (x *UpgradeAgentResponse) GetPreviousVersion() string {
 	return ""
 }
 
+type GetPublicAddressesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ipv4          bool                   `protobuf:"varint,1,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	Ipv6          bool                   `protobuf:"varint,2,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPublicAddressesRequest) Reset() {
+	*x = GetPublicAddressesRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPublicAddressesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPublicAddressesRequest) ProtoMessage() {}
+
+func (x *GetPublicAddressesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPublicAddressesRequest.ProtoReflect.Descriptor instead.
+func (*GetPublicAddressesRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *GetPublicAddressesRequest) GetIpv4() bool {
+	if x != nil {
+		return x.Ipv4
+	}
+	return false
+}
+
+func (x *GetPublicAddressesRequest) GetIpv6() bool {
+	if x != nil {
+		return x.Ipv6
+	}
+	return false
+}
+
+type GetPublicAddressesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ipv4          string                 `protobuf:"bytes,1,opt,name=ipv4,proto3" json:"ipv4,omitempty"`
+	Ipv6          string                 `protobuf:"bytes,2,opt,name=ipv6,proto3" json:"ipv6,omitempty"`
+	Ipv4Sources   []string               `protobuf:"bytes,3,rep,name=ipv4_sources,json=ipv4Sources,proto3" json:"ipv4_sources,omitempty"`
+	Ipv6Sources   []string               `protobuf:"bytes,4,rep,name=ipv6_sources,json=ipv6Sources,proto3" json:"ipv6_sources,omitempty"`
+	Warnings      []string               `protobuf:"bytes,5,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPublicAddressesResponse) Reset() {
+	*x = GetPublicAddressesResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPublicAddressesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPublicAddressesResponse) ProtoMessage() {}
+
+func (x *GetPublicAddressesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPublicAddressesResponse.ProtoReflect.Descriptor instead.
+func (*GetPublicAddressesResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *GetPublicAddressesResponse) GetIpv4() string {
+	if x != nil {
+		return x.Ipv4
+	}
+	return ""
+}
+
+func (x *GetPublicAddressesResponse) GetIpv6() string {
+	if x != nil {
+		return x.Ipv6
+	}
+	return ""
+}
+
+func (x *GetPublicAddressesResponse) GetIpv4Sources() []string {
+	if x != nil {
+		return x.Ipv4Sources
+	}
+	return nil
+}
+
+func (x *GetPublicAddressesResponse) GetIpv6Sources() []string {
+	if x != nil {
+		return x.Ipv6Sources
+	}
+	return nil
+}
+
+func (x *GetPublicAddressesResponse) GetWarnings() []string {
+	if x != nil {
+		return x.Warnings
+	}
+	return nil
+}
+
+type PrepareProtocolCertificateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CertificateId string                 `protobuf:"bytes,1,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`
+	GenerationId  string                 `protobuf:"bytes,2,opt,name=generation_id,json=generationId,proto3" json:"generation_id,omitempty"`
+	DnsNames      []string               `protobuf:"bytes,3,rep,name=dns_names,json=dnsNames,proto3" json:"dns_names,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PrepareProtocolCertificateRequest) Reset() {
+	*x = PrepareProtocolCertificateRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareProtocolCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareProtocolCertificateRequest) ProtoMessage() {}
+
+func (x *PrepareProtocolCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareProtocolCertificateRequest.ProtoReflect.Descriptor instead.
+func (*PrepareProtocolCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *PrepareProtocolCertificateRequest) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+func (x *PrepareProtocolCertificateRequest) GetGenerationId() string {
+	if x != nil {
+		return x.GenerationId
+	}
+	return ""
+}
+
+func (x *PrepareProtocolCertificateRequest) GetDnsNames() []string {
+	if x != nil {
+		return x.DnsNames
+	}
+	return nil
+}
+
+type PrepareProtocolCertificateResponse struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	KeyId                string                 `protobuf:"bytes,1,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	CsrPem               string                 `protobuf:"bytes,2,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`
+	PublicKeyFingerprint string                 `protobuf:"bytes,3,opt,name=public_key_fingerprint,json=publicKeyFingerprint,proto3" json:"public_key_fingerprint,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *PrepareProtocolCertificateResponse) Reset() {
+	*x = PrepareProtocolCertificateResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PrepareProtocolCertificateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PrepareProtocolCertificateResponse) ProtoMessage() {}
+
+func (x *PrepareProtocolCertificateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PrepareProtocolCertificateResponse.ProtoReflect.Descriptor instead.
+func (*PrepareProtocolCertificateResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *PrepareProtocolCertificateResponse) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
+}
+
+func (x *PrepareProtocolCertificateResponse) GetCsrPem() string {
+	if x != nil {
+		return x.CsrPem
+	}
+	return ""
+}
+
+func (x *PrepareProtocolCertificateResponse) GetPublicKeyFingerprint() string {
+	if x != nil {
+		return x.PublicKeyFingerprint
+	}
+	return ""
+}
+
+type InstallProtocolCertificateRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CertificateId  string                 `protobuf:"bytes,1,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`
+	GenerationId   string                 `protobuf:"bytes,2,opt,name=generation_id,json=generationId,proto3" json:"generation_id,omitempty"`
+	KeyId          string                 `protobuf:"bytes,3,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	CertificatePem string                 `protobuf:"bytes,4,opt,name=certificate_pem,json=certificatePem,proto3" json:"certificate_pem,omitempty"`
+	DnsNames       []string               `protobuf:"bytes,5,rep,name=dns_names,json=dnsNames,proto3" json:"dns_names,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *InstallProtocolCertificateRequest) Reset() {
+	*x = InstallProtocolCertificateRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallProtocolCertificateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallProtocolCertificateRequest) ProtoMessage() {}
+
+func (x *InstallProtocolCertificateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallProtocolCertificateRequest.ProtoReflect.Descriptor instead.
+func (*InstallProtocolCertificateRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *InstallProtocolCertificateRequest) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateRequest) GetGenerationId() string {
+	if x != nil {
+		return x.GenerationId
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateRequest) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateRequest) GetCertificatePem() string {
+	if x != nil {
+		return x.CertificatePem
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateRequest) GetDnsNames() []string {
+	if x != nil {
+		return x.DnsNames
+	}
+	return nil
+}
+
+type InstallProtocolCertificateResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	CertificatePath string                 `protobuf:"bytes,1,opt,name=certificate_path,json=certificatePath,proto3" json:"certificate_path,omitempty"`
+	KeyPath         string                 `protobuf:"bytes,2,opt,name=key_path,json=keyPath,proto3" json:"key_path,omitempty"`
+	Fingerprint     string                 `protobuf:"bytes,3,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
+	Serial          string                 `protobuf:"bytes,4,opt,name=serial,proto3" json:"serial,omitempty"`
+	NotBeforeUnix   int64                  `protobuf:"varint,5,opt,name=not_before_unix,json=notBeforeUnix,proto3" json:"not_before_unix,omitempty"`
+	NotAfterUnix    int64                  `protobuf:"varint,6,opt,name=not_after_unix,json=notAfterUnix,proto3" json:"not_after_unix,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *InstallProtocolCertificateResponse) Reset() {
+	*x = InstallProtocolCertificateResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallProtocolCertificateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallProtocolCertificateResponse) ProtoMessage() {}
+
+func (x *InstallProtocolCertificateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallProtocolCertificateResponse.ProtoReflect.Descriptor instead.
+func (*InstallProtocolCertificateResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *InstallProtocolCertificateResponse) GetCertificatePath() string {
+	if x != nil {
+		return x.CertificatePath
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateResponse) GetKeyPath() string {
+	if x != nil {
+		return x.KeyPath
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateResponse) GetFingerprint() string {
+	if x != nil {
+		return x.Fingerprint
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateResponse) GetSerial() string {
+	if x != nil {
+		return x.Serial
+	}
+	return ""
+}
+
+func (x *InstallProtocolCertificateResponse) GetNotBeforeUnix() int64 {
+	if x != nil {
+		return x.NotBeforeUnix
+	}
+	return 0
+}
+
+func (x *InstallProtocolCertificateResponse) GetNotAfterUnix() int64 {
+	if x != nil {
+		return x.NotAfterUnix
+	}
+	return 0
+}
+
+type GetProtocolCertificateStatusRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CertificateId string                 `protobuf:"bytes,1,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`
+	GenerationId  string                 `protobuf:"bytes,2,opt,name=generation_id,json=generationId,proto3" json:"generation_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProtocolCertificateStatusRequest) Reset() {
+	*x = GetProtocolCertificateStatusRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProtocolCertificateStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProtocolCertificateStatusRequest) ProtoMessage() {}
+
+func (x *GetProtocolCertificateStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProtocolCertificateStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetProtocolCertificateStatusRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *GetProtocolCertificateStatusRequest) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+func (x *GetProtocolCertificateStatusRequest) GetGenerationId() string {
+	if x != nil {
+		return x.GenerationId
+	}
+	return ""
+}
+
+type GetProtocolCertificateStatusResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	KeyExists         bool                   `protobuf:"varint,1,opt,name=key_exists,json=keyExists,proto3" json:"key_exists,omitempty"`
+	CertificateExists bool                   `protobuf:"varint,2,opt,name=certificate_exists,json=certificateExists,proto3" json:"certificate_exists,omitempty"`
+	KeyId             string                 `protobuf:"bytes,3,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	CertificatePath   string                 `protobuf:"bytes,4,opt,name=certificate_path,json=certificatePath,proto3" json:"certificate_path,omitempty"`
+	KeyPath           string                 `protobuf:"bytes,5,opt,name=key_path,json=keyPath,proto3" json:"key_path,omitempty"`
+	Fingerprint       string                 `protobuf:"bytes,6,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
+	NotAfterUnix      int64                  `protobuf:"varint,7,opt,name=not_after_unix,json=notAfterUnix,proto3" json:"not_after_unix,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *GetProtocolCertificateStatusResponse) Reset() {
+	*x = GetProtocolCertificateStatusResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProtocolCertificateStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProtocolCertificateStatusResponse) ProtoMessage() {}
+
+func (x *GetProtocolCertificateStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProtocolCertificateStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetProtocolCertificateStatusResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GetProtocolCertificateStatusResponse) GetKeyExists() bool {
+	if x != nil {
+		return x.KeyExists
+	}
+	return false
+}
+
+func (x *GetProtocolCertificateStatusResponse) GetCertificateExists() bool {
+	if x != nil {
+		return x.CertificateExists
+	}
+	return false
+}
+
+func (x *GetProtocolCertificateStatusResponse) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
+}
+
+func (x *GetProtocolCertificateStatusResponse) GetCertificatePath() string {
+	if x != nil {
+		return x.CertificatePath
+	}
+	return ""
+}
+
+func (x *GetProtocolCertificateStatusResponse) GetKeyPath() string {
+	if x != nil {
+		return x.KeyPath
+	}
+	return ""
+}
+
+func (x *GetProtocolCertificateStatusResponse) GetFingerprint() string {
+	if x != nil {
+		return x.Fingerprint
+	}
+	return ""
+}
+
+func (x *GetProtocolCertificateStatusResponse) GetNotAfterUnix() int64 {
+	if x != nil {
+		return x.NotAfterUnix
+	}
+	return 0
+}
+
+type DeleteProtocolCertificateGenerationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CertificateId string                 `protobuf:"bytes,1,opt,name=certificate_id,json=certificateId,proto3" json:"certificate_id,omitempty"`
+	GenerationId  string                 `protobuf:"bytes,2,opt,name=generation_id,json=generationId,proto3" json:"generation_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteProtocolCertificateGenerationRequest) Reset() {
+	*x = DeleteProtocolCertificateGenerationRequest{}
+	mi := &file_agent_v1_agent_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteProtocolCertificateGenerationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteProtocolCertificateGenerationRequest) ProtoMessage() {}
+
+func (x *DeleteProtocolCertificateGenerationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteProtocolCertificateGenerationRequest.ProtoReflect.Descriptor instead.
+func (*DeleteProtocolCertificateGenerationRequest) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *DeleteProtocolCertificateGenerationRequest) GetCertificateId() string {
+	if x != nil {
+		return x.CertificateId
+	}
+	return ""
+}
+
+func (x *DeleteProtocolCertificateGenerationRequest) GetGenerationId() string {
+	if x != nil {
+		return x.GenerationId
+	}
+	return ""
+}
+
+type DeleteProtocolCertificateGenerationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteProtocolCertificateGenerationResponse) Reset() {
+	*x = DeleteProtocolCertificateGenerationResponse{}
+	mi := &file_agent_v1_agent_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteProtocolCertificateGenerationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteProtocolCertificateGenerationResponse) ProtoMessage() {}
+
+func (x *DeleteProtocolCertificateGenerationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_agent_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteProtocolCertificateGenerationResponse.ProtoReflect.Descriptor instead.
+func (*DeleteProtocolCertificateGenerationResponse) Descriptor() ([]byte, []int) {
+	return file_agent_v1_agent_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *DeleteProtocolCertificateGenerationResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *DeleteProtocolCertificateGenerationResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_agent_v1_agent_proto protoreflect.FileDescriptor
 
 const file_agent_v1_agent_proto_rawDesc = "" +
@@ -1250,7 +1906,56 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1f\n" +
 	"\vstaged_path\x18\x04 \x01(\tR\n" +
 	"stagedPath\x12)\n" +
-	"\x10previous_version\x18\x05 \x01(\tR\x0fpreviousVersion2\xc7\x05\n" +
+	"\x10previous_version\x18\x05 \x01(\tR\x0fpreviousVersion\"C\n" +
+	"\x19GetPublicAddressesRequest\x12\x12\n" +
+	"\x04ipv4\x18\x01 \x01(\bR\x04ipv4\x12\x12\n" +
+	"\x04ipv6\x18\x02 \x01(\bR\x04ipv6\"\xa6\x01\n" +
+	"\x1aGetPublicAddressesResponse\x12\x12\n" +
+	"\x04ipv4\x18\x01 \x01(\tR\x04ipv4\x12\x12\n" +
+	"\x04ipv6\x18\x02 \x01(\tR\x04ipv6\x12!\n" +
+	"\fipv4_sources\x18\x03 \x03(\tR\vipv4Sources\x12!\n" +
+	"\fipv6_sources\x18\x04 \x03(\tR\vipv6Sources\x12\x1a\n" +
+	"\bwarnings\x18\x05 \x03(\tR\bwarnings\"\x8c\x01\n" +
+	"!PrepareProtocolCertificateRequest\x12%\n" +
+	"\x0ecertificate_id\x18\x01 \x01(\tR\rcertificateId\x12#\n" +
+	"\rgeneration_id\x18\x02 \x01(\tR\fgenerationId\x12\x1b\n" +
+	"\tdns_names\x18\x03 \x03(\tR\bdnsNames\"\x8a\x01\n" +
+	"\"PrepareProtocolCertificateResponse\x12\x15\n" +
+	"\x06key_id\x18\x01 \x01(\tR\x05keyId\x12\x17\n" +
+	"\acsr_pem\x18\x02 \x01(\tR\x06csrPem\x124\n" +
+	"\x16public_key_fingerprint\x18\x03 \x01(\tR\x14publicKeyFingerprint\"\xcc\x01\n" +
+	"!InstallProtocolCertificateRequest\x12%\n" +
+	"\x0ecertificate_id\x18\x01 \x01(\tR\rcertificateId\x12#\n" +
+	"\rgeneration_id\x18\x02 \x01(\tR\fgenerationId\x12\x15\n" +
+	"\x06key_id\x18\x03 \x01(\tR\x05keyId\x12'\n" +
+	"\x0fcertificate_pem\x18\x04 \x01(\tR\x0ecertificatePem\x12\x1b\n" +
+	"\tdns_names\x18\x05 \x03(\tR\bdnsNames\"\xf2\x01\n" +
+	"\"InstallProtocolCertificateResponse\x12)\n" +
+	"\x10certificate_path\x18\x01 \x01(\tR\x0fcertificatePath\x12\x19\n" +
+	"\bkey_path\x18\x02 \x01(\tR\akeyPath\x12 \n" +
+	"\vfingerprint\x18\x03 \x01(\tR\vfingerprint\x12\x16\n" +
+	"\x06serial\x18\x04 \x01(\tR\x06serial\x12&\n" +
+	"\x0fnot_before_unix\x18\x05 \x01(\x03R\rnotBeforeUnix\x12$\n" +
+	"\x0enot_after_unix\x18\x06 \x01(\x03R\fnotAfterUnix\"q\n" +
+	"#GetProtocolCertificateStatusRequest\x12%\n" +
+	"\x0ecertificate_id\x18\x01 \x01(\tR\rcertificateId\x12#\n" +
+	"\rgeneration_id\x18\x02 \x01(\tR\fgenerationId\"\x99\x02\n" +
+	"$GetProtocolCertificateStatusResponse\x12\x1d\n" +
+	"\n" +
+	"key_exists\x18\x01 \x01(\bR\tkeyExists\x12-\n" +
+	"\x12certificate_exists\x18\x02 \x01(\bR\x11certificateExists\x12\x15\n" +
+	"\x06key_id\x18\x03 \x01(\tR\x05keyId\x12)\n" +
+	"\x10certificate_path\x18\x04 \x01(\tR\x0fcertificatePath\x12\x19\n" +
+	"\bkey_path\x18\x05 \x01(\tR\akeyPath\x12 \n" +
+	"\vfingerprint\x18\x06 \x01(\tR\vfingerprint\x12$\n" +
+	"\x0enot_after_unix\x18\a \x01(\x03R\fnotAfterUnix\"x\n" +
+	"*DeleteProtocolCertificateGenerationRequest\x12%\n" +
+	"\x0ecertificate_id\x18\x01 \x01(\tR\rcertificateId\x12#\n" +
+	"\rgeneration_id\x18\x02 \x01(\tR\fgenerationId\"W\n" +
+	"+DeleteProtocolCertificateGenerationResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage2\xae\n" +
+	"\n" +
 	"\fAgentControl\x125\n" +
 	"\x04Ping\x12\x15.agent.v1.PingRequest\x1a\x16.agent.v1.PingResponse\x12J\n" +
 	"\vApplyConfig\x12\x1c.agent.v1.ApplyConfigRequest\x1a\x1d.agent.v1.ApplyConfigResponse\x128\n" +
@@ -1263,7 +1968,12 @@ const file_agent_v1_agent_proto_rawDesc = "" +
 	"StreamLogs\x12\x1b.agent.v1.StreamLogsRequest\x1a\x11.agent.v1.LogLine0\x01\x12S\n" +
 	"\x0eListInterfaces\x12\x1f.agent.v1.ListInterfacesRequest\x1a .agent.v1.ListInterfacesResponse\x12M\n" +
 	"\fUpgradeAgent\x12\x1d.agent.v1.UpgradeAgentRequest\x1a\x1e.agent.v1.UpgradeAgentResponse\x12P\n" +
-	"\rProbeOutbound\x12\x1e.agent.v1.ProbeOutboundRequest\x1a\x1f.agent.v1.ProbeOutboundResponseB8Z6github.com/ladderairport/proto/gen/go/agent/v1;agentv1b\x06proto3"
+	"\rProbeOutbound\x12\x1e.agent.v1.ProbeOutboundRequest\x1a\x1f.agent.v1.ProbeOutboundResponse\x12_\n" +
+	"\x12GetPublicAddresses\x12#.agent.v1.GetPublicAddressesRequest\x1a$.agent.v1.GetPublicAddressesResponse\x12w\n" +
+	"\x1aPrepareProtocolCertificate\x12+.agent.v1.PrepareProtocolCertificateRequest\x1a,.agent.v1.PrepareProtocolCertificateResponse\x12w\n" +
+	"\x1aInstallProtocolCertificate\x12+.agent.v1.InstallProtocolCertificateRequest\x1a,.agent.v1.InstallProtocolCertificateResponse\x12}\n" +
+	"\x1cGetProtocolCertificateStatus\x12-.agent.v1.GetProtocolCertificateStatusRequest\x1a..agent.v1.GetProtocolCertificateStatusResponse\x12\x92\x01\n" +
+	"#DeleteProtocolCertificateGeneration\x124.agent.v1.DeleteProtocolCertificateGenerationRequest\x1a5.agent.v1.DeleteProtocolCertificateGenerationResponseB8Z6github.com/ladderairport/proto/gen/go/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -1277,29 +1987,39 @@ func file_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_agent_v1_agent_proto_rawDescData
 }
 
-var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
 var file_agent_v1_agent_proto_goTypes = []any{
-	(*PingRequest)(nil),            // 0: agent.v1.PingRequest
-	(*PingResponse)(nil),           // 1: agent.v1.PingResponse
-	(*ProbeOutboundRequest)(nil),   // 2: agent.v1.ProbeOutboundRequest
-	(*ProbeOutboundResponse)(nil),  // 3: agent.v1.ProbeOutboundResponse
-	(*ApplyConfigRequest)(nil),     // 4: agent.v1.ApplyConfigRequest
-	(*ApplyConfigResponse)(nil),    // 5: agent.v1.ApplyConfigResponse
-	(*StartRequest)(nil),           // 6: agent.v1.StartRequest
-	(*StartResponse)(nil),          // 7: agent.v1.StartResponse
-	(*StopRequest)(nil),            // 8: agent.v1.StopRequest
-	(*StopResponse)(nil),           // 9: agent.v1.StopResponse
-	(*GetStatusRequest)(nil),       // 10: agent.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),      // 11: agent.v1.GetStatusResponse
-	(*GetMetricsRequest)(nil),      // 12: agent.v1.GetMetricsRequest
-	(*GetMetricsResponse)(nil),     // 13: agent.v1.GetMetricsResponse
-	(*StreamLogsRequest)(nil),      // 14: agent.v1.StreamLogsRequest
-	(*LogLine)(nil),                // 15: agent.v1.LogLine
-	(*ListInterfacesRequest)(nil),  // 16: agent.v1.ListInterfacesRequest
-	(*NetworkInterface)(nil),       // 17: agent.v1.NetworkInterface
-	(*ListInterfacesResponse)(nil), // 18: agent.v1.ListInterfacesResponse
-	(*UpgradeAgentRequest)(nil),    // 19: agent.v1.UpgradeAgentRequest
-	(*UpgradeAgentResponse)(nil),   // 20: agent.v1.UpgradeAgentResponse
+	(*PingRequest)(nil),                                 // 0: agent.v1.PingRequest
+	(*PingResponse)(nil),                                // 1: agent.v1.PingResponse
+	(*ProbeOutboundRequest)(nil),                        // 2: agent.v1.ProbeOutboundRequest
+	(*ProbeOutboundResponse)(nil),                       // 3: agent.v1.ProbeOutboundResponse
+	(*ApplyConfigRequest)(nil),                          // 4: agent.v1.ApplyConfigRequest
+	(*ApplyConfigResponse)(nil),                         // 5: agent.v1.ApplyConfigResponse
+	(*StartRequest)(nil),                                // 6: agent.v1.StartRequest
+	(*StartResponse)(nil),                               // 7: agent.v1.StartResponse
+	(*StopRequest)(nil),                                 // 8: agent.v1.StopRequest
+	(*StopResponse)(nil),                                // 9: agent.v1.StopResponse
+	(*GetStatusRequest)(nil),                            // 10: agent.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),                           // 11: agent.v1.GetStatusResponse
+	(*GetMetricsRequest)(nil),                           // 12: agent.v1.GetMetricsRequest
+	(*GetMetricsResponse)(nil),                          // 13: agent.v1.GetMetricsResponse
+	(*StreamLogsRequest)(nil),                           // 14: agent.v1.StreamLogsRequest
+	(*LogLine)(nil),                                     // 15: agent.v1.LogLine
+	(*ListInterfacesRequest)(nil),                       // 16: agent.v1.ListInterfacesRequest
+	(*NetworkInterface)(nil),                            // 17: agent.v1.NetworkInterface
+	(*ListInterfacesResponse)(nil),                      // 18: agent.v1.ListInterfacesResponse
+	(*UpgradeAgentRequest)(nil),                         // 19: agent.v1.UpgradeAgentRequest
+	(*UpgradeAgentResponse)(nil),                        // 20: agent.v1.UpgradeAgentResponse
+	(*GetPublicAddressesRequest)(nil),                   // 21: agent.v1.GetPublicAddressesRequest
+	(*GetPublicAddressesResponse)(nil),                  // 22: agent.v1.GetPublicAddressesResponse
+	(*PrepareProtocolCertificateRequest)(nil),           // 23: agent.v1.PrepareProtocolCertificateRequest
+	(*PrepareProtocolCertificateResponse)(nil),          // 24: agent.v1.PrepareProtocolCertificateResponse
+	(*InstallProtocolCertificateRequest)(nil),           // 25: agent.v1.InstallProtocolCertificateRequest
+	(*InstallProtocolCertificateResponse)(nil),          // 26: agent.v1.InstallProtocolCertificateResponse
+	(*GetProtocolCertificateStatusRequest)(nil),         // 27: agent.v1.GetProtocolCertificateStatusRequest
+	(*GetProtocolCertificateStatusResponse)(nil),        // 28: agent.v1.GetProtocolCertificateStatusResponse
+	(*DeleteProtocolCertificateGenerationRequest)(nil),  // 29: agent.v1.DeleteProtocolCertificateGenerationRequest
+	(*DeleteProtocolCertificateGenerationResponse)(nil), // 30: agent.v1.DeleteProtocolCertificateGenerationResponse
 }
 var file_agent_v1_agent_proto_depIdxs = []int32{
 	17, // 0: agent.v1.ListInterfacesResponse.interfaces:type_name -> agent.v1.NetworkInterface
@@ -1313,18 +2033,28 @@ var file_agent_v1_agent_proto_depIdxs = []int32{
 	16, // 8: agent.v1.AgentControl.ListInterfaces:input_type -> agent.v1.ListInterfacesRequest
 	19, // 9: agent.v1.AgentControl.UpgradeAgent:input_type -> agent.v1.UpgradeAgentRequest
 	2,  // 10: agent.v1.AgentControl.ProbeOutbound:input_type -> agent.v1.ProbeOutboundRequest
-	1,  // 11: agent.v1.AgentControl.Ping:output_type -> agent.v1.PingResponse
-	5,  // 12: agent.v1.AgentControl.ApplyConfig:output_type -> agent.v1.ApplyConfigResponse
-	7,  // 13: agent.v1.AgentControl.Start:output_type -> agent.v1.StartResponse
-	9,  // 14: agent.v1.AgentControl.Stop:output_type -> agent.v1.StopResponse
-	11, // 15: agent.v1.AgentControl.GetStatus:output_type -> agent.v1.GetStatusResponse
-	13, // 16: agent.v1.AgentControl.GetMetrics:output_type -> agent.v1.GetMetricsResponse
-	15, // 17: agent.v1.AgentControl.StreamLogs:output_type -> agent.v1.LogLine
-	18, // 18: agent.v1.AgentControl.ListInterfaces:output_type -> agent.v1.ListInterfacesResponse
-	20, // 19: agent.v1.AgentControl.UpgradeAgent:output_type -> agent.v1.UpgradeAgentResponse
-	3,  // 20: agent.v1.AgentControl.ProbeOutbound:output_type -> agent.v1.ProbeOutboundResponse
-	11, // [11:21] is the sub-list for method output_type
-	1,  // [1:11] is the sub-list for method input_type
+	21, // 11: agent.v1.AgentControl.GetPublicAddresses:input_type -> agent.v1.GetPublicAddressesRequest
+	23, // 12: agent.v1.AgentControl.PrepareProtocolCertificate:input_type -> agent.v1.PrepareProtocolCertificateRequest
+	25, // 13: agent.v1.AgentControl.InstallProtocolCertificate:input_type -> agent.v1.InstallProtocolCertificateRequest
+	27, // 14: agent.v1.AgentControl.GetProtocolCertificateStatus:input_type -> agent.v1.GetProtocolCertificateStatusRequest
+	29, // 15: agent.v1.AgentControl.DeleteProtocolCertificateGeneration:input_type -> agent.v1.DeleteProtocolCertificateGenerationRequest
+	1,  // 16: agent.v1.AgentControl.Ping:output_type -> agent.v1.PingResponse
+	5,  // 17: agent.v1.AgentControl.ApplyConfig:output_type -> agent.v1.ApplyConfigResponse
+	7,  // 18: agent.v1.AgentControl.Start:output_type -> agent.v1.StartResponse
+	9,  // 19: agent.v1.AgentControl.Stop:output_type -> agent.v1.StopResponse
+	11, // 20: agent.v1.AgentControl.GetStatus:output_type -> agent.v1.GetStatusResponse
+	13, // 21: agent.v1.AgentControl.GetMetrics:output_type -> agent.v1.GetMetricsResponse
+	15, // 22: agent.v1.AgentControl.StreamLogs:output_type -> agent.v1.LogLine
+	18, // 23: agent.v1.AgentControl.ListInterfaces:output_type -> agent.v1.ListInterfacesResponse
+	20, // 24: agent.v1.AgentControl.UpgradeAgent:output_type -> agent.v1.UpgradeAgentResponse
+	3,  // 25: agent.v1.AgentControl.ProbeOutbound:output_type -> agent.v1.ProbeOutboundResponse
+	22, // 26: agent.v1.AgentControl.GetPublicAddresses:output_type -> agent.v1.GetPublicAddressesResponse
+	24, // 27: agent.v1.AgentControl.PrepareProtocolCertificate:output_type -> agent.v1.PrepareProtocolCertificateResponse
+	26, // 28: agent.v1.AgentControl.InstallProtocolCertificate:output_type -> agent.v1.InstallProtocolCertificateResponse
+	28, // 29: agent.v1.AgentControl.GetProtocolCertificateStatus:output_type -> agent.v1.GetProtocolCertificateStatusResponse
+	30, // 30: agent.v1.AgentControl.DeleteProtocolCertificateGeneration:output_type -> agent.v1.DeleteProtocolCertificateGenerationResponse
+	16, // [16:31] is the sub-list for method output_type
+	1,  // [1:16] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -1341,7 +2071,7 @@ func file_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_agent_proto_rawDesc), len(file_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   31,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

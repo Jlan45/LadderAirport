@@ -275,6 +275,148 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_pki_enrollment_node
 			ON pki_enrollment_tokens(node_id, created_at_unix DESC)`,
+		`CREATE TABLE IF NOT EXISTS dns_accounts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			provider TEXT NOT NULL,
+			credentials_ciphertext TEXT NOT NULL DEFAULT '',
+			settings_json TEXT NOT NULL DEFAULT '{}',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			last_test_unix INTEGER NOT NULL DEFAULT 0,
+			last_test_error TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS managed_domains (
+			id TEXT PRIMARY KEY,
+			node_id TEXT NOT NULL,
+			dns_account_id TEXT NOT NULL,
+			zone TEXT NOT NULL,
+			fqdn TEXT NOT NULL COLLATE NOCASE,
+			record_mode TEXT NOT NULL DEFAULT 'a',
+			address_source TEXT NOT NULL DEFAULT 'manual',
+			manual_ipv4 TEXT NOT NULL DEFAULT '',
+			manual_ipv6 TEXT NOT NULL DEFAULT '',
+			ttl INTEGER NOT NULL DEFAULT 300,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			state TEXT NOT NULL DEFAULT 'pending',
+			desired_ipv4 TEXT NOT NULL DEFAULT '',
+			desired_ipv6 TEXT NOT NULL DEFAULT '',
+			observed_ipv4_json TEXT NOT NULL DEFAULT '[]',
+			observed_ipv6_json TEXT NOT NULL DEFAULT '[]',
+			provider_record_a_id TEXT NOT NULL DEFAULT '',
+			provider_record_aaaa_id TEXT NOT NULL DEFAULT '',
+			created_a_by_panel INTEGER NOT NULL DEFAULT 0,
+			created_aaaa_by_panel INTEGER NOT NULL DEFAULT 0,
+			last_reconcile_unix INTEGER NOT NULL DEFAULT 0,
+			next_reconcile_unix INTEGER NOT NULL DEFAULT 0,
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL,
+			UNIQUE (dns_account_id, fqdn),
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
+			FOREIGN KEY (dns_account_id) REFERENCES dns_accounts(id) ON DELETE RESTRICT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_managed_domains_due
+			ON managed_domains(enabled, next_reconcile_unix)`,
+		`CREATE INDEX IF NOT EXISTS idx_managed_domains_node
+			ON managed_domains(node_id, fqdn)`,
+		`CREATE TABLE IF NOT EXISTS acme_accounts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			directory_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			account_key_ciphertext TEXT NOT NULL DEFAULT '',
+			registration_uri TEXT NOT NULL DEFAULT '',
+			eab_key_id TEXT NOT NULL DEFAULT '',
+			eab_hmac_ciphertext TEXT NOT NULL DEFAULT '',
+			terms_accepted_unix INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL DEFAULT 'pending',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS protocol_certificates (
+			id TEXT PRIMARY KEY,
+			node_id TEXT NOT NULL,
+			managed_domain_id TEXT NOT NULL,
+			acme_account_id TEXT NOT NULL,
+			domains_json TEXT NOT NULL DEFAULT '[]',
+			status TEXT NOT NULL DEFAULT 'pending',
+			agent_key_id TEXT NOT NULL DEFAULT '',
+			public_key_fingerprint TEXT NOT NULL DEFAULT '',
+			candidate_cert_path TEXT NOT NULL DEFAULT '',
+			candidate_key_path TEXT NOT NULL DEFAULT '',
+			active_cert_path TEXT NOT NULL DEFAULT '',
+			active_key_path TEXT NOT NULL DEFAULT '',
+			cert_pem TEXT NOT NULL DEFAULT '',
+			serial TEXT NOT NULL DEFAULT '',
+			fingerprint TEXT NOT NULL DEFAULT '',
+			not_before_unix INTEGER NOT NULL DEFAULT 0,
+			not_after_unix INTEGER NOT NULL DEFAULT 0,
+			renew_after_unix INTEGER NOT NULL DEFAULT 0,
+			revision INTEGER NOT NULL DEFAULT 0,
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			next_retry_unix INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL,
+			UNIQUE (node_id, managed_domain_id),
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
+			FOREIGN KEY (managed_domain_id) REFERENCES managed_domains(id) ON DELETE CASCADE,
+			FOREIGN KEY (acme_account_id) REFERENCES acme_accounts(id) ON DELETE RESTRICT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_protocol_certificates_renewal
+			ON protocol_certificates(status, renew_after_unix)`,
+		`CREATE TABLE IF NOT EXISTS node_inbound_tls_bindings (
+			node_id TEXT NOT NULL,
+			inbound_id TEXT NOT NULL,
+			mode TEXT NOT NULL DEFAULT 'legacy',
+			managed_domain_id TEXT,
+			certificate_id TEXT,
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL,
+			PRIMARY KEY (node_id, inbound_id),
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
+			FOREIGN KEY (inbound_id) REFERENCES inbounds(id) ON DELETE CASCADE,
+			FOREIGN KEY (managed_domain_id) REFERENCES managed_domains(id) ON DELETE SET NULL,
+			FOREIGN KEY (certificate_id) REFERENCES protocol_certificates(id) ON DELETE SET NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_node_inbound_tls_domain
+			ON node_inbound_tls_bindings(managed_domain_id)`,
+		`CREATE TABLE IF NOT EXISTS automation_jobs (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			target_type TEXT NOT NULL,
+			target_id TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'pending',
+			payload_json TEXT NOT NULL DEFAULT '{}',
+			attempt INTEGER NOT NULL DEFAULT 0,
+			next_run_unix INTEGER NOT NULL DEFAULT 0,
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_expires_unix INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_automation_jobs_due
+			ON automation_jobs(state, next_run_unix, lease_expires_unix)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_jobs_active_target
+			ON automation_jobs(type, target_type, target_id)
+			WHERE state IN ('pending', 'running', 'retry_wait')`,
+		`CREATE TABLE IF NOT EXISTS automation_audit_logs (
+			id TEXT PRIMARY KEY,
+			action TEXT NOT NULL,
+			target_type TEXT NOT NULL DEFAULT '',
+			target_id TEXT NOT NULL DEFAULT '',
+			actor TEXT NOT NULL DEFAULT '',
+			outcome TEXT NOT NULL DEFAULT '',
+			detail TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_automation_audit_created
+			ON automation_audit_logs(created_at_unix DESC)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -592,6 +734,39 @@ func (s *Store) DeleteNode(id string) error {
 		return fmt.Errorf("节点仍被代理链引用：%s；请先替换对应跳点或删除代理链", strings.Join(chainNames, "、"))
 	}
 
+	var runningAutomation int
+	if err := tx.QueryRow(`
+		SELECT COUNT(*) FROM automation_jobs
+		WHERE state = 'running' AND (
+			(target_type = 'managed_domain' AND target_id IN (
+				SELECT id FROM managed_domains WHERE node_id = ?
+			)) OR
+			(target_type = 'protocol_certificate' AND target_id IN (
+				SELECT id FROM protocol_certificates WHERE node_id = ?
+			))
+		)`, id, id,
+	).Scan(&runningAutomation); err != nil {
+		return fmt.Errorf("检查节点自动化任务失败：%w", err)
+	}
+	if runningAutomation > 0 {
+		return fmt.Errorf("节点有 %d 个正在执行的 DNS/证书任务，请等待任务结束后再删除", runningAutomation)
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM automation_jobs
+		WHERE target_type = 'protocol_certificate'
+			AND target_id IN (SELECT id FROM protocol_certificates WHERE node_id = ?)`,
+		id,
+	); err != nil {
+		return fmt.Errorf("取消节点协议证书任务失败：%w", err)
+	}
+	if _, err := tx.Exec(`
+		DELETE FROM automation_jobs
+		WHERE target_type = 'managed_domain'
+			AND target_id IN (SELECT id FROM managed_domains WHERE node_id = ?)`,
+		id,
+	); err != nil {
+		return fmt.Errorf("取消节点 DNS 任务失败：%w", err)
+	}
 	if _, err := tx.Exec(`DELETE FROM node_inbounds WHERE node_id = ?`, id); err != nil {
 		return fmt.Errorf("删除节点入站关联失败：%w", err)
 	}

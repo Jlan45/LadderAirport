@@ -9,12 +9,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/ladderairport/agent/internal/control"
 	"github.com/ladderairport/agent/internal/managementpki"
+	"github.com/ladderairport/agent/internal/protocolcert"
 	"github.com/ladderairport/agent/internal/version"
 	"github.com/ladderairport/pkg/auth"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
@@ -67,6 +69,16 @@ func main() {
 	log.Printf("运行模式=内置代理实例 Agent版本=%s sing-box版本=%s 数据目录=%q", agentVersion, singboxVer, *dataDir)
 
 	srv := control.NewServer(rt, agentVersion, singboxVer, logs)
+	srv.SetPublicAddressResolver(control.NewPublicAddressResolver())
+	certDataDir := *dataDir
+	if certDataDir == "" {
+		certDataDir = "./data"
+	}
+	protocolCerts, err := protocolcert.New(filepath.Join(certDataDir, "protocol-certs"))
+	if err != nil {
+		log.Fatalf("初始化协议证书存储失败：%v", err)
+	}
+	srv.SetProtocolCertificateManager(protocolCerts)
 
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(auth.UnaryServerInterceptor(*token)),

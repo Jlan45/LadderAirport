@@ -34,16 +34,20 @@ import {
 import {
   applyNode,
   getNodeInstallCommand,
+  getNodeInboundTLS,
   getNodeMetrics,
   listInbounds,
   listNodeInbounds,
   listNodeInterfaces,
+  listManagedDomains,
   listNodes,
+  listProtocolCertificates,
   previewNodeConfig,
   setNodeInboundBindings,
   startNode,
   stopNode,
   streamNodeLogs,
+  putNodeInboundTLS,
   updateNode,
   upgradeNode,
   type InboundConfig,
@@ -52,6 +56,9 @@ import {
   type Node,
   type NodeInboundBinding,
   type NodeInstallInfo,
+  type NodeInboundTLSBinding,
+  type ManagedDomain,
+  type ProtocolCertificate,
   type Task,
   type UpdateNodeInput,
 } from '../api/client'
@@ -143,6 +150,12 @@ function inboundNATSnapshot(value: Record<string, InboundNATEdit>): string {
   )
 }
 
+function supportsManagedTLS(inbound: InboundConfig): boolean {
+  if (['trojan', 'hysteria2', 'tuic', 'anytls'].includes(inbound.protocol)) return true
+  if (['vless', 'vmess'].includes(inbound.protocol)) return inbound.params?.tls_mode !== 'reality'
+  return false
+}
+
 export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) {
   const open = !!nodeId
   const id = nodeId ?? ''
@@ -153,6 +166,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [savedInboundNAT, setSavedInboundNAT] = useState<Record<string, InboundNATEdit>>({})
   const [inboundsLoading, setInboundsLoading] = useState(false)
   const [inboundsError, setInboundsError] = useState('')
+  const [tlsBindings, setTLSBindings] = useState<Record<string, NodeInboundTLSBinding>>({})
+  const [managedDomains, setManagedDomains] = useState<ManagedDomain[]>([])
+  const [protocolCertificates, setProtocolCertificates] = useState<ProtocolCertificate[]>([])
+  const [tlsBusy, setTLSBusy] = useState('')
   const [preview, setPreview] = useState('')
   const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [task, setTask] = useState<Task | null>(null)
@@ -333,6 +350,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
 
   const inboundsDirty =
     inboundNATSnapshot(inboundNAT) !== inboundNATSnapshot(savedInboundNAT)
+  const attachedTLSKey = Object.keys(savedInboundNAT).sort().join(',')
 
   useUnsavedNavigation({
     active: open && (connectionDirty || inboundsDirty),
@@ -346,6 +364,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setAllInbounds([])
     setInboundNAT({})
     setSavedInboundNAT({})
+    setTLSBindings({})
+    setManagedDomains([])
+    setProtocolCertificates([])
+    setTLSBusy('')
     setPreview('')
     setMetrics(null)
     setTask(null)
@@ -371,6 +393,31 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       }
     }
   }, [id, open, load, loadInterfaces])
+
+  useEffect(() => {
+    if (!open || !id || !attachedTLSKey) {
+      setTLSBindings({})
+      return
+    }
+    let cancelled = false
+    const inboundIDs = attachedTLSKey.split(',').filter(Boolean)
+    ;(async () => {
+      try {
+        const [domains, certificates, bindings] = await Promise.all([
+          listManagedDomains(),
+          listProtocolCertificates(),
+          Promise.all(inboundIDs.map((inboundID) => getNodeInboundTLS(id, inboundID))),
+        ])
+        if (cancelled) return
+        setManagedDomains((domains ?? []).filter((item) => item.node_id === id))
+        setProtocolCertificates((certificates ?? []).filter((item) => item.node_id === id))
+        setTLSBindings(Object.fromEntries(bindings.map((binding) => [binding.inbound_id, binding])))
+      } catch (err) {
+        if (!cancelled) toast.error(err instanceof Error ? err.message : '加载托管 TLS 绑定失败')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [attachedTLSKey, id, open])
 
   useEffect(() => {
     if (!open || activeTab !== 'ops' || !node || !isOnlineStatus(node.status)) {
@@ -450,6 +497,28 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       }
       return next
     })
+  }
+
+  async function saveTLSBinding(inboundID: string) {
+    const binding = tlsBindings[inboundID] ?? {
+      node_id: id, inbound_id: inboundID, mode: 'legacy' as const,
+    }
+    setTLSBusy(inboundID)
+    try {
+      const result = await putNodeInboundTLS(id, inboundID, {
+        mode: binding.mode,
+        managed_domain_id: binding.managed_domain_id,
+        certificate_id: binding.certificate_id,
+      })
+      setTLSBindings((current) => ({ ...current, [inboundID]: result.binding }))
+      if (result.apply_task) setTask(result.apply_task)
+      toast.success(binding.mode === 'managed' ? '托管 TLS 已保存并开始下发' : '已恢复传统 TLS 并开始下发')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存托管 TLS 失败')
+    } finally {
+      setTLSBusy('')
+    }
   }
 
   function updateInboundNAT(inboundId: string, patch: Partial<InboundNATEdit>) {
@@ -1190,6 +1259,21 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                             const listenPort = Number(inb.params?.port) || 0
                             const checked = !!inboundNAT[inb.id]
                             const nat = inboundNAT[inb.id]
+                            const attached = !!savedInboundNAT[inb.id]
+                            const tlsBinding = tlsBindings[inb.id] ?? {
+                              node_id: id,
+                              inbound_id: inb.id,
+                              mode: 'legacy' as const,
+                            }
+                            const availableCertificates = protocolCertificates.filter(
+                              (certificate) =>
+                                certificate.status === 'active' &&
+                                managedDomains.some(
+                                  (domain) =>
+                                    domain.id === certificate.managed_domain_id &&
+                                    domain.state === 'ready',
+                                ),
+                            )
                             return (
                               <div
                                 key={inb.id}
@@ -1266,6 +1350,86 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                                           )}
                                       </code>
                                     </div>
+                                    {supportsManagedTLS(inb) && (
+                                      <div className="col-span-1 sm:col-span-2 space-y-3 rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div>
+                                            <div className="text-xs font-medium text-zinc-300">协议 TLS</div>
+                                            <div className="mt-1 text-xs text-zinc-500">托管模式使用 Agent 本地私钥和自动续期证书。</div>
+                                          </div>
+                                          {!attached && <Badge variant="warning">请先保存入站关联</Badge>}
+                                        </div>
+                                        <div className="grid gap-3 sm:grid-cols-[160px_1fr_auto]">
+                                          <Select
+                                            value={tlsBinding.mode}
+                                            disabled={!attached || tlsBusy === inb.id}
+                                            onValueChange={(mode: 'legacy' | 'managed') => {
+                                              const first = availableCertificates[0]
+                                              setTLSBindings((current) => ({
+                                                ...current,
+                                                [inb.id]: {
+                                                  node_id: id,
+                                                  inbound_id: inb.id,
+                                                  mode,
+                                                  certificate_id: mode === 'managed' ? first?.id : undefined,
+                                                  managed_domain_id: mode === 'managed' ? first?.managed_domain_id : undefined,
+                                                },
+                                              }))
+                                            }}
+                                          >
+                                            <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                              <SelectItem value="legacy">传统 TLS</SelectItem>
+                                              <SelectItem value="managed">托管 TLS</SelectItem>
+                                            </SelectContent>
+                                          </Select>
+                                          <Select
+                                            value={tlsBinding.certificate_id ?? ''}
+                                            disabled={!attached || tlsBinding.mode !== 'managed' || tlsBusy === inb.id || availableCertificates.length === 0}
+                                            onValueChange={(certificateID) => {
+                                              const certificate = availableCertificates.find((item) => item.id === certificateID)
+                                              if (!certificate) return
+                                              setTLSBindings((current) => ({
+                                                ...current,
+                                                [inb.id]: {
+                                                  ...tlsBinding,
+                                                  mode: 'managed',
+                                                  certificate_id: certificate.id,
+                                                  managed_domain_id: certificate.managed_domain_id,
+                                                },
+                                              }))
+                                            }}
+                                          >
+                                            <SelectTrigger className="h-8"><SelectValue placeholder="选择已签发证书" /></SelectTrigger>
+                                            <SelectContent>
+                                              {availableCertificates.map((certificate) => (
+                                                <SelectItem key={certificate.id} value={certificate.id}>
+                                                  {certificate.domains.join(', ')} · r{certificate.revision}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            loading={tlsBusy === inb.id}
+                                            disabled={
+                                              !attached ||
+                                              (tlsBinding.mode === 'managed' && !tlsBinding.certificate_id)
+                                            }
+                                            onClick={() => void saveTLSBinding(inb.id)}
+                                          >
+                                            保存 TLS
+                                          </Button>
+                                        </div>
+                                        {availableCertificates.length === 0 && (
+                                          <div className="text-xs text-zinc-500">
+                                            尚无可用证书，请先前往 <Link className="text-primary hover:underline" to="/dns-certificates">DNS/ACME</Link> 完成域名同步和签发。
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>

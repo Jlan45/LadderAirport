@@ -209,6 +209,109 @@ export interface PKICertificate {
   created_at_unix: number
 }
 
+export interface DNSCredentialField {
+  name: string
+  label: string
+  secret: boolean
+  required: boolean
+  description?: string
+}
+
+export interface DNSProviderMetadata {
+  name: string
+  label: string
+  credential_fields: DNSCredentialField[]
+  capabilities: string[]
+}
+
+export interface DNSAccount {
+  id: string
+  name: string
+  provider: string
+  has_credentials: boolean
+  settings: Record<string, unknown>
+  enabled: boolean
+  last_test_unix: number
+  last_test_error?: string
+  created_at_unix: number
+  updated_at_unix: number
+}
+
+export interface ManagedDomain {
+  id: string
+  node_id: string
+  dns_account_id: string
+  zone: string
+  fqdn: string
+  record_mode: 'a' | 'aaaa' | 'dual'
+  address_source: 'manual' | 'node_address' | 'agent_public'
+  manual_ipv4?: string
+  manual_ipv6?: string
+  ttl: number
+  enabled: boolean
+  state: string
+  desired_ipv4?: string
+  desired_ipv6?: string
+  observed_ipv4: string[]
+  observed_ipv6: string[]
+  last_reconcile_unix: number
+  next_reconcile_unix: number
+  last_error?: string
+}
+
+export interface ACMEAccount {
+  id: string
+  name: string
+  directory_url: string
+  email?: string
+  has_account_key: boolean
+  registration_uri?: string
+  eab_key_id?: string
+  has_eab_hmac: boolean
+  terms_accepted_unix: number
+  status: string
+  last_error?: string
+}
+
+export interface ProtocolCertificate {
+  id: string
+  node_id: string
+  managed_domain_id: string
+  acme_account_id: string
+  domains: string[]
+  status: string
+  active_cert_path?: string
+  active_key_path?: string
+  serial?: string
+  fingerprint?: string
+  not_before_unix: number
+  not_after_unix: number
+  renew_after_unix: number
+  revision: number
+  last_error?: string
+}
+
+export interface AutomationJob {
+  id: string
+  type: string
+  target_type: string
+  target_id: string
+  state: string
+  attempt: number
+  next_run_unix: number
+  last_error?: string
+  created_at_unix: number
+  updated_at_unix: number
+}
+
+export interface NodeInboundTLSBinding {
+  node_id: string
+  inbound_id: string
+  mode: 'legacy' | 'managed'
+  managed_domain_id?: string
+  certificate_id?: string
+}
+
 export interface TaskNodeResult {
   node_id: string
   ok: boolean
@@ -684,6 +787,103 @@ export function listPKICertificates(): Promise<PKICertificate[]> {
 
 export function revokePKICertificate(serial: string, reason = ''): Promise<{ ok: boolean }> {
   return request('POST', `/pki/certificates/${encodeURIComponent(serial)}/revoke`, { reason })
+}
+
+// --- Managed DNS / ACME protocol certificates ---
+
+export function listDNSProviders(): Promise<DNSProviderMetadata[]> {
+  return request('GET', '/dns/providers')
+}
+
+export function listDNSAccounts(): Promise<DNSAccount[]> {
+  return request('GET', '/dns/accounts')
+}
+
+export function createDNSAccount(body: {
+  name: string
+  provider: string
+  credentials: Record<string, string>
+  settings?: Record<string, unknown>
+  enabled?: boolean
+}): Promise<DNSAccount> {
+  return request('POST', '/dns/accounts', body)
+}
+
+export function testDNSAccount(id: string): Promise<{ ok: boolean }> {
+  return request('POST', `/dns/accounts/${id}/test`)
+}
+
+export function listManagedDomains(): Promise<ManagedDomain[]> {
+  return request('GET', '/managed-domains')
+}
+
+export function createManagedDomain(body: {
+  node_id: string
+  dns_account_id: string
+  zone: string
+  fqdn: string
+  record_mode: 'a' | 'aaaa' | 'dual'
+  address_source: 'manual' | 'node_address' | 'agent_public'
+  manual_ipv4?: string
+  manual_ipv6?: string
+  ttl?: number
+}): Promise<ManagedDomain> {
+  return request('POST', '/managed-domains', body)
+}
+
+export function reconcileManagedDomain(id: string): Promise<AutomationJob> {
+  return request('POST', `/managed-domains/${id}/reconcile`)
+}
+
+export function listACMEAccounts(): Promise<ACMEAccount[]> {
+  return request('GET', '/acme/accounts')
+}
+
+export function createACMEAccount(body: {
+  name: string
+  directory_url: string
+  email?: string
+  eab_key_id?: string
+  eab_hmac?: string
+  accept_terms: boolean
+}): Promise<ACMEAccount> {
+  return request('POST', '/acme/accounts', body)
+}
+
+export function registerACMEAccount(id: string): Promise<ACMEAccount> {
+  return request('POST', `/acme/accounts/${id}/register`)
+}
+
+export function listProtocolCertificates(): Promise<ProtocolCertificate[]> {
+  return request('GET', '/protocol-certificates')
+}
+
+export function createProtocolCertificate(body: {
+  node_id: string
+  managed_domain_id: string
+  acme_account_id: string
+}): Promise<{ certificate: ProtocolCertificate; job: AutomationJob }> {
+  return request('POST', '/protocol-certificates', body)
+}
+
+export function issueProtocolCertificate(id: string): Promise<AutomationJob> {
+  return request('POST', `/protocol-certificates/${id}/issue`)
+}
+
+export function listAutomationJobs(): Promise<AutomationJob[]> {
+  return request('GET', '/automation/jobs')
+}
+
+export function getNodeInboundTLS(nodeID: string, inboundID: string): Promise<NodeInboundTLSBinding> {
+  return request('GET', `/nodes/${nodeID}/inbounds/${inboundID}/tls`)
+}
+
+export function putNodeInboundTLS(
+  nodeID: string,
+  inboundID: string,
+  body: Pick<NodeInboundTLSBinding, 'mode' | 'managed_domain_id' | 'certificate_id'>,
+): Promise<{ binding: NodeInboundTLSBinding; apply_task?: Task; message?: string }> {
+  return request('PUT', `/nodes/${nodeID}/inbounds/${inboundID}/tls`, body)
 }
 
 // --- Subscriptions ---

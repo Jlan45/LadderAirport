@@ -11,10 +11,17 @@ import (
 	"path/filepath"
 	"time"
 
+	acmeservice "github.com/ladderairport/panel/internal/acme"
 	"github.com/ladderairport/panel/internal/api"
+	"github.com/ladderairport/panel/internal/automation"
 	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/certmanager"
+	"github.com/ladderairport/panel/internal/dnsprovider"
+	"github.com/ladderairport/panel/internal/dnsproviders"
+	"github.com/ladderairport/panel/internal/dnsreconcile"
 	"github.com/ladderairport/panel/internal/pki"
 	"github.com/ladderairport/panel/internal/proxychain"
+	"github.com/ladderairport/panel/internal/secretstore"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
 	"github.com/ladderairport/panel/internal/version"
@@ -31,6 +38,11 @@ func main() {
 	showVersion := flag.Bool("version", false, "显示版本后退出")
 	pkiDir := flag.String("pki-dir", "", "管理 PKI 目录（默认：<数据库目录>/pki）")
 	pkiRotateIntermediate := flag.Bool("pki-rotate-intermediate", false, "轮换在线中间 CA 和 Panel 客户端证书后退出")
+	credentialsKeyFile := flag.String(
+		"credentials-key-file",
+		"",
+		"DNS/ACME 凭据主密钥文件（默认：<数据库目录>/secrets/credentials.key）",
+	)
 	flag.Parse()
 
 	if *showVersion {
@@ -53,6 +65,27 @@ func main() {
 		log.Fatalf("打开数据存储失败：%v", err)
 	}
 	defer func() { _ = st.Close() }()
+
+	keyFile := *credentialsKeyFile
+	if keyFile == "" {
+		keyFile = filepath.Join(filepath.Dir(*dbPath), "secrets", "credentials.key")
+	}
+	credentialsKey, err := secretstore.LoadOrCreateKey(secretstore.KeyOptions{
+		EnvironmentValue: os.Getenv("LADDER_CREDENTIALS_KEY"),
+		FilePath:         keyFile,
+	})
+	if err != nil {
+		log.Fatalf("打开 DNS/ACME 凭据主密钥失败：%v", err)
+	}
+	secrets, err := secretstore.New(credentialsKey)
+	if err != nil {
+		log.Fatalf("初始化 DNS/ACME 凭据保险箱失败：%v", err)
+	}
+	log.Printf("DNS/ACME 凭据保险箱已启用（密钥来源=%s）", credentialKeySource(keyFile))
+	dnsRegistry := dnsprovider.NewRegistry()
+	if err := dnsproviders.RegisterBuiltins(dnsRegistry); err != nil {
+		log.Fatalf("注册 DNS 供应商失败：%v", err)
+	}
 
 	dir := *pkiDir
 	if dir == "" {
@@ -104,17 +137,56 @@ func main() {
 	if settings.MaxConcurrency > 0 {
 		runner.MaxConcurrency = settings.MaxConcurrency
 	}
+	dnsService := &dnsreconcile.Service{
+		Store:     st,
+		Secrets:   secrets,
+		Providers: dnsRegistry,
+		Timeout:   runner.Timeout,
+		DefaultToken: func() string {
+			cur, err := st.GetSettings()
+			if err != nil {
+				return settings.DefaultAgentToken
+			}
+			return cur.DefaultAgentToken
+		},
+		DialAgent: func(ctx context.Context, node store.Node, token string) (dnsreconcile.Agent, error) {
+			return runner.DialClient(ctx, node, token)
+		},
+	}
+	acmeService := &acmeservice.Service{Secrets: secrets}
+	certificateService := &certmanager.Service{
+		Store: st, Secrets: secrets, Providers: dnsRegistry, ACME: acmeService,
+		Timeout: 10 * time.Minute, ConfigBuilder: runner.ConfigBuilder,
+		Coordinator: runner.Coordinator,
+		DefaultToken: func() string {
+			cur, err := st.GetSettings()
+			if err != nil {
+				return settings.DefaultAgentToken
+			}
+			return cur.DefaultAgentToken
+		},
+		DialAgent: func(ctx context.Context, node store.Node, token string) (certmanager.Agent, error) {
+			return runner.DialClient(ctx, node, token)
+		},
+	}
+	automationRunner := &automation.Runner{
+		Store: st, DNS: dnsService, Certificates: certificateService,
+		Owner: automationOwner(),
+	}
 
 	agg := subscription.NewAggregator(st)
 	chainService := proxychain.NewService(st, runner.ConfigBuilder, runner.Coordinator)
 	chainService.PKI = ca
 	srv := &api.Server{
-		Store:      st,
-		Runner:     runner,
-		Secret:     secret,
-		Aggregator: agg,
-		Chains:     chainService,
-		PKI:        ca,
+		Store:        st,
+		Runner:       runner,
+		Secret:       secret,
+		Aggregator:   agg,
+		Chains:       chainService,
+		PKI:          ca,
+		Secrets:      secrets,
+		DNSProviders: dnsRegistry,
+		ACME:         acmeService,
 	}
 
 	addr := *listen
@@ -159,11 +231,27 @@ func main() {
 		agg.RunBackground(context.Background(), subscription.BackgroundTick)
 	}()
 	go chainService.RunProbeLoop(context.Background())
+	go automationRunner.Run(context.Background())
 
 	log.Printf("Panel 正在监听 %s（数据库=%s，版本=%s）", addr, *dbPath, version.Version)
 	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
 		log.Fatalf("启动监听失败：%v", err)
 	}
+}
+
+func automationOwner() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("%s-%d", host, os.Getpid())
+}
+
+func credentialKeySource(file string) string {
+	if os.Getenv("LADDER_CREDENTIALS_KEY") != "" {
+		return "LADDER_CREDENTIALS_KEY"
+	}
+	return file
 }
 
 func randomSecret(n int) ([]byte, error) {

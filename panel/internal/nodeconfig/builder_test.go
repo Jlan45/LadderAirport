@@ -1,0 +1,115 @@
+package nodeconfig
+
+import (
+	"encoding/json"
+	"path/filepath"
+	"testing"
+
+	"github.com/ladderairport/panel/internal/store"
+)
+
+func TestBuildOverlaysManagedTLSWithoutMutatingGlobalInbound(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	node := &store.Node{Name: "edge", Address: "192.0.2.10", GRPCPort: 50051, Status: "online"}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	inbound := &store.InboundConfig{
+		Name: "trojan", Protocol: "trojan", Enabled: true,
+		Params: map[string]any{
+			"listen": "0.0.0.0", "port": 443, "password": "secret",
+			"tls_cert_path": "/legacy/cert.pem", "tls_key_path": "/legacy/key.pem",
+		},
+	}
+	if err := st.CreateInbound(inbound); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(node.ID, []string{inbound.ID}); err != nil {
+		t.Fatal(err)
+	}
+	dnsAccount := &store.DNSAccount{
+		Name: "DNS", Provider: "callback", CredentialsCiphertext: "encrypted",
+		Settings: map[string]any{}, Enabled: true,
+	}
+	if err := st.CreateDNSAccount(dnsAccount); err != nil {
+		t.Fatal(err)
+	}
+	domain := &store.ManagedDomain{
+		NodeID: node.ID, DNSAccountID: dnsAccount.ID, Zone: "example.com",
+		FQDN: "edge.example.com", RecordMode: "a", AddressSource: "manual",
+		ManualIPv4: "192.0.2.10", TTL: 300, Enabled: true, State: "ready",
+	}
+	if err := st.CreateManagedDomain(domain); err != nil {
+		t.Fatal(err)
+	}
+	acmeAccount := &store.ACMEAccount{
+		Name: "CA", DirectoryURL: "https://ca.example/directory",
+		AccountKeyCiphertext: "encrypted", Status: "active",
+	}
+	if err := st.CreateACMEAccount(acmeAccount); err != nil {
+		t.Fatal(err)
+	}
+	certificate := &store.ProtocolCertificate{
+		NodeID: node.ID, ManagedDomainID: domain.ID, ACMEAccountID: acmeAccount.ID,
+		Domains: []string{domain.FQDN}, Status: "active",
+		ActiveCertPath: "/managed/r1/fullchain.pem",
+		ActiveKeyPath:  "/managed/r1/privkey.pem", Revision: 1,
+	}
+	if err := st.CreateProtocolCertificate(certificate); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutNodeInboundTLSBinding(&store.NodeInboundTLSBinding{
+		NodeID: node.ID, InboundID: inbound.ID, Mode: "managed",
+		ManagedDomainID: domain.ID, CertificateID: certificate.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := (&Builder{Store: st}).Build(node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(result.JSON), &config); err != nil {
+		t.Fatal(err)
+	}
+	inbounds := config["inbounds"].([]any)
+	tls := inbounds[0].(map[string]any)["tls"].(map[string]any)
+	if tls["certificate_path"] != "/managed/r1/fullchain.pem" ||
+		tls["key_path"] != "/managed/r1/privkey.pem" ||
+		tls["server_name"] != "edge.example.com" {
+		t.Fatalf("tls = %+v", tls)
+	}
+	stored, err := st.GetInbound(inbound.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Params["tls_cert_path"] != "/legacy/cert.pem" ||
+		stored.Params["server_name"] != nil {
+		t.Fatalf("global inbound was mutated: %+v", stored.Params)
+	}
+	resolved, hostname, managed, err := (&Builder{Store: st}).ResolveManagedTLS(node.ID, *stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !managed || hostname != "edge.example.com" ||
+		resolved.Params["tls_cert_path"] != "/managed/r1/fullchain.pem" {
+		t.Fatalf("resolved=%+v hostname=%s managed=%v", resolved, hostname, managed)
+	}
+	endpoint, err := (&Builder{Store: st}).ResolveHopEndpoint(store.ProxyChain{
+		Name: "managed-chain",
+		Hops: []store.ProxyChainHop{{
+			NodeID: node.ID, InboundID: inbound.ID,
+		}},
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint.Server != "edge.example.com" ||
+		endpoint.Params["server_name"] != "edge.example.com" {
+		t.Fatalf("managed chain endpoint = %+v", endpoint)
+	}
+}

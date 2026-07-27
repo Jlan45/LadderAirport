@@ -14,9 +14,13 @@ import (
 	"testing"
 	"time"
 
+	acmeservice "github.com/ladderairport/panel/internal/acme"
 	"github.com/ladderairport/panel/internal/api"
 	"github.com/ladderairport/panel/internal/batch"
+	"github.com/ladderairport/panel/internal/dnsprovider"
+	"github.com/ladderairport/panel/internal/dnsproviders"
 	"github.com/ladderairport/panel/internal/pki"
+	"github.com/ladderairport/panel/internal/secretstore"
 	"github.com/ladderairport/panel/internal/store"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc/metadata"
@@ -184,13 +188,24 @@ func newTestServer(t *testing.T, dial batch.DialFunc, live api.LiveDialFunc) (*h
 	if dial != nil {
 		runner.Dial = dial
 	}
+	secrets, err := secretstore.New(bytes.Repeat([]byte{0x41}, 32))
+	if err != nil {
+		t.Fatalf("secretstore.New: %v", err)
+	}
+	dnsRegistry := dnsprovider.NewRegistry()
+	if err := dnsproviders.RegisterBuiltins(dnsRegistry); err != nil {
+		t.Fatalf("RegisterBuiltins: %v", err)
+	}
 
 	srv := &api.Server{
-		Store:  st,
-		Runner: runner,
-		Secret: []byte("test-session-secret-at-least-32b"),
-		Dial:   live,
-		PKI:    ca,
+		Store:        st,
+		Runner:       runner,
+		Secret:       []byte("test-session-secret-at-least-32b"),
+		Dial:         live,
+		PKI:          ca,
+		Secrets:      secrets,
+		DNSProviders: dnsRegistry,
+		ACME:         &acmeservice.Service{Secrets: secrets},
 	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

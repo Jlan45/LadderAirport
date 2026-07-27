@@ -489,20 +489,28 @@ func buildTLS(params map[string]any, required bool) (map[string]any, error) {
 	certPEM := optionalString(params, "tls_cert_pem")
 	keyPEM := optionalString(params, "tls_key_pem")
 	if certPEM != "" && keyPEM != "" {
-		return map[string]any{
+		tls := map[string]any{
 			"enabled":     true,
 			"certificate": []string{certPEM},
 			"key":         []string{keyPEM},
-		}, nil
+		}
+		if serverName := optionalString(params, "server_name"); serverName != "" {
+			tls["server_name"] = serverName
+		}
+		return tls, nil
 	}
 	certPath := optionalString(params, "tls_cert_path")
 	keyPath := optionalString(params, "tls_key_path")
 	if certPath != "" && keyPath != "" {
-		return map[string]any{
+		tls := map[string]any{
 			"enabled":          true,
 			"certificate_path": certPath,
 			"key_path":         keyPath,
-		}, nil
+		}
+		if serverName := optionalString(params, "server_name"); serverName != "" {
+			tls["server_name"] = serverName
+		}
+		return tls, nil
 	}
 	if required {
 		return nil, fmt.Errorf("缺少 TLS 材料（tls_cert_pem/tls_key_pem 或 tls_cert_path/tls_key_path）")

@@ -12,6 +12,7 @@
 - **入站模板**：SS / Trojan / VLESS(Reality) / Hysteria2 / TUIC / AnyTLS / VMess
 - **配置下发**：关联入站 → 完整 sing-box JSON → gRPC 热更新；启动时自动同步并重试
 - **订阅**：Clash / sing-box 链接，基础 CN 分流；可聚合外部机场订阅源
+- **DNS / ACME**：AliDNS、DNSPod、Cloudflare 或 Callback 自动解析；DNS-01 自动签发和续期协议 TLS 证书，私钥只留在 Agent
 - **部署**：一键装成 systemd 服务
 
 ## 快速安装
@@ -64,7 +65,10 @@ make test
 - 节点强制使用 Panel 管理 CA 和 mTLS；不兼容的旧 Agent 需全清卸载后重新创建并注册
 - 首次初始化后离线保存并移走根 CA 私钥；Panel 日常只保留中间 CA 私钥
 - 公网 Panel 必须反代 HTTPS；代理入站公网证书继续使用 ACME，不与管理 CA 混用
+- 备份 `panel.db` 时同时备份 `secrets/credentials.key`；缺少该密钥将无法解密 DNS / ACME 凭据
 - 浏览器不直连 Agent，仅 Panel 访问控制口
+
+DNS 自动解析和协议证书的配置、权限与恢复说明见 [DNS / ACME 运维指南](docs/dns-acme.md)。
 
 ## 许可证
 

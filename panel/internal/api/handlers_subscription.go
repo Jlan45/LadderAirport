@@ -334,6 +334,23 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		if err != nil {
 			return nil, "", err
 		}
+		builder := &nodeconfig.Builder{Store: s.Store}
+		for i := range local {
+			resolved, hostname, managed, err := builder.ResolveManagedTLS(
+				local[i].Node.ID, local[i].Inbound,
+			)
+			if err != nil {
+				return nil, "", err
+			}
+			if !managed {
+				continue
+			}
+			verify := false
+			local[i].Inbound = resolved
+			local[i].Params = resolved.Params
+			local[i].Server = hostname
+			local[i].TLSSkipVerify = &verify
+		}
 	}
 	if sub.IncludeAllChains || len(sub.ChainIDs) > 0 {
 		chains, err := s.Store.ListProxyChains()

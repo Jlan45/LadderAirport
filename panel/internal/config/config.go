@@ -10,4 +10,8 @@ type Config struct {
 	ListenAddr string
 	// SessionSecret signs JWT session cookies. Empty means generate a random secret at startup.
 	SessionSecret string
+	// CredentialsKey is an optional encoded 32-byte DNS/ACME credential key.
+	CredentialsKey string
+	// CredentialsKeyFile is used when CredentialsKey is empty.
+	CredentialsKeyFile string
 }
