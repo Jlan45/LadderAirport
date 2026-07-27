@@ -3,6 +3,7 @@ package api_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/ladderairport/panel/internal/store"
 )
@@ -30,6 +31,52 @@ func TestCreateProtocolCertificateEnqueuesIssue(t *testing.T) {
 	if len(jobs) != 1 || jobs[0].Type != "certificate.issue" ||
 		jobs[0].TargetID != certificate["id"] {
 		t.Fatalf("jobs=%+v", jobs)
+	}
+}
+
+func TestManualCertificateIssueReplacesWaitingRetry(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	node, domain, account := createCertificateAPIFixture(t, st)
+
+	resp, body := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/protocol-certificates", map[string]any{
+		"node_id": node.ID, "managed_domain_id": domain.ID, "acme_account_id": account.ID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d body=%v", resp.StatusCode, body)
+	}
+	certificate := body["certificate"].(map[string]any)
+	initialJob := body["job"].(map[string]any)
+	now := time.Now()
+	claimed, err := st.ClaimAutomationJobs("old-worker", now, time.Minute, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	if err := st.FinishAutomationJob(
+		claimed[0].ID, "old-worker", "retry_wait", "旧版 DNS-01 失败",
+		now.Add(6*time.Hour).Unix(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, retry := doJSON(
+		t, client, http.MethodPost,
+		ts.URL+"/api/v1/protocol-certificates/"+certificate["id"].(string)+"/issue", nil,
+	)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("retry status=%d body=%v", resp.StatusCode, retry)
+	}
+	if retry["id"] == initialJob["id"] || retry["state"] != "pending" {
+		t.Fatalf("retry=%v initial=%v", retry, initialJob)
+	}
+	old, err := st.GetAutomationJob(initialJob["id"].(string))
+	if err != nil || old.State != "failed" || old.LastError != "旧版 DNS-01 失败" {
+		t.Fatalf("old=%+v err=%v", old, err)
+	}
+	jobs, err := st.ListAutomationJobs(10)
+	if err != nil || len(jobs) != 2 || jobs[0].ID != retry["id"] {
+		t.Fatalf("jobs=%+v err=%v", jobs, err)
 	}
 }
 

@@ -65,7 +65,7 @@ func (s *Server) handleCreateProtocolCertificate(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	job, err := s.enqueueCertificateIssue(certificate.ID)
+	job, err := s.enqueueCertificateIssue(certificate.ID, false)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -89,7 +89,7 @@ func (s *Server) handleIssueProtocolCertificate(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	job, err := s.enqueueCertificateIssue(pathID(r))
+	job, err := s.enqueueCertificateIssue(pathID(r), true)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -97,10 +97,14 @@ func (s *Server) handleIssueProtocolCertificate(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusAccepted, job)
 }
 
-func (s *Server) enqueueCertificateIssue(id string) (*store.AutomationJob, error) {
-	return s.Store.EnqueueAutomationJob(&store.AutomationJob{
+func (s *Server) enqueueCertificateIssue(id string, force bool) (*store.AutomationJob, error) {
+	job := &store.AutomationJob{
 		Type: "certificate.issue", TargetType: "protocol_certificate", TargetID: id,
-	})
+	}
+	if force {
+		return s.Store.ForceEnqueueAutomationJob(job)
+	}
+	return s.Store.EnqueueAutomationJob(job)
 }
 
 func (s *Server) handleGetNodeInboundTLS(w http.ResponseWriter, r *http.Request) {

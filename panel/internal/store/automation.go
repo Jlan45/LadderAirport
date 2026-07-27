@@ -52,9 +52,89 @@ func (s *Store) EnqueueAutomationJob(job *AutomationJob) (*AutomationJob, error)
 	if err != sql.ErrNoRows {
 		return nil, fmt.Errorf("查询现有自动化任务失败：%w", err)
 	}
+	if err := insertAutomationJob(tx, job, nowUnix()); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+// ForceEnqueueAutomationJob makes a user-requested retry immediately due.
+// A waiting retry is marked failed and replaced so the previous failure remains in
+// task history. A pending or currently running operation is reused to prevent
+// duplicate concurrent work.
+func (s *Store) ForceEnqueueAutomationJob(job *AutomationJob) (*AutomationJob, error) {
+	if job == nil || job.Type == "" || job.TargetType == "" || job.TargetID == "" {
+		return nil, fmt.Errorf("必须提供任务类型和目标")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	existing, err := scanAutomationJob(tx.QueryRow(`
+		SELECT `+automationJobCols+` FROM automation_jobs
+		WHERE type = ? AND target_type = ? AND target_id = ?
+			AND state IN ('pending', 'running', 'retry_wait')
+		ORDER BY created_at_unix DESC LIMIT 1`,
+		job.Type, job.TargetType, job.TargetID,
+	))
+	now := nowUnix()
+	if err == nil {
+		switch existing.State {
+		case "running":
+			if existing.LeaseExpiresUnix > now {
+				return existing, nil
+			}
+		case "pending":
+			if _, err := tx.Exec(`
+				UPDATE automation_jobs SET next_run_unix = ?, last_error = '',
+					updated_at_unix = ? WHERE id = ?`,
+				now, now, existing.ID,
+			); err != nil {
+				return nil, fmt.Errorf("唤醒自动化任务失败：%w", err)
+			}
+			existing.NextRunUnix = now
+			existing.LastError = ""
+			existing.UpdatedAtUnix = now
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return existing, nil
+		}
+		if _, err := tx.Exec(`
+			UPDATE automation_jobs SET state = 'failed', next_run_unix = 0,
+				lease_owner = '', lease_expires_unix = 0, updated_at_unix = ?
+			WHERE id = ?`,
+			now, existing.ID,
+		); err != nil {
+			return nil, fmt.Errorf("结束旧自动化任务失败：%w", err)
+		}
+	} else if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("查询现有自动化任务失败：%w", err)
+	}
+	job.ID = ""
+	job.State = "pending"
+	job.Attempt = 0
+	job.NextRunUnix = now
+	job.LeaseOwner = ""
+	job.LeaseExpiresUnix = 0
+	job.LastError = ""
+	if err := insertAutomationJob(tx, job, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
+func insertAutomationJob(tx *sql.Tx, job *AutomationJob, now int64) error {
 	payloadJSON, err := marshalJSON(job.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("编码自动化任务参数失败：%w", err)
+		return fmt.Errorf("编码自动化任务参数失败：%w", err)
 	}
 	if job.ID == "" {
 		job.ID = newID()
@@ -62,7 +142,6 @@ func (s *Store) EnqueueAutomationJob(job *AutomationJob) (*AutomationJob, error)
 	if job.State == "" {
 		job.State = "pending"
 	}
-	now := nowUnix()
 	if job.NextRunUnix == 0 {
 		job.NextRunUnix = now
 	}
@@ -78,12 +157,9 @@ func (s *Store) EnqueueAutomationJob(job *AutomationJob) (*AutomationJob, error)
 		job.Attempt, job.NextRunUnix, job.LeaseOwner, job.LeaseExpiresUnix,
 		job.LastError, now, now,
 	); err != nil {
-		return nil, fmt.Errorf("创建自动化任务失败：%w", err)
+		return fmt.Errorf("创建自动化任务失败：%w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return job, nil
+	return nil
 }
 
 func (s *Store) GetAutomationJob(id string) (*AutomationJob, error) {
@@ -104,7 +180,7 @@ func (s *Store) ListAutomationJobs(limit int) ([]AutomationJob, error) {
 		limit = 200
 	}
 	rows, err := s.db.Query(`SELECT `+automationJobCols+`
-		FROM automation_jobs ORDER BY created_at_unix DESC LIMIT ?`, limit)
+		FROM automation_jobs ORDER BY created_at_unix DESC, rowid DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("查询自动化任务失败：%w", err)
 	}

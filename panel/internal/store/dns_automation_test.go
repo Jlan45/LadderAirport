@@ -295,6 +295,58 @@ func TestAutomationJobLeaseAndIdempotentEnqueue(t *testing.T) {
 	}
 }
 
+func TestForceEnqueueAutomationJobReplacesWaitingRetry(t *testing.T) {
+	s := openTestStore(t)
+	first, err := s.EnqueueAutomationJob(&AutomationJob{
+		Type: "certificate.issue", TargetType: "protocol_certificate", TargetID: "cert-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	claimed, err := s.ClaimAutomationJobs("worker-a", now, time.Minute, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	if err := s.FinishAutomationJob(
+		first.ID, "worker-a", "retry_wait", "旧版 DNS-01 失败",
+		now.Add(6*time.Hour).Unix(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	retry, err := s.ForceEnqueueAutomationJob(&AutomationJob{
+		Type: "certificate.issue", TargetType: "protocol_certificate", TargetID: "cert-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.ID == first.ID || retry.State != "pending" ||
+		retry.NextRunUnix > time.Now().Unix() {
+		t.Fatalf("retry=%+v", retry)
+	}
+	old, err := s.GetAutomationJob(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.State != "failed" || old.LastError != "旧版 DNS-01 失败" {
+		t.Fatalf("old=%+v", old)
+	}
+	again, err := s.ForceEnqueueAutomationJob(&AutomationJob{
+		Type: "certificate.issue", TargetType: "protocol_certificate", TargetID: "cert-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != retry.ID {
+		t.Fatalf("pending retry was duplicated: %s != %s", again.ID, retry.ID)
+	}
+	jobs, err := s.ListAutomationJobs(10)
+	if err != nil || len(jobs) != 2 || jobs[0].ID != retry.ID {
+		t.Fatalf("jobs=%+v err=%v", jobs, err)
+	}
+}
+
 func TestAutomationJobExpiredRunningLeaseIsRecovered(t *testing.T) {
 	s := openTestStore(t)
 	job, err := s.EnqueueAutomationJob(&AutomationJob{

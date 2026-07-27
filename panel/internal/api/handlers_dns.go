@@ -389,10 +389,14 @@ func (s *Server) handleReconcileManagedDomain(w http.ResponseWriter, r *http.Req
 }
 
 func (s *Server) enqueueDomainReconcile(id string, force bool) (*store.AutomationJob, error) {
-	return s.Store.EnqueueAutomationJob(&store.AutomationJob{
+	job := &store.AutomationJob{
 		Type: "dns.reconcile", TargetType: "managed_domain", TargetID: id,
 		Payload: map[string]any{"force": force},
-	})
+	}
+	if force {
+		return s.Store.ForceEnqueueAutomationJob(job)
+	}
+	return s.Store.EnqueueAutomationJob(job)
 }
 
 func (s *Server) buildManagedDomain(current *store.ManagedDomain, request managedDomainRequest) (*store.ManagedDomain, error) {
