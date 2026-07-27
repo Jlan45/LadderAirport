@@ -811,6 +811,10 @@ export function createDNSAccount(body: {
   return request('POST', '/dns/accounts', body)
 }
 
+export function deleteDNSAccount(id: string): Promise<void> {
+  return request('DELETE', `/dns/accounts/${id}`)
+}
+
 export function testDNSAccount(id: string): Promise<{ ok: boolean }> {
   return request('POST', `/dns/accounts/${id}/test`)
 }

@@ -41,8 +41,56 @@ func NormalizeFQDN(value string) (string, error) {
 	return ascii, nil
 }
 
+// NormalizeRecordFQDN normalizes a DNS record owner name. Unlike host names,
+// record owner labels may contain underscores (for example _acme-challenge).
+// Labels without underscores still go through the same IDNA conversion used by
+// NormalizeFQDN.
+func NormalizeRecordFQDN(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, ".")
+	value = strings.NewReplacer("。", ".", "．", ".", "｡", ".").Replace(value)
+	if value == "" {
+		return "", fmt.Errorf("DNS 记录名称不能为空")
+	}
+	labels := strings.Split(value, ".")
+	if len(labels) < 2 {
+		return "", fmt.Errorf("必须提供完整 DNS 记录名称")
+	}
+	normalized := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if label == "" {
+			return "", fmt.Errorf("DNS 记录名称标签无效：%q", label)
+		}
+		ascii := label
+		if !strings.ContainsRune(label, '_') {
+			var err error
+			ascii, err = idna.Lookup.ToASCII(label)
+			if err != nil {
+				return "", fmt.Errorf("DNS 记录名称 IDNA 转换失败：%w", err)
+			}
+		}
+		ascii = strings.ToLower(ascii)
+		if len(ascii) > 63 ||
+			strings.HasPrefix(ascii, "-") || strings.HasSuffix(ascii, "-") {
+			return "", fmt.Errorf("DNS 记录名称标签无效：%q", label)
+		}
+		for _, char := range ascii {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') &&
+				char != '-' && char != '_' {
+				return "", fmt.Errorf("DNS 记录名称标签包含无效字符：%q", label)
+			}
+		}
+		normalized = append(normalized, ascii)
+	}
+	result := strings.Join(normalized, ".")
+	if len(result) > 253 {
+		return "", fmt.Errorf("DNS 记录名称长度超过 253 字节")
+	}
+	return result, nil
+}
+
 func RelativeName(fqdn, zone string) (string, error) {
-	normalizedFQDN, err := NormalizeFQDN(fqdn)
+	normalizedFQDN, err := NormalizeRecordFQDN(fqdn)
 	if err != nil {
 		return "", err
 	}

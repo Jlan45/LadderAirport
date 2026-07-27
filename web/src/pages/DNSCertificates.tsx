@@ -7,12 +7,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Loader2, Play, Plus, RefreshCw, TestTube2 } from 'lucide-react'
+import { Loader2, Play, Plus, RefreshCw, TestTube2, Trash2 } from 'lucide-react'
 import {
   createACMEAccount,
   createDNSAccount,
   createManagedDomain,
   createProtocolCertificate,
+  deleteDNSAccount,
   issueProtocolCertificate,
   listACMEAccounts,
   listAutomationJobs,
@@ -86,6 +87,19 @@ export default function DNSCertificates() {
     }
   }
 
+  function removeDNSAccount(account: DNSAccount) {
+    const confirmed = window.confirm(
+      `确定删除 DNS 账号「${account.name}」吗？\n` +
+      '此操作无法撤销；如果账号仍有关联的托管域名，系统会拒绝删除。',
+    )
+    if (!confirmed) return
+    void action(
+      `dns-delete-${account.id}`,
+      () => deleteDNSAccount(account.id),
+      `DNS 账号「${account.name}」已删除`,
+    )
+  }
+
   if (loading && providers.length === 0) {
     return <div className="flex min-h-[320px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-500" /></div>
   }
@@ -124,7 +138,10 @@ export default function DNSCertificates() {
                 <TableCell className="font-mono text-xs">{account.zone || <span className="text-amber-400">待配置</span>}</TableCell>
                 <TableCell><StatusBadge value={account.enabled ? (account.last_test_error ? 'error' : 'enabled') : 'disabled'} /></TableCell>
                 <TableCell>{account.last_test_unix ? formatTime(account.last_test_unix) : '未测试'}{account.last_test_error && <div className="max-w-[360px] truncate text-xs text-red-400">{account.last_test_error}</div>}</TableCell>
-                <TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `dns-test-${account.id}`} onClick={() => void action(`dns-test-${account.id}`, () => testDNSAccount(account.id), 'DNS 连接测试通过')}><TestTube2 className="mr-2 h-4 w-4" />测试</Button></TableCell>
+                <TableCell className="text-right"><div className="flex justify-end gap-1">
+                  <Button variant="ghost" size="sm" loading={busy === `dns-test-${account.id}`} disabled={busy === `dns-delete-${account.id}`} onClick={() => void action(`dns-test-${account.id}`, () => testDNSAccount(account.id), 'DNS 连接测试通过')}><TestTube2 className="mr-2 h-4 w-4" />测试</Button>
+                  <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-300" loading={busy === `dns-delete-${account.id}`} disabled={busy === `dns-test-${account.id}`} onClick={() => removeDNSAccount(account)}><Trash2 className="mr-2 h-4 w-4" />删除</Button>
+                </div></TableCell>
               </TableRow>)}</TableBody></Table></CardContent>
           </Card>
         </TabsContent>

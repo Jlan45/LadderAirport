@@ -75,6 +75,30 @@ func TestDNSAccountRequiresZone(t *testing.T) {
 	}
 }
 
+func TestDNSAccountCanBeDeletedThroughAPI(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+
+	resp, account := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/dns/accounts", map[string]any{
+		"name": "Disposable DNS", "provider": "cloudflare", "zone": "example.com",
+		"credentials": map[string]string{"api_token": "secret"},
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status=%d body=%v", resp.StatusCode, account)
+	}
+	id, _ := account["id"].(string)
+	resp, body := doJSON(
+		t, client, http.MethodDelete, ts.URL+"/api/v1/dns/accounts/"+id, nil,
+	)
+	if resp.StatusCode != http.StatusNoContent || body != nil {
+		t.Fatalf("delete status=%d body=%v", resp.StatusCode, body)
+	}
+	if _, err := st.GetDNSAccount(id); err == nil {
+		t.Fatal("DNS 账号删除后仍可读取")
+	}
+}
+
 func TestManagedDomainCreateNormalizesAndEnqueues(t *testing.T) {
 	ts, client, st := newTestServer(t, nil, nil)
 	resp := login(t, client, ts.URL, "admin")

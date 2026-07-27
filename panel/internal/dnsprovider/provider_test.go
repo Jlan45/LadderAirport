@@ -53,6 +53,18 @@ func TestNormalizeFQDNAndRelativeName(t *testing.T) {
 	if err != nil || apex != "@" {
 		t.Fatalf("apex = %q, %v", apex, err)
 	}
+	challenge, err := RelativeName(
+		"_acme-challenge.节点.Example.COM.", "example.com",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if challenge != "_acme-challenge.xn--3px729a" {
+		t.Fatalf("challenge = %q", challenge)
+	}
+	if _, err := NormalizeFQDN("_acme-challenge.example.com"); err == nil {
+		t.Fatal("普通域名校验错误地接受了下划线")
+	}
 }
 
 func TestNormalizeRecord(t *testing.T) {
