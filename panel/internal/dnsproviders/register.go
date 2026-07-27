@@ -18,7 +18,6 @@ func RegisterBuiltins(registry *dnsprovider.Registry) error {
 		{metadata: alidnsMetadata(), factory: newAliDNS},
 		{metadata: dnspodMetadata(), factory: newDNSPod},
 		{metadata: cloudflareMetadata(), factory: newCloudflare},
-		{metadata: callbackMetadata(), factory: newCallback},
 	}
 	for _, registration := range registrations {
 		if err := registry.Register(registration.metadata, registration.factory); err != nil {
@@ -41,7 +40,7 @@ func newAliDNS(config dnsprovider.Config) (dnsprovider.Provider, error) {
 		SecurityToken:   strings.TrimSpace(config.Credentials["security_token"]),
 	}}
 	return &libdnsProvider{
-		name: "alidns", defaultZone: stringSetting(config.Settings, "test_zone"), backend: backend,
+		name: "alidns", defaultZone: config.Zone, backend: backend,
 	}, nil
 }
 
@@ -58,7 +57,7 @@ func newDNSPod(config dnsprovider.Config) (dnsprovider.Provider, error) {
 		Region:       strings.TrimSpace(config.Credentials["region"]),
 	}
 	return &libdnsProvider{
-		name: "dnspod", defaultZone: stringSetting(config.Settings, "test_zone"), backend: backend,
+		name: "dnspod", defaultZone: config.Zone, backend: backend,
 	}, nil
 }
 
@@ -68,11 +67,10 @@ func newCloudflare(config dnsprovider.Config) (dnsprovider.Provider, error) {
 		return nil, fmt.Errorf("必须提供 Cloudflare API Token")
 	}
 	backend := &cloudflare.Provider{
-		APIToken:  apiToken,
-		ZoneToken: strings.TrimSpace(config.Credentials["zone_token"]),
+		APIToken: apiToken,
 	}
 	return &libdnsProvider{
-		name: "cloudflare", defaultZone: stringSetting(config.Settings, "test_zone"), backend: backend,
+		name: "cloudflare", defaultZone: config.Zone, backend: backend,
 	}, nil
 }
 
@@ -107,29 +105,7 @@ func cloudflareMetadata() dnsprovider.Metadata {
 		Name: "cloudflare", Label: "Cloudflare DNS",
 		CredentialFields: []dnsprovider.CredentialField{
 			{Name: "api_token", Label: "API Token", Secret: true, Required: true},
-			{Name: "zone_token", Label: "Zone Read Token", Secret: true},
 		},
 		Capabilities: []dnsprovider.RecordType{dnsprovider.TypeA, dnsprovider.TypeAAAA, dnsprovider.TypeTXT},
 	}
-}
-
-func callbackMetadata() dnsprovider.Metadata {
-	return dnsprovider.Metadata{
-		Name: "callback", Label: "通用 HTTP Callback",
-		CredentialFields: []dnsprovider.CredentialField{
-			{
-				Name: "token", Label: "Callback Token", Secret: true,
-				Description: "可在 URL、Header 或 Body 中通过 #{credential.token} 引用",
-			},
-		},
-		Capabilities: []dnsprovider.RecordType{dnsprovider.TypeA, dnsprovider.TypeAAAA, dnsprovider.TypeTXT},
-	}
-}
-
-func stringSetting(settings map[string]any, key string) string {
-	if settings == nil {
-		return ""
-	}
-	value, _ := settings[key].(string)
-	return strings.TrimSpace(value)
 }

@@ -26,35 +26,15 @@ LadderAirport 可由 Panel 调用 DNS API 维护节点 A/AAAA 记录，并通过
 
 - AliDNS：AccessKey ID / Secret，推荐使用 RAM 子账号或 STS。
 - DNSPod：SecretId / SecretKey，推荐使用受限子账号。
-- Cloudflare：API Token 至少需要目标 Zone 的 DNS Edit 和 Zone Read。
-- Callback：默认只允许 HTTPS、公网目标和无重定向响应；访问内网 Callback 必须显式设置 `allow_private_network: true`。
+- Cloudflare：只需一个 API Token，同时授予目标 Zone 的 `DNS:Edit` 和
+  `Zone:Read` 权限；不支持全局 API Key 或拆分双 Token。
 
-供应商设置中的 `test_zone` 用于连接测试。Callback 设置示例：
+每个 DNS 账号必须绑定一个管理区域（Zone），例如 `example.com`。账号只会
+操作此区域下的记录；若同一供应商还要管理 `example.net`，需要创建另一个
+DNS 账号。连接测试只读取账号绑定的 Zone，不会创建或修改记录。
 
-```json
-{
-  "url": "https://dns-api.example.net/records",
-  "method": "POST",
-  "headers": {
-    "Authorization": "Bearer #{credential.token}"
-  },
-  "body": "{\"action\":\"#{action}\",\"zone\":\"#{zone}\",\"name\":\"#{name}\",\"type\":\"#{type}\",\"value\":\"#{value}\",\"ttl\":\"#{ttl}\",\"id\":\"#{id}\"}",
-  "success_statuses": [200, 201, 204],
-  "test_zone": "example.com"
-}
-```
-
-查询动作应返回：
-
-```json
-{
-  "records": [
-    {"id":"provider-record-id","name":"edge","type":"A","value":"203.0.113.10","ttl":300000000000}
-  ]
-}
-```
-
-`ttl` 在 Callback JSON 响应中使用 Go `time.Duration` 纳秒值；请求模板里的 `#{ttl}` 使用秒。
+HTTP Callback 自定义供应商不受支持。升级时遗留的 Callback 账号和关联域名
+会被自动停用，但不会删除任何外部 DNS 记录。
 
 ## 任务与故障恢复
 

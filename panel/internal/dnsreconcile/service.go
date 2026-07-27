@@ -204,6 +204,7 @@ func (s *Service) providerForDomain(domain *store.ManagedDomain) (dnsprovider.Pr
 	}
 	provider, err := s.Providers.New(account.Provider, dnsprovider.Config{
 		Credentials: credentials, Settings: account.Settings,
+		Zone:        account.Zone,
 		HTTPTimeout: s.timeout(),
 	})
 	if err != nil {

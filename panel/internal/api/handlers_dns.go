@@ -18,6 +18,7 @@ import (
 type dnsAccountRequest struct {
 	Name        string            `json:"name"`
 	Provider    string            `json:"provider"`
+	Zone        string            `json:"zone"`
 	Credentials map[string]string `json:"credentials"`
 	Settings    map[string]any    `json:"settings"`
 	Enabled     *bool             `json:"enabled"`
@@ -125,6 +126,7 @@ func (s *Server) handleTestDNSAccount(w http.ResponseWriter, r *http.Request) {
 	provider, err := s.DNSProviders.New(account.Provider, dnsprovider.Config{
 		Credentials: credentials,
 		Settings:    account.Settings,
+		Zone:        account.Zone,
 		HTTPTimeout: 15 * time.Second,
 	})
 	if err == nil {
@@ -161,6 +163,14 @@ func (s *Server) buildDNSAccount(current *store.DNSAccount, request dnsAccountRe
 	if name == "" || providerName == "" {
 		return nil, fmt.Errorf("必须提供 DNS 账号名称和供应商")
 	}
+	zoneInput := strings.TrimSpace(request.Zone)
+	if zoneInput == "" && current != nil {
+		zoneInput = current.Zone
+	}
+	zone, err := dnsprovider.NormalizeFQDN(zoneInput)
+	if err != nil {
+		return nil, fmt.Errorf("DNS 账号区域无效：%w", err)
+	}
 	if current != nil && providerName != current.Provider && len(request.Credentials) == 0 {
 		return nil, fmt.Errorf("更换供应商时必须重新提供凭据")
 	}
@@ -171,6 +181,7 @@ func (s *Server) buildDNSAccount(current *store.DNSAccount, request dnsAccountRe
 	if settings == nil {
 		settings = map[string]any{}
 	}
+	delete(settings, "test_zone")
 	enabled := true
 	if current != nil {
 		enabled = current.Enabled
@@ -184,10 +195,10 @@ func (s *Server) buildDNSAccount(current *store.DNSAccount, request dnsAccountRe
 		id = current.ID
 		ciphertext = current.CredentialsCiphertext
 	}
-	if len(request.Credentials) > 0 {
+	if current == nil || len(request.Credentials) > 0 {
 		// Factory validation catches missing required fields before encryption.
 		if _, err := s.DNSProviders.New(providerName, dnsprovider.Config{
-			Credentials: request.Credentials, Settings: settings,
+			Credentials: request.Credentials, Settings: settings, Zone: zone,
 		}); err != nil {
 			return nil, err
 		}
@@ -199,13 +210,12 @@ func (s *Server) buildDNSAccount(current *store.DNSAccount, request dnsAccountRe
 		if err != nil {
 			return nil, err
 		}
-	} else if current == nil {
-		return nil, fmt.Errorf("必须提供 DNS 供应商凭据")
 	}
 	return &store.DNSAccount{
 		ID:                    id,
 		Name:                  name,
 		Provider:              providerName,
+		Zone:                  zone,
 		CredentialsCiphertext: ciphertext,
 		HasCredentials:        ciphertext != "",
 		Settings:              settings,
@@ -402,30 +412,35 @@ func (s *Server) buildManagedDomain(current *store.ManagedDomain, request manage
 	if _, err := s.Store.GetNode(domain.NodeID); err != nil {
 		return nil, err
 	}
-	if _, err := s.Store.GetDNSAccount(domain.DNSAccountID); err != nil {
+	account, err := s.Store.GetDNSAccount(domain.DNSAccountID)
+	if err != nil {
 		return nil, err
+	}
+	if account.Zone == "" {
+		return nil, fmt.Errorf("DNS 账号尚未配置区域，请先编辑账号")
 	}
 	fqdnInput := request.FQDN
 	if strings.TrimSpace(fqdnInput) == "" {
 		fqdnInput = domain.FQDN
 	}
-	fqdn, err := dnsprovider.NormalizeFQDN(fqdnInput)
+	fqdn, err := managedFQDN(fqdnInput, account.Zone)
 	if err != nil {
 		return nil, err
 	}
-	zoneInput := request.Zone
-	if strings.TrimSpace(zoneInput) == "" {
-		zoneInput = domain.Zone
+	if strings.TrimSpace(request.Zone) != "" {
+		requestedZone, err := dnsprovider.NormalizeFQDN(request.Zone)
+		if err != nil {
+			return nil, err
+		}
+		if requestedZone != account.Zone {
+			return nil, fmt.Errorf("托管域名区域由 DNS 账号决定，当前账号区域为 %s", account.Zone)
+		}
 	}
-	zone, err := dnsprovider.NormalizeFQDN(zoneInput)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := dnsprovider.RelativeName(fqdn, zone); err != nil {
+	if _, err := dnsprovider.RelativeName(fqdn, account.Zone); err != nil {
 		return nil, err
 	}
 	domain.FQDN = fqdn
-	domain.Zone = zone
+	domain.Zone = account.Zone
 	if current != nil && (current.CreatedAByPanel || current.CreatedAAAAByPanel) &&
 		(domain.DNSAccountID != current.DNSAccountID ||
 			domain.Zone != current.Zone || domain.FQDN != current.FQDN) {
@@ -495,6 +510,22 @@ func (s *Server) buildManagedDomain(current *store.ManagedDomain, request manage
 		domain.State = "disabled"
 	}
 	return domain, nil
+}
+
+func managedFQDN(value, zone string) (string, error) {
+	value = strings.Trim(strings.TrimSpace(value), ".")
+	comparison := strings.ToLower(value)
+	if comparison != zone && !strings.HasSuffix(comparison, "."+zone) {
+		value += "." + zone
+	}
+	normalized, err := dnsprovider.NormalizeFQDN(value)
+	if err != nil {
+		return "", err
+	}
+	if _, err := dnsprovider.RelativeName(normalized, zone); err != nil {
+		return "", err
+	}
+	return normalized, nil
 }
 
 func validAddressFamily(value string, ipv4 bool) bool {

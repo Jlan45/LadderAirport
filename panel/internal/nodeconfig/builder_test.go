@@ -32,8 +32,9 @@ func TestBuildOverlaysManagedTLSWithoutMutatingGlobalInbound(t *testing.T) {
 		t.Fatal(err)
 	}
 	dnsAccount := &store.DNSAccount{
-		Name: "DNS", Provider: "callback", CredentialsCiphertext: "encrypted",
-		Settings: map[string]any{}, Enabled: true,
+		Name: "DNS", Provider: "cloudflare", Zone: "example.com",
+		CredentialsCiphertext: "encrypted",
+		Settings:              map[string]any{}, Enabled: true,
 	}
 	if err := st.CreateDNSAccount(dnsAccount); err != nil {
 		t.Fatal(err)

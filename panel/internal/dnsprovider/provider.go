@@ -46,6 +46,7 @@ type Provider interface {
 type Config struct {
 	Credentials map[string]string
 	Settings    map[string]any
+	Zone        string
 	HTTPTimeout time.Duration
 }
 

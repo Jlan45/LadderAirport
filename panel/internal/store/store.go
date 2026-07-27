@@ -279,6 +279,7 @@ func (s *Store) migrate() error {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
 			provider TEXT NOT NULL,
+			zone TEXT NOT NULL DEFAULT '',
 			credentials_ciphertext TEXT NOT NULL DEFAULT '',
 			settings_json TEXT NOT NULL DEFAULT '{}',
 			enabled INTEGER NOT NULL DEFAULT 1,
@@ -454,9 +455,62 @@ func (s *Store) migrate() error {
 		`ALTER TABLE subscriptions ADD COLUMN include_standalone INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE subscriptions ADD COLUMN chain_ids_json TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE subscriptions ADD COLUMN include_all_chains INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE dns_accounts ADD COLUMN zone TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alters {
 		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
+	}
+	// v0.10.0 stored the provider zone in each managed domain and exposed a
+	// temporary test_zone setting. Preserve accounts that already manage one
+	// unambiguous zone; accounts spanning multiple zones must be split by the
+	// operator under the one-account-one-zone model.
+	if _, err := s.db.Exec(`
+		UPDATE dns_accounts
+		SET zone = (
+			SELECT MIN(zone)
+			FROM managed_domains
+			WHERE managed_domains.dns_account_id = dns_accounts.id
+		)
+		WHERE zone = ''
+			AND 1 = (
+				SELECT COUNT(DISTINCT zone)
+				FROM managed_domains
+				WHERE managed_domains.dns_account_id = dns_accounts.id
+			)`); err != nil {
+		return fmt.Errorf("迁移 DNS 账号区域失败：%w", err)
+	}
+	// HTTP Callback was removed after v0.10.0. Disable any legacy Callback
+	// automation without deleting external DNS records or encrypted account
+	// data, so operators can migrate deliberately to a supported provider.
+	if _, err := s.db.Exec(`
+		UPDATE dns_accounts
+		SET enabled = 0,
+			last_test_error = 'HTTP Callback DNS 供应商已停止支持，请迁移到 AliDNS、DNSPod 或 Cloudflare'
+		WHERE provider = 'callback'`); err != nil {
+		return fmt.Errorf("停用旧 HTTP Callback DNS 账号失败：%w", err)
+	}
+	if _, err := s.db.Exec(`
+		UPDATE managed_domains
+		SET enabled = 0,
+			state = 'disabled',
+			last_error = '关联的 HTTP Callback DNS 供应商已停止支持'
+		WHERE dns_account_id IN (
+			SELECT id FROM dns_accounts WHERE provider = 'callback'
+		)`); err != nil {
+		return fmt.Errorf("停用旧 HTTP Callback 托管域名失败：%w", err)
+	}
+	if _, err := s.db.Exec(`
+		UPDATE dns_accounts
+		SET zone = LOWER(TRIM(json_extract(settings_json, '$.test_zone'), '.'))
+		WHERE zone = ''
+			AND json_valid(settings_json)
+			AND COALESCE(json_extract(settings_json, '$.test_zone'), '') <> ''
+			AND 0 = (
+				SELECT COUNT(DISTINCT zone)
+				FROM managed_domains
+				WHERE managed_domains.dns_account_id = dns_accounts.id
+			)`); err != nil {
+		return fmt.Errorf("迁移 DNS 账号验证区域失败：%w", err)
 	}
 	// These columns belonged to removed management-TLS and one-time upgrade
 	// implementations and are deliberately not retained.

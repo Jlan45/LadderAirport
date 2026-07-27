@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -21,10 +22,10 @@ func TestDNSAccountSecretsAreEncryptedAndMasked(t *testing.T) {
 	resp, body := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/dns/accounts", map[string]any{
 		"name":     "Cloudflare",
 		"provider": "cloudflare",
+		"zone":     "Example.COM.",
 		"credentials": map[string]string{
 			"api_token": "super-secret-token",
 		},
-		"settings": map[string]any{"test_zone": "example.com"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("create status = %d body=%v", resp.StatusCode, body)
@@ -42,6 +43,9 @@ func TestDNSAccountSecretsAreEncryptedAndMasked(t *testing.T) {
 		strings.Contains(account.CredentialsCiphertext, "super-secret-token") {
 		t.Fatalf("credentials were not encrypted: %q", account.CredentialsCiphertext)
 	}
+	if account.Zone != "example.com" {
+		t.Fatalf("zone was not normalized: %q", account.Zone)
+	}
 
 	resp, body = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/dns/accounts/"+id, map[string]any{
 		"name":     "Cloudflare Updated",
@@ -56,6 +60,21 @@ func TestDNSAccountSecretsAreEncryptedAndMasked(t *testing.T) {
 	}
 }
 
+func TestDNSAccountRequiresZone(t *testing.T) {
+	ts, client, _ := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+
+	resp, body := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/dns/accounts", map[string]any{
+		"name": "Cloudflare", "provider": "cloudflare",
+		"credentials": map[string]string{"api_token": "secret"},
+	})
+	if resp.StatusCode != http.StatusBadRequest ||
+		!strings.Contains(fmt.Sprint(body["error"]), "区域") {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, body)
+	}
+}
+
 func TestManagedDomainCreateNormalizesAndEnqueues(t *testing.T) {
 	ts, client, st := newTestServer(t, nil, nil)
 	resp := login(t, client, ts.URL, "admin")
@@ -66,20 +85,15 @@ func TestManagedDomainCreateNormalizesAndEnqueues(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp, account := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/dns/accounts", map[string]any{
-		"name": "Callback", "provider": "callback",
-		"credentials": map[string]string{"token": "secret"},
-		"settings": map[string]any{
-			"url":                   "http://127.0.0.1/callback",
-			"allow_private_network": true,
-			"test_zone":             "example.com",
-		},
+		"name": "Cloudflare DNS", "provider": "cloudflare", "zone": "Example.COM.",
+		"credentials": map[string]string{"api_token": "secret"},
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("account status=%d body=%v", resp.StatusCode, account)
 	}
 	resp, domain := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/managed-domains", map[string]any{
 		"node_id": node.ID, "dns_account_id": account["id"],
-		"zone": "Example.COM.", "fqdn": "节点.Example.COM.",
+		"fqdn":        "节点",
 		"record_mode": "a", "address_source": "manual",
 		"manual_ipv4": "192.0.2.10", "ttl": 300,
 	})
@@ -88,6 +102,16 @@ func TestManagedDomainCreateNormalizesAndEnqueues(t *testing.T) {
 	}
 	if domain["fqdn"] != "xn--3px729a.example.com" || domain["zone"] != "example.com" {
 		t.Fatalf("domain was not normalized: %v", domain)
+	}
+	resp, mismatched := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/managed-domains", map[string]any{
+		"node_id": node.ID, "dns_account_id": account["id"],
+		"zone": "example.net", "fqdn": "edge.example.net",
+		"record_mode": "a", "address_source": "manual",
+		"manual_ipv4": "192.0.2.11", "ttl": 300,
+	})
+	if resp.StatusCode != http.StatusBadRequest ||
+		!strings.Contains(fmt.Sprint(mismatched["error"]), "账号区域") {
+		t.Fatalf("mismatched zone status=%d body=%v", resp.StatusCode, mismatched)
 	}
 	jobs, err := st.ListAutomationJobs(10)
 	if err != nil {

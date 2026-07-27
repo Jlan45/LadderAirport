@@ -285,6 +285,7 @@ type DNSAccount struct {
 	ID                    string         `json:"id"`
 	Name                  string         `json:"name"`
 	Provider              string         `json:"provider"`
+	Zone                  string         `json:"zone"`
 	CredentialsCiphertext string         `json:"-"`
 	HasCredentials        bool           `json:"has_credentials"`
 	Settings              map[string]any `json:"settings"`

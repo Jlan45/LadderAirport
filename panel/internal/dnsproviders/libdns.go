@@ -27,7 +27,7 @@ type libdnsProvider struct {
 
 func (p *libdnsProvider) Test(ctx context.Context) error {
 	if p.defaultZone == "" {
-		return fmt.Errorf("测试 DNS 账号时必须提供 test_zone")
+		return fmt.Errorf("DNS 账号尚未配置管理区域")
 	}
 	_, err := p.backend.GetRecords(ctx, libdnsZone(p.defaultZone))
 	return p.wrap("测试连接", err)

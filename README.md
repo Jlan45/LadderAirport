@@ -12,7 +12,7 @@
 - **入站模板**：SS / Trojan / VLESS(Reality) / Hysteria2 / TUIC / AnyTLS / VMess
 - **配置下发**：关联入站 → 完整 sing-box JSON → gRPC 热更新；启动时自动同步并重试
 - **订阅**：Clash / sing-box 链接，基础 CN 分流；可聚合外部机场订阅源
-- **DNS / ACME**：AliDNS、DNSPod、Cloudflare 或 Callback 自动解析；DNS-01 自动签发和续期协议 TLS 证书，私钥只留在 Agent
+- **DNS / ACME**：AliDNS、DNSPod、Cloudflare 自动解析；DNS-01 自动签发和续期协议 TLS 证书，私钥只留在 Agent
 - **部署**：一键装成 systemd 服务
 
 ## 快速安装

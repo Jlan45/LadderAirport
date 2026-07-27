@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ func createDNSFixture(t *testing.T, s *Store) (*Node, *InboundConfig, *DNSAccoun
 	account := &DNSAccount{
 		Name:                  "cloudflare-primary",
 		Provider:              "cloudflare",
+		Zone:                  "example.com",
 		CredentialsCiphertext: "v1.encrypted.value",
 		Settings:              map[string]any{"zone_id": "zone"},
 		Enabled:               true,
@@ -131,6 +133,100 @@ func TestDNSAccountDeleteIsRestrictedWhileReferenced(t *testing.T) {
 	err := s.DeleteDNSAccount(account.ID)
 	if err == nil || !strings.Contains(err.Error(), "解除关联域名") {
 		t.Fatalf("DeleteDNSAccount error = %v", err)
+	}
+}
+
+func TestDNSAccountZoneCannotChangeWhileDomainUsesIt(t *testing.T) {
+	s := openTestStore(t)
+	_, _, account, _, _ := createDNSFixture(t, s)
+	account.Zone = "example.net"
+	err := s.UpdateDNSAccount(account)
+	if err == nil || !strings.Contains(err.Error(), "独立账号") {
+		t.Fatalf("UpdateDNSAccount error = %v", err)
+	}
+}
+
+func TestDNSAccountZoneMigratesFromV0100Settings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v0100.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := &DNSAccount{
+		Name: "legacy", Provider: "cloudflare", Zone: "placeholder.invalid",
+		CredentialsCiphertext: "encrypted", Settings: map[string]any{}, Enabled: true,
+	}
+	if err := s.CreateDNSAccount(account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE dns_accounts SET zone = '', settings_json = '{"test_zone":"Example.COM."}' WHERE id = ?`,
+		account.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	got, err := s.GetDNSAccount(account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Zone != "example.com" {
+		t.Fatalf("migrated zone = %q", got.Zone)
+	}
+}
+
+func TestRemovedCallbackAccountsAreDisabledWithoutDeletingState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "callback.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := &Node{Name: "edge", Address: "192.0.2.10", GRPCPort: 50051}
+	if err := s.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	account := &DNSAccount{
+		Name: "legacy-callback", Provider: "callback", Zone: "example.com",
+		CredentialsCiphertext: "encrypted", Settings: map[string]any{}, Enabled: true,
+	}
+	if err := s.CreateDNSAccount(account); err != nil {
+		t.Fatal(err)
+	}
+	domain := &ManagedDomain{
+		NodeID: node.ID, DNSAccountID: account.ID, Zone: account.Zone,
+		FQDN: "edge.example.com", RecordMode: "a", AddressSource: "manual",
+		ManualIPv4: "192.0.2.10", TTL: 300, Enabled: true,
+	}
+	if err := s.CreateManagedDomain(domain); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	gotAccount, err := s.GetDNSAccount(account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotDomain, err := s.GetManagedDomain(domain.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotAccount.Enabled || !strings.Contains(gotAccount.LastTestError, "停止支持") ||
+		gotDomain.Enabled || gotDomain.State != "disabled" ||
+		!strings.Contains(gotDomain.LastError, "停止支持") {
+		t.Fatalf("account=%+v domain=%+v", gotAccount, gotDomain)
 	}
 }
 

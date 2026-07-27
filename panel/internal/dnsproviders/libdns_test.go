@@ -115,8 +115,15 @@ func TestRegisterBuiltins(t *testing.T) {
 		t.Fatal(err)
 	}
 	metadata := registry.Metadata()
-	if len(metadata) != 4 {
+	if len(metadata) != 3 {
 		t.Fatalf("providers = %+v", metadata)
+	}
+	for _, provider := range metadata {
+		if provider.Name == "cloudflare" &&
+			(len(provider.CredentialFields) != 1 ||
+				provider.CredentialFields[0].Name != "api_token") {
+			t.Fatalf("Cloudflare credentials = %+v", provider.CredentialFields)
+		}
 	}
 	if _, err := registry.New("cloudflare", dnsprovider.Config{}); err == nil {
 		t.Fatal("cloudflare accepted missing token")

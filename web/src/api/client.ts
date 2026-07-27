@@ -228,6 +228,7 @@ export interface DNSAccount {
   id: string
   name: string
   provider: string
+  zone: string
   has_credentials: boolean
   settings: Record<string, unknown>
   enabled: boolean
@@ -802,6 +803,7 @@ export function listDNSAccounts(): Promise<DNSAccount[]> {
 export function createDNSAccount(body: {
   name: string
   provider: string
+  zone: string
   credentials: Record<string, string>
   settings?: Record<string, unknown>
   enabled?: boolean
@@ -820,7 +822,6 @@ export function listManagedDomains(): Promise<ManagedDomain[]> {
 export function createManagedDomain(body: {
   node_id: string
   dns_account_id: string
-  zone: string
   fqdn: string
   record_mode: 'a' | 'aaaa' | 'dual'
   address_source: 'manual' | 'node_address' | 'agent_public'

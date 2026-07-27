@@ -55,7 +55,8 @@ func TestManualReconcile(t *testing.T) {
 	secrets, _ := secretstore.New(bytes.Repeat([]byte{7}, 32))
 	credentialsJSON, _ := json.Marshal(map[string]string{"token": "secret"})
 	account := &store.DNSAccount{
-		Name: "memory", Provider: "memory", Settings: map[string]any{}, Enabled: true,
+		Name: "memory", Provider: "memory", Zone: "example.com",
+		Settings: map[string]any{}, Enabled: true,
 	}
 	account.ID = "account"
 	account.CredentialsCiphertext, _ = secrets.Encrypt(credentialsJSON, "dns-account:account:memory")
@@ -123,7 +124,7 @@ func TestReconcileFailureSchedulesRetry(t *testing.T) {
 	raw, _ := json.Marshal(map[string]string{"token": "secret"})
 	ciphertext, _ := secrets.Encrypt(raw, "dns-account:account:memory")
 	account := &store.DNSAccount{
-		ID: "account", Name: "memory", Provider: "memory",
+		ID: "account", Name: "memory", Provider: "memory", Zone: "example.com",
 		CredentialsCiphertext: ciphertext, Settings: map[string]any{}, Enabled: true,
 	}
 	if err := st.CreateDNSAccount(account); err != nil {
@@ -167,7 +168,7 @@ func TestCleanupDeletesOnlyPanelCreatedExactValue(t *testing.T) {
 	raw, _ := json.Marshal(map[string]string{"token": "secret"})
 	ciphertext, _ := secrets.Encrypt(raw, "dns-account:account:memory")
 	account := &store.DNSAccount{
-		ID: "account", Name: "memory", Provider: "memory",
+		ID: "account", Name: "memory", Provider: "memory", Zone: "example.com",
 		CredentialsCiphertext: ciphertext, Settings: map[string]any{}, Enabled: true,
 	}
 	if err := st.CreateDNSAccount(account); err != nil {

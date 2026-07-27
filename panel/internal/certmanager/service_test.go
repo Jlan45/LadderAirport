@@ -227,7 +227,7 @@ func newCertificateFixture(t *testing.T) (*Service, *store.Store, *store.Protoco
 	raw, _ := json.Marshal(map[string]string{"token": "secret"})
 	ciphertext, _ := secrets.Encrypt(raw, "dns-account:dns-account:memory")
 	dnsAccount := &store.DNSAccount{
-		ID: "dns-account", Name: "DNS", Provider: "memory",
+		ID: "dns-account", Name: "DNS", Provider: "memory", Zone: "example.com",
 		CredentialsCiphertext: ciphertext, Settings: map[string]any{}, Enabled: true,
 	}
 	if err := st.CreateDNSAccount(dnsAccount); err != nil {

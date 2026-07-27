@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const dnsAccountCols = `id, name, provider, credentials_ciphertext, settings_json,
+const dnsAccountCols = `id, name, provider, zone, credentials_ciphertext, settings_json,
 	enabled, last_test_unix, last_test_error, created_at_unix, updated_at_unix`
 
 func scanDNSAccount(row interface{ Scan(...any) error }) (*DNSAccount, error) {
@@ -13,8 +13,9 @@ func scanDNSAccount(row interface{ Scan(...any) error }) (*DNSAccount, error) {
 	var settingsJSON string
 	var enabled int
 	if err := row.Scan(
-		&account.ID, &account.Name, &account.Provider, &account.CredentialsCiphertext,
-		&settingsJSON, &enabled, &account.LastTestUnix, &account.LastTestError,
+		&account.ID, &account.Name, &account.Provider, &account.Zone,
+		&account.CredentialsCiphertext, &settingsJSON, &enabled,
+		&account.LastTestUnix, &account.LastTestError,
 		&account.CreatedAtUnix, &account.UpdatedAtUnix,
 	); err != nil {
 		return nil, err
@@ -29,8 +30,8 @@ func scanDNSAccount(row interface{ Scan(...any) error }) (*DNSAccount, error) {
 }
 
 func (s *Store) CreateDNSAccount(account *DNSAccount) error {
-	if account == nil || account.Name == "" || account.Provider == "" {
-		return fmt.Errorf("必须提供 DNS 账号名称和供应商")
+	if account == nil || account.Name == "" || account.Provider == "" || account.Zone == "" {
+		return fmt.Errorf("必须提供 DNS 账号名称、供应商和区域")
 	}
 	settingsJSON, err := marshalJSON(account.Settings)
 	if err != nil {
@@ -44,10 +45,10 @@ func (s *Store) CreateDNSAccount(account *DNSAccount) error {
 	account.UpdatedAtUnix = now
 	_, err = s.db.Exec(`
 		INSERT INTO dns_accounts (
-			id, name, provider, credentials_ciphertext, settings_json, enabled,
+			id, name, provider, zone, credentials_ciphertext, settings_json, enabled,
 			last_test_unix, last_test_error, created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		account.ID, account.Name, account.Provider, account.CredentialsCiphertext,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		account.ID, account.Name, account.Provider, account.Zone, account.CredentialsCiphertext,
 		settingsJSON, boolToInt(account.Enabled), account.LastTestUnix,
 		account.LastTestError, now, now,
 	)
@@ -59,8 +60,20 @@ func (s *Store) CreateDNSAccount(account *DNSAccount) error {
 }
 
 func (s *Store) UpdateDNSAccount(account *DNSAccount) error {
-	if account == nil || account.ID == "" || account.Name == "" || account.Provider == "" {
+	if account == nil || account.ID == "" || account.Name == "" ||
+		account.Provider == "" || account.Zone == "" {
 		return fmt.Errorf("必须提供完整的 DNS 账号")
+	}
+	var incompatibleDomains int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM managed_domains
+		WHERE dns_account_id = ? AND zone <> ?`,
+		account.ID, account.Zone,
+	).Scan(&incompatibleDomains); err != nil {
+		return fmt.Errorf("检查 DNS 账号区域引用失败：%w", err)
+	}
+	if incompatibleDomains > 0 {
+		return fmt.Errorf("DNS 账号已关联其他区域的托管域名；请为新区域创建独立账号")
 	}
 	settingsJSON, err := marshalJSON(account.Settings)
 	if err != nil {
@@ -68,11 +81,11 @@ func (s *Store) UpdateDNSAccount(account *DNSAccount) error {
 	}
 	account.UpdatedAtUnix = nowUnix()
 	res, err := s.db.Exec(`
-		UPDATE dns_accounts SET name = ?, provider = ?, credentials_ciphertext = ?,
+		UPDATE dns_accounts SET name = ?, provider = ?, zone = ?, credentials_ciphertext = ?,
 			settings_json = ?, enabled = ?, last_test_unix = ?,
 			last_test_error = ?, updated_at_unix = ?
 		WHERE id = ?`,
-		account.Name, account.Provider, account.CredentialsCiphertext, settingsJSON,
+		account.Name, account.Provider, account.Zone, account.CredentialsCiphertext, settingsJSON,
 		boolToInt(account.Enabled), account.LastTestUnix, account.LastTestError,
 		account.UpdatedAtUnix, account.ID,
 	)
@@ -171,6 +184,9 @@ func (s *Store) CreateManagedDomain(domain *ManagedDomain) error {
 		domain.Zone == "" || domain.FQDN == "" {
 		return fmt.Errorf("必须提供节点、DNS 账号、区域和完整域名")
 	}
+	if err := s.validateManagedDomainZone(domain.DNSAccountID, domain.Zone); err != nil {
+		return err
+	}
 	if domain.ID == "" {
 		domain.ID = newID()
 	}
@@ -225,6 +241,9 @@ func (s *Store) UpdateManagedDomain(domain *ManagedDomain) error {
 	if domain == nil || domain.ID == "" {
 		return fmt.Errorf("必须提供托管域名 ID")
 	}
+	if err := s.validateManagedDomainZone(domain.DNSAccountID, domain.Zone); err != nil {
+		return err
+	}
 	observedIPv4JSON, err := marshalJSON(domain.ObservedIPv4)
 	if err != nil {
 		return err
@@ -259,6 +278,25 @@ func (s *Store) UpdateManagedDomain(domain *ManagedDomain) error {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("托管域名不存在：%s", domain.ID)
+	}
+	return nil
+}
+
+func (s *Store) validateManagedDomainZone(accountID, zone string) error {
+	var accountZone string
+	if err := s.db.QueryRow(
+		`SELECT zone FROM dns_accounts WHERE id = ?`, accountID,
+	).Scan(&accountZone); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("DNS 账号不存在：%s", accountID)
+		}
+		return fmt.Errorf("读取 DNS 账号区域失败：%w", err)
+	}
+	if accountZone == "" {
+		return fmt.Errorf("DNS 账号尚未配置区域")
+	}
+	if accountZone != zone {
+		return fmt.Errorf("托管域名区域必须与 DNS 账号区域一致：%s", accountZone)
 	}
 	return nil
 }

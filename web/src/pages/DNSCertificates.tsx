@@ -118,9 +118,10 @@ export default function DNSCertificates() {
           <DNSAccountForm providers={providers} onCreate={(body) => action('dns-create', () => createDNSAccount(body), 'DNS 账号已创建')} busy={busy === 'dns-create'} />
           <Card>
             <CardHeader><CardTitle>DNS 账号</CardTitle><CardDescription>敏感字段只可覆盖写入，API 不会返回明文。</CardDescription></CardHeader>
-            <CardContent><Table><TableHeader><TableRow><TableHead>名称</TableHead><TableHead>供应商</TableHead><TableHead>状态</TableHead><TableHead>最近测试</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+            <CardContent><Table><TableHeader><TableRow><TableHead>名称</TableHead><TableHead>供应商</TableHead><TableHead>管理区域</TableHead><TableHead>状态</TableHead><TableHead>最近测试</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
               <TableBody>{dnsAccounts.map((account) => <TableRow key={account.id}>
                 <TableCell className="font-medium">{account.name}</TableCell><TableCell>{account.provider}</TableCell>
+                <TableCell className="font-mono text-xs">{account.zone || <span className="text-amber-400">待配置</span>}</TableCell>
                 <TableCell><StatusBadge value={account.enabled ? (account.last_test_error ? 'error' : 'enabled') : 'disabled'} /></TableCell>
                 <TableCell>{account.last_test_unix ? formatTime(account.last_test_unix) : '未测试'}{account.last_test_error && <div className="max-w-[360px] truncate text-xs text-red-400">{account.last_test_error}</div>}</TableCell>
                 <TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `dns-test-${account.id}`} onClick={() => void action(`dns-test-${account.id}`, () => testDNSAccount(account.id), 'DNS 连接测试通过')}><TestTube2 className="mr-2 h-4 w-4" />测试</Button></TableCell>
@@ -173,19 +174,19 @@ export default function DNSCertificates() {
 function DNSAccountForm({ providers, onCreate, busy }: { providers: DNSProviderMetadata[]; onCreate: (body: Parameters<typeof createDNSAccount>[0]) => void; busy: boolean }) {
   const [name, setName] = useState('')
   const [provider, setProvider] = useState('')
+  const [zone, setZone] = useState('')
   const [credentials, setCredentials] = useState<Record<string, string>>({})
-  const [settings, setSettings] = useState('{"test_zone":"example.com"}')
   useEffect(() => { if (!provider && providers[0]) setProvider(providers[0].name) }, [provider, providers])
   const metadata = providers.find((item) => item.name === provider)
   function submit(event: FormEvent) {
     event.preventDefault()
-    try { onCreate({ name, provider, credentials, settings: JSON.parse(settings) as Record<string, unknown> }) } catch { toast.error('供应商设置必须是有效 JSON') }
+    onCreate({ name, provider, zone, credentials, settings: {} })
   }
-  return <Card><CardHeader><CardTitle>添加 DNS 账号</CardTitle></CardHeader><CardContent><form className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" onSubmit={submit}>
+  return <Card><CardHeader><CardTitle>添加 DNS 账号</CardTitle><CardDescription>一个账号只管理一个 DNS 区域；同一供应商的其他区域请创建独立账号。</CardDescription></CardHeader><CardContent><form className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" onSubmit={submit}>
     <Field label="名称"><Input value={name} onChange={(e) => setName(e.target.value)} required /></Field>
     <Field label="供应商"><select className={selectClass} value={provider} onChange={(e) => { setProvider(e.target.value); setCredentials({}) }}>{providers.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select></Field>
+    <Field label="管理区域（Zone）"><Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="example.com" required /><p className="text-xs text-zinc-500">该账号可写入此区域下的二级域名，例如 hk.example.com。</p></Field>
     {metadata?.credential_fields.map((field) => <Field key={field.name} label={field.label}><Input type={field.secret ? 'password' : 'text'} value={credentials[field.name] ?? ''} required={field.required} onChange={(e) => setCredentials((current) => ({ ...current, [field.name]: e.target.value }))} /></Field>)}
-    <Field label="供应商设置 JSON"><Input value={settings} onChange={(e) => setSettings(e.target.value)} /></Field>
     <div className="flex items-end"><Button type="submit" loading={busy}><Plus className="mr-2 h-4 w-4" />添加</Button></div>
   </form></CardContent></Card>
 }
@@ -193,16 +194,16 @@ function DNSAccountForm({ providers, onCreate, busy }: { providers: DNSProviderM
 function DomainForm({ nodes, accounts, onCreate, busy }: { nodes: Node[]; accounts: DNSAccount[]; onCreate: (body: Parameters<typeof createManagedDomain>[0]) => void; busy: boolean }) {
   const [nodeID, setNodeID] = useState('')
   const [accountID, setAccountID] = useState('')
-  const [zone, setZone] = useState('')
   const [fqdn, setFQDN] = useState('')
   const [ipv4, setIPv4] = useState('')
   useEffect(() => { if (!nodeID && nodes[0]) setNodeID(nodes[0].id) }, [nodeID, nodes])
   useEffect(() => { if (!accountID && accounts[0]) setAccountID(accounts[0].id) }, [accountID, accounts])
-  return <Card><CardHeader><CardTitle>添加托管域名</CardTitle></CardHeader><CardContent><form className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" onSubmit={(e) => { e.preventDefault(); onCreate({ node_id: nodeID, dns_account_id: accountID, zone, fqdn, record_mode: 'a', address_source: ipv4 ? 'manual' : 'agent_public', manual_ipv4: ipv4, ttl: 300 }) }}>
+  const account = accounts.find((item) => item.id === accountID)
+  return <Card><CardHeader><CardTitle>添加托管域名</CardTitle><CardDescription>DNS 区域由所选账号固定，域名必须位于该区域下。</CardDescription></CardHeader><CardContent><form className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" onSubmit={(e) => { e.preventDefault(); onCreate({ node_id: nodeID, dns_account_id: accountID, fqdn, record_mode: 'a', address_source: ipv4 ? 'manual' : 'agent_public', manual_ipv4: ipv4, ttl: 300 }) }}>
     <Field label="节点"><select className={selectClass} value={nodeID} onChange={(e) => setNodeID(e.target.value)}>{nodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></Field>
     <Field label="DNS 账号"><select className={selectClass} value={accountID} onChange={(e) => setAccountID(e.target.value)}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></Field>
-    <Field label="DNS 区域"><Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="example.com" required /></Field>
-    <Field label="完整域名"><Input value={fqdn} onChange={(e) => setFQDN(e.target.value)} placeholder="edge.example.com" required /></Field>
+    <Field label="账号管理区域"><Input value={account?.zone ?? ''} readOnly placeholder="请先选择 DNS 账号" /></Field>
+    <Field label="主机名 / 二级域名"><Input value={fqdn} onChange={(e) => setFQDN(e.target.value)} placeholder="edge" required />{account?.zone && <p className="text-xs text-zinc-500">最终域名：{fqdn ? (fqdn.endsWith(`.${account.zone}`) || fqdn === account.zone ? fqdn : `${fqdn}.${account.zone}`) : `edge.${account.zone}`}</p>}</Field>
     <Field label="手工 IPv4（留空由 Agent 探测）"><Input value={ipv4} onChange={(e) => setIPv4(e.target.value)} /></Field>
     <div className="flex items-end"><Button type="submit" loading={busy}><Plus className="mr-2 h-4 w-4" />添加</Button></div>
   </form></CardContent></Card>
