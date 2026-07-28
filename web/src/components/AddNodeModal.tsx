@@ -222,7 +222,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
               </Button>
             </div>
 
-            <pre className="p-4 rounded-lg bg-zinc-900 border border-zinc-800 overflow-x-auto text-xs font-mono text-zinc-300 leading-relaxed max-h-[160px]">
+            <pre className="p-4 rounded-lg bg-muted border border-border text-xs font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
               {installInfo.install_command}
             </pre>
 

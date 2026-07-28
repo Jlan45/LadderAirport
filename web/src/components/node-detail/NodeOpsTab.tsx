@@ -200,7 +200,7 @@ export function NodeOpsTab({
       {preview && (
         <div className="space-y-4 rounded-lg border border-border bg-card/40 p-5">
           <h3 className="text-sm font-semibold text-foreground">配置预览</h3>
-          <pre className="p-4 rounded-lg bg-background border border-border overflow-x-auto text-xs font-mono text-foreground max-h-[300px] leading-relaxed">
+          <pre className="p-4 rounded-lg bg-background border border-border text-xs font-mono text-foreground max-h-[360px] overflow-y-auto leading-relaxed whitespace-pre-wrap break-all">
             {preview}
           </pre>
         </div>

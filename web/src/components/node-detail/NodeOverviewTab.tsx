@@ -302,10 +302,22 @@ export function NodeOverviewTab({
               )}
             </div>
           </div>
-          <div className="space-y-2">
-            <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[11px] font-mono text-foreground leading-relaxed">
-              {installInfo.install_command}
-            </pre>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <span className="text-xs text-muted-foreground">一键安装命令：</span>
+              <pre className="p-3 bg-muted border border-border rounded-md text-[11px] font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
+                {installInfo.install_command}
+              </pre>
+            </div>
+
+            {installInfo.upgrade_command && (
+              <div className="space-y-1 pt-2 border-t border-border">
+                <span className="text-xs text-muted-foreground">一键升级命令：</span>
+                <pre className="p-3 bg-muted border border-border rounded-md text-[11px] font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
+                  {installInfo.upgrade_command}
+                </pre>
+              </div>
+            )}
           </div>
         </div>
       )}

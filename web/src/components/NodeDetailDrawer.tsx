@@ -640,8 +640,9 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     if (busy) return
     setBusyAction('preview')
     try {
-      const res = (await previewNodeConfig(id)) as { config_json?: string }
-      setPreview(res.config_json || '')
+      const res = await previewNodeConfig(id)
+      const formatted = typeof res === 'string' ? res : JSON.stringify(res, null, 2)
+      setPreview(formatted || '')
       toast.success('配置生成成功')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '预览失败')

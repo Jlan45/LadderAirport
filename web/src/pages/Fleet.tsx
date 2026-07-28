@@ -714,13 +714,13 @@ export default function Fleet() {
             </div>
           </CardHeader>
           <CardContent className="p-5 pt-1 space-y-3">
-            <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[10px] font-mono text-foreground">
+            <pre className="p-3 bg-muted border border-border rounded-md text-[10px] font-mono text-foreground whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
               {installBanner.install_command}
             </pre>
             {installBanner.upgrade_command && (
               <div className="space-y-1 mt-2">
                 <span className="text-xs text-muted-foreground block">已装机环境的快速升级命令：</span>
-                <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[10px] font-mono text-foreground">
+                <pre className="p-3 bg-muted border border-border rounded-md text-[10px] font-mono text-foreground whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
                   {installBanner.upgrade_command}
                 </pre>
               </div>
