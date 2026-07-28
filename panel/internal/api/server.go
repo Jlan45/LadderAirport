@@ -38,6 +38,16 @@ type NodeLive interface {
 	StreamLogs(ctx context.Context, level string, tail int32) (agentv1.AgentControl_StreamLogsClient, error)
 }
 
+// NodeFRPS is implemented by live clients for Agents with the frps-v1
+// capability. It is separate from NodeLive so existing test doubles and older
+// integrations remain source-compatible.
+type NodeFRPS interface {
+	ApplyFRPServerConfig(ctx context.Context, config *agentv1.FRPServerConfig, hash string) (*agentv1.ApplyFRPServerConfigResponse, error)
+	StartFRPServer(ctx context.Context) (*agentv1.StartFRPServerResponse, error)
+	StopFRPServer(ctx context.Context) (*agentv1.StopFRPServerResponse, error)
+	GetFRPServerStatus(ctx context.Context) (*agentv1.GetFRPServerStatusResponse, error)
+}
+
 // LiveDialFunc dials a node for live RPCs (probe/metrics/logs).
 // Tests may inject a fake implementation.
 type LiveDialFunc func(ctx context.Context, n store.Node, token string) (NodeLive, error)
@@ -59,7 +69,7 @@ type Server struct {
 	Timeout time.Duration
 	Chains  *proxychain.Service
 	PKI     *pki.Manager
-	// Secrets encrypts DNS provider and ACME account credentials.
+	// Secrets encrypts DNS/ACME credentials and FRPS authentication tokens.
 	Secrets      *secretstore.Store
 	DNSProviders *dnsprovider.Registry
 	ACME         *acmeservice.Service
@@ -188,6 +198,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/nodes/{id}/interfaces", s.handleNodeInterfaces)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/upgrade", s.handleNodeUpgrade)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/logs", s.handleNodeLogs)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/frps", s.handleGetNodeFRPS)
+	mux.HandleFunc("PUT /api/v1/nodes/{id}/frps", s.handlePutNodeFRPS)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/frps/status", s.handleGetNodeFRPSStatus)
+	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/start", s.handleStartNodeFRPS)
+	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/stop", s.handleStopNodeFRPS)
+	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/token/reveal", s.handleRevealNodeFRPSToken)
 
 	mux.HandleFunc("POST /api/v1/batch/apply", s.handleBatchApply)
 	mux.HandleFunc("POST /api/v1/batch/start", s.handleBatchStart)

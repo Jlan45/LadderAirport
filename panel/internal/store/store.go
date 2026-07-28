@@ -126,6 +126,26 @@ func (s *Store) migrate() error {
 			created_at_unix INTEGER NOT NULL,
 			updated_at_unix INTEGER NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS node_frps_configs (
+			node_id TEXT PRIMARY KEY,
+			enabled INTEGER NOT NULL DEFAULT 0,
+			bind_addr TEXT NOT NULL DEFAULT '0.0.0.0',
+			bind_port INTEGER NOT NULL DEFAULT 7000,
+			proxy_bind_addr TEXT NOT NULL DEFAULT '0.0.0.0',
+			allow_ports_json TEXT NOT NULL DEFAULT '[]',
+			auth_token_ciphertext TEXT NOT NULL DEFAULT '',
+			tls_force INTEGER NOT NULL DEFAULT 1,
+			max_ports_per_client INTEGER NOT NULL DEFAULT 0,
+			desired_hash TEXT NOT NULL DEFAULT '',
+			applied_hash TEXT NOT NULL DEFAULT '',
+			runtime_state TEXT NOT NULL DEFAULT '',
+			frps_version TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			started_at_unix INTEGER NOT NULL DEFAULT 0,
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL,
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS inbounds (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,

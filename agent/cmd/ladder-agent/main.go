@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"github.com/ladderairport/agent/internal/control"
+	"github.com/ladderairport/agent/internal/frpsruntime"
 	"github.com/ladderairport/agent/internal/managementpki"
 	"github.com/ladderairport/agent/internal/protocolcert"
 	"github.com/ladderairport/agent/internal/version"
@@ -65,8 +66,12 @@ func main() {
 	rt := control.NewBoxRuntime(*dataDir)
 	logs := control.NewLogBuf(0)
 	singboxVer := control.SingboxVersion()
+	frpsVer := frpsruntime.Version()
 	agentVersion := version.Version
-	log.Printf("运行模式=内置代理实例 Agent版本=%s sing-box版本=%s 数据目录=%q", agentVersion, singboxVer, *dataDir)
+	log.Printf(
+		"运行模式=内置代理实例 Agent版本=%s sing-box版本=%s frps版本=%s 数据目录=%q",
+		agentVersion, singboxVer, frpsVer, *dataDir,
+	)
 
 	srv := control.NewServer(rt, agentVersion, singboxVer, logs)
 	srv.SetPublicAddressResolver(control.NewPublicAddressResolver())
@@ -79,6 +84,11 @@ func main() {
 		log.Fatalf("初始化协议证书存储失败：%v", err)
 	}
 	srv.SetProtocolCertificateManager(protocolCerts)
+	frps := frpsruntime.New(filepath.Join(*dataDir, "frps"))
+	if err := frps.Restore(context.Background()); err != nil {
+		log.Printf("恢复 FRPS 缓存配置失败：%v", err)
+	}
+	srv.SetFRPServerRuntime(frps)
 
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(auth.UnaryServerInterceptor(*token)),
@@ -153,6 +163,7 @@ func main() {
 		log.Printf("收到信号 %v，正在停止", sig)
 		cancelRun()
 		gs.GracefulStop()
+		_ = frps.Stop(context.Background())
 		_ = rt.Stop(context.Background())
 	case err := <-errCh:
 		if err != nil {

@@ -23,6 +23,10 @@ service AgentControl {
   rpc InstallProtocolCertificate(InstallProtocolCertificateRequest) returns (InstallProtocolCertificateResponse);
   rpc GetProtocolCertificateStatus(GetProtocolCertificateStatusRequest) returns (GetProtocolCertificateStatusResponse);
   rpc DeleteProtocolCertificateGeneration(DeleteProtocolCertificateGenerationRequest) returns (DeleteProtocolCertificateGenerationResponse);
+  rpc ApplyFRPServerConfig(ApplyFRPServerConfigRequest) returns (ApplyFRPServerConfigResponse);
+  rpc StartFRPServer(StartFRPServerRequest) returns (StartFRPServerResponse);
+  rpc StopFRPServer(StopFRPServerRequest) returns (StopFRPServerResponse);
+  rpc GetFRPServerStatus(GetFRPServerStatusRequest) returns (GetFRPServerStatusResponse);
 }
 
 message PingRequest {}
@@ -30,6 +34,55 @@ message PingResponse {
   string agent_version = 1;
   string singbox_version = 2;
   repeated string capabilities = 3;
+  string frps_version = 4;
+}
+
+message FRPServerPortRange {
+  uint32 start = 1;
+  uint32 end = 2;
+}
+
+message FRPServerConfig {
+  bool enabled = 1;
+  string bind_addr = 2;
+  uint32 bind_port = 3;
+  string proxy_bind_addr = 4;
+  repeated FRPServerPortRange allow_ports = 5;
+  string auth_token = 6;
+  bool tls_force = 7;
+  int64 max_ports_per_client = 8;
+}
+
+message ApplyFRPServerConfigRequest {
+  FRPServerConfig config = 1;
+  string config_hash = 2;
+}
+
+message ApplyFRPServerConfigResponse {
+  bool ok = 1;
+  string message = 2;
+  string applied_hash = 3;
+}
+
+message StartFRPServerRequest {}
+message StartFRPServerResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message StopFRPServerRequest {}
+message StopFRPServerResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+message GetFRPServerStatusRequest {}
+message GetFRPServerStatusResponse {
+  string state = 1;
+  string config_hash = 2;
+  int64 started_at_unix = 3;
+  string last_error = 4;
+  string frps_version = 5;
 }
 
 message ProbeOutboundRequest {

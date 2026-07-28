@@ -41,7 +41,7 @@ func main() {
 	credentialsKeyFile := flag.String(
 		"credentials-key-file",
 		"",
-		"DNS/ACME 凭据主密钥文件（默认：<数据库目录>/secrets/credentials.key）",
+		"Panel 凭据主密钥文件（默认：<数据库目录>/secrets/credentials.key）",
 	)
 	flag.Parse()
 

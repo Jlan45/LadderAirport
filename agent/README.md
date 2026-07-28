@@ -1,6 +1,6 @@
 # LadderAirport Agent
 
-In-process **sing-box 二开** agent: gRPC `AgentControl` + `BoxRuntime` lifecycle adapter.
+In-process **sing-box + optional FRPS** agent: gRPC `AgentControl` with independent `BoxRuntime` and `FRPServerRuntime` lifecycle adapters.
 
 ## Upstream pin
 
@@ -10,6 +10,15 @@ In-process **sing-box 二开** agent: gRPC `AgentControl` + `BoxRuntime` lifecyc
 | Pinned tag | **v1.12.22** |
 | Submodule path | `agent/sing-box` |
 | Go module | `github.com/sagernet/sing-box` |
+
+FRPS follows the same source pinning model:
+
+| Item | Value |
+|---|---|
+| Upstream | [fatedier/frp](https://github.com/fatedier/frp) |
+| Pinned tag | `v0.69.0` |
+| Submodule path | `agent/frp` |
+| Go module | `github.com/fatedier/frp` |
 | Default build tags | `with_quic,with_utls` |
 
 `agent/go.mod` uses:
@@ -36,7 +45,9 @@ git clone --depth 1 --branch v1.12.22 https://github.com/SagerNet/sing-box.git a
 
 ## Runtime
 
-Agent always uses **in-process sing-box** (`control.BoxRuntime`). There is no mock core or `-runtime` flag.
+Agent always uses **in-process sing-box** (`control.BoxRuntime`). FRPS is also linked into the Agent and remains stopped until Panel applies an enabled FRPS configuration.
+
+The runtimes are independent: applying or stopping FRPS does not restart sing-box. The latest FRPS configuration is stored as `frps/frps-current.json` under the Agent data directory with mode `0600`, restored at Agent startup, and controlled through the `frps-v1` gRPC capability.
 
 Log line on start: `runtime=box agent_version=... singbox_version=...`.
 

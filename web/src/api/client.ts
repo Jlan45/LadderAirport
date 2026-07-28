@@ -121,6 +121,47 @@ export interface Node {
   updated_at_unix: number
 }
 
+export interface FRPServerPortRange {
+  start: number
+  end: number
+}
+
+export interface FRPServerConfig {
+  node_id: string
+  enabled: boolean
+  bind_addr: string
+  bind_port: number
+  proxy_bind_addr: string
+  allow_ports: FRPServerPortRange[]
+  has_auth_token: boolean
+  /** Returned immediately after generation/rotation; it can also be revealed later. */
+  generated_auth_token?: string
+  tls_force: boolean
+  max_ports_per_client: number
+  desired_hash: string
+  applied_hash: string
+  runtime_state: string
+  frps_version: string
+  last_error?: string
+  started_at_unix: number
+  created_at_unix: number
+  updated_at_unix: number
+}
+
+export interface PutFRPServerConfigInput {
+  enabled: boolean
+  bind_addr: string
+  bind_port: number
+  proxy_bind_addr: string
+  allow_ports: FRPServerPortRange[]
+  /** Empty preserves the encrypted token already stored by Panel. */
+  auth_token?: string
+  /** Generate and apply a new random token. Existing clients must be updated. */
+  rotate_auth_token?: boolean
+  tls_force: boolean
+  max_ports_per_client: number
+}
+
 export interface NetworkInterface {
   name: string
   addresses: string[]
@@ -644,6 +685,30 @@ export function getNodeMetrics(id: string): Promise<Metrics> {
 
 export function listNodeInterfaces(id: string): Promise<{ interfaces: NetworkInterface[] }> {
   return request('GET', `/nodes/${id}/interfaces`)
+}
+
+export function getNodeFRPS(id: string): Promise<FRPServerConfig> {
+  return request('GET', `/nodes/${id}/frps`)
+}
+
+export function putNodeFRPS(id: string, body: PutFRPServerConfigInput): Promise<FRPServerConfig> {
+  return request('PUT', `/nodes/${id}/frps`, body)
+}
+
+export function getNodeFRPSStatus(id: string): Promise<FRPServerConfig> {
+  return request('GET', `/nodes/${id}/frps/status`)
+}
+
+export function startNodeFRPS(id: string): Promise<FRPServerConfig> {
+  return request('POST', `/nodes/${id}/frps/start`)
+}
+
+export function stopNodeFRPS(id: string): Promise<FRPServerConfig> {
+  return request('POST', `/nodes/${id}/frps/stop`)
+}
+
+export function revealNodeFRPSToken(id: string): Promise<{ auth_token: string }> {
+  return request('POST', `/nodes/${id}/frps/token/reveal`)
 }
 
 /**

@@ -1,4 +1,4 @@
-// Package secretstore encrypts Panel-owned provider and ACME credentials.
+// Package secretstore encrypts Panel-owned credentials and service tokens.
 package secretstore
 
 import (
@@ -61,11 +61,12 @@ func (s *Store) Decrypt(envelope, associatedData string) ([]byte, error) {
 	}
 	encoding := base64.RawURLEncoding
 	nonce, err := encoding.DecodeString(parts[1])
-	if err != nil || len(nonce) != s.aead.NonceSize() {
+	if err != nil || len(nonce) != s.aead.NonceSize() ||
+		encoding.EncodeToString(nonce) != parts[1] {
 		return nil, fmt.Errorf("凭据密文随机数无效")
 	}
 	ciphertext, err := encoding.DecodeString(parts[2])
-	if err != nil {
+	if err != nil || encoding.EncodeToString(ciphertext) != parts[2] {
 		return nil, fmt.Errorf("凭据密文内容无效")
 	}
 	plaintext, err := s.aead.Open(nil, nonce, ciphertext, []byte(associatedData))

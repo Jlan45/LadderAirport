@@ -52,6 +52,36 @@ type Node struct {
 	UpdatedAtUnix  int64    `json:"updated_at_unix"`
 }
 
+// FRPServerPortRange limits the remote proxy ports that FRPS may allocate.
+type FRPServerPortRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// FRPServerConfig stores a node's desired FRPS configuration and the latest
+// runtime state observed from the Agent. The authentication token is always
+// encrypted at rest and never serialized by the HTTP API.
+type FRPServerConfig struct {
+	NodeID              string               `json:"node_id"`
+	Enabled             bool                 `json:"enabled"`
+	BindAddr            string               `json:"bind_addr"`
+	BindPort            int                  `json:"bind_port"`
+	ProxyBindAddr       string               `json:"proxy_bind_addr"`
+	AllowPorts          []FRPServerPortRange `json:"allow_ports"`
+	AuthTokenCiphertext string               `json:"-"`
+	HasAuthToken        bool                 `json:"has_auth_token"`
+	TLSForce            bool                 `json:"tls_force"`
+	MaxPortsPerClient   int64                `json:"max_ports_per_client"`
+	DesiredHash         string               `json:"desired_hash"`
+	AppliedHash         string               `json:"applied_hash"`
+	RuntimeState        string               `json:"runtime_state"`
+	FRPSVersion         string               `json:"frps_version"`
+	LastError           string               `json:"last_error,omitempty"`
+	StartedAtUnix       int64                `json:"started_at_unix"`
+	CreatedAtUnix       int64                `json:"created_at_unix"`
+	UpdatedAtUnix       int64                `json:"updated_at_unix"`
+}
+
 // NodeOperatorUpdate contains only fields controlled by an operator. Runtime
 // status, metrics, versions and config hashes are deliberately excluded.
 type NodeOperatorUpdate struct {

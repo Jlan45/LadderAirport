@@ -1,3 +1,6 @@
 [submodule "agent/sing-box"]
 	path = agent/sing-box
 	url = https://github.com/SagerNet/sing-box.git
+[submodule "agent/frp"]
+	path = agent/frp
+	url = https://github.com/fatedier/frp.git

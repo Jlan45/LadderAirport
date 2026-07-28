@@ -187,6 +187,28 @@ func (c *Client) GetMetrics(ctx context.Context) (*agentv1.GetMetricsResponse, e
 	return c.api.GetMetrics(c.withAuth(ctx), &agentv1.GetMetricsRequest{})
 }
 
+func (c *Client) ApplyFRPServerConfig(
+	ctx context.Context,
+	config *agentv1.FRPServerConfig,
+	hash string,
+) (*agentv1.ApplyFRPServerConfigResponse, error) {
+	return c.api.ApplyFRPServerConfig(c.withAuth(ctx), &agentv1.ApplyFRPServerConfigRequest{
+		Config: config, ConfigHash: hash,
+	})
+}
+
+func (c *Client) StartFRPServer(ctx context.Context) (*agentv1.StartFRPServerResponse, error) {
+	return c.api.StartFRPServer(c.withAuth(ctx), &agentv1.StartFRPServerRequest{})
+}
+
+func (c *Client) StopFRPServer(ctx context.Context) (*agentv1.StopFRPServerResponse, error) {
+	return c.api.StopFRPServer(c.withAuth(ctx), &agentv1.StopFRPServerRequest{})
+}
+
+func (c *Client) GetFRPServerStatus(ctx context.Context) (*agentv1.GetFRPServerStatusResponse, error) {
+	return c.api.GetFRPServerStatus(c.withAuth(ctx), &agentv1.GetFRPServerStatusRequest{})
+}
+
 func (c *Client) ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (*agentv1.ProbeOutboundResponse, error) {
 	return c.api.ProbeOutbound(c.withAuth(ctx), &agentv1.ProbeOutboundRequest{
 		OutboundTag: outboundTag,

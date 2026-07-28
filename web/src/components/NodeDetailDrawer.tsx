@@ -30,12 +30,19 @@ import {
   Activity,
   Terminal,
   Wifi,
+  Plus,
+  Trash2,
+  ChevronDown,
+  KeyRound,
+  ShieldCheck,
 } from 'lucide-react'
 import {
   applyNode,
   getNodeInstallCommand,
   getNodeInboundTLS,
   getNodeMetrics,
+  getNodeFRPS,
+  getNodeFRPSStatus,
   listInbounds,
   listNodeInbounds,
   listNodeInterfaces,
@@ -44,13 +51,19 @@ import {
   listProtocolCertificates,
   previewNodeConfig,
   setNodeInboundBindings,
+  startNodeFRPS,
   startNode,
   stopNode,
+  stopNodeFRPS,
   streamNodeLogs,
   putNodeInboundTLS,
+  putNodeFRPS,
+  revealNodeFRPSToken,
   updateNode,
   upgradeNode,
   type InboundConfig,
+  type FRPServerConfig,
+  type PutFRPServerConfigInput,
   type Metrics,
   type NetworkInterface,
   type Node,
@@ -102,6 +115,11 @@ type DrawerAction =
   | 'metrics'
   | 'upgrade'
   | 'install'
+  | 'save-frps'
+  | 'start-frps'
+  | 'stop-frps'
+  | 'refresh-frps'
+  | 'reveal-frps-token'
 
 type ConnectionErrors = Partial<
   Record<'name' | 'address' | 'grpcPort' | 'publicAddress', string>
@@ -210,6 +228,15 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
   const [copiedUpgrade, setCopiedUpgrade] = useState(false)
+  const [frps, setFRPS] = useState<FRPServerConfig | null>(null)
+  const [frpsDraft, setFRPSDraft] = useState<PutFRPServerConfigInput | null>(null)
+  const [frpsToken, setFRPSToken] = useState('')
+  const [frpsTokenVisible, setFRPSTokenVisible] = useState(false)
+  const [frpsLoading, setFRPSLoading] = useState(false)
+  const [frpsError, setFRPSError] = useState('')
+  const [frpsTouched, setFRPSTouched] = useState(false)
+  const [frpsAdvanced, setFRPSAdvanced] = useState(false)
+  const [frpsCopied, setFRPSCopied] = useState(false)
 
   const isCurrentNode = useCallback(
     (targetId: string, generation: number) =>
@@ -236,6 +263,39 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       if (isCurrentNode(targetId, generation) && request === interfacesRequestRef.current) {
         setIfacesLoading(false)
       }
+    }
+  }, [isCurrentNode])
+
+  const loadFRPS = useCallback(async (targetId: string, generation: number) => {
+    if (!targetId) return
+    if (isCurrentNode(targetId, generation)) {
+      setFRPSLoading(true)
+      setFRPSError('')
+    }
+    try {
+      const config = await getNodeFRPS(targetId)
+      if (!isCurrentNode(targetId, generation)) return
+      setFRPS(config)
+      setFRPSDraft({
+        enabled: config.enabled,
+        bind_addr: config.bind_addr || '0.0.0.0',
+        bind_port: config.bind_port || 7000,
+        proxy_bind_addr: config.proxy_bind_addr || '0.0.0.0',
+        allow_ports: config.allow_ports?.length
+          ? config.allow_ports.map((item) => ({ ...item }))
+          : [{ start: 20000, end: 30000 }],
+        tls_force: config.tls_force,
+        max_ports_per_client: config.max_ports_per_client ?? 8,
+      })
+      setFRPSToken('')
+      setFRPSTokenVisible(false)
+      setFRPSCopied(false)
+      setFRPSTouched(false)
+    } catch (err) {
+      if (!isCurrentNode(targetId, generation)) return
+      setFRPSError(err instanceof Error ? err.message : '加载 FRPS 配置失败')
+    } finally {
+      if (isCurrentNode(targetId, generation)) setFRPSLoading(false)
     }
   }, [isCurrentNode])
 
@@ -350,10 +410,11 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
 
   const inboundsDirty =
     inboundNATSnapshot(inboundNAT) !== inboundNATSnapshot(savedInboundNAT)
+  const frpsDirty = frpsTouched
   const attachedTLSKey = Object.keys(savedInboundNAT).sort().join(',')
 
   useUnsavedNavigation({
-    active: open && (connectionDirty || inboundsDirty),
+    active: open && (connectionDirty || inboundsDirty || frpsDirty),
     message: '离开节点详情会丢失尚未保存的更改。',
   })
 
@@ -383,16 +444,26 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setInstallInfo(null)
     setCopied(false)
     setCopiedUpgrade(false)
+    setFRPS(null)
+    setFRPSDraft(null)
+    setFRPSToken('')
+    setFRPSTokenVisible(false)
+    setFRPSLoading(false)
+    setFRPSError('')
+    setFRPSTouched(false)
+    setFRPSAdvanced(false)
+    setFRPSCopied(false)
 
     void load(id, currentGeneration, { syncConnection: true, syncInbounds: true, fatal: true })
     void loadInterfaces(id, currentGeneration)
+    void loadFRPS(id, currentGeneration)
     return () => {
       if (abortRef.current) {
         abortRef.current.abort()
         abortRef.current = null
       }
     }
-  }, [id, open, load, loadInterfaces])
+  }, [id, open, load, loadInterfaces, loadFRPS])
 
   useEffect(() => {
     if (!open || !id || !attachedTLSKey) {
@@ -453,14 +524,14 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       event.preventDefault()
       event.returnValue = ''
     }
-    if (connectionDirty || inboundsDirty) {
+    if (connectionDirty || inboundsDirty || frpsDirty) {
       window.addEventListener('beforeunload', warnBeforeUnload)
     }
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-  }, [open, connectionDirty, inboundsDirty])
+  }, [open, connectionDirty, inboundsDirty, frpsDirty])
 
   function requestClose() {
-    if (!connectionDirty && !inboundsDirty) {
+    if (!connectionDirty && !inboundsDirty && !frpsDirty) {
       onClose()
       return
     }
@@ -478,6 +549,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setLoadError('')
     void load(id, current, { syncConnection: true, syncInbounds: true, fatal: true })
     void loadInterfaces(id, current)
+    void loadFRPS(id, current)
   }
 
   function retryInbounds() {
@@ -769,6 +841,155 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     }
   }
 
+  function updateFRPSDraft(patch: Partial<PutFRPServerConfigInput>) {
+    setFRPSDraft((current) => current ? { ...current, ...patch } : current)
+    setFRPSTouched(true)
+  }
+
+  async function saveFRPS(options: { rotateToken?: boolean } = {}) {
+    if (busy || !frpsDraft) return
+    const bindPort = Number(frpsDraft.bind_port)
+    const maxPorts = Number(frpsDraft.max_ports_per_client)
+    const allowPorts = frpsDraft.allow_ports.map((item) => ({
+      start: Number(item.start),
+      end: Number(item.end),
+    }))
+    if (frpsDraft.enabled) {
+      if (!frpsDraft.bind_addr.trim() || !frpsDraft.proxy_bind_addr.trim()) {
+        toast.warning('请填写 FRPS 绑定地址')
+        return
+      }
+      if (!Number.isInteger(bindPort) || bindPort < 1024 || bindPort > 65535) {
+        toast.warning('FRPS 控制端口必须在 1024 到 65535 之间')
+        return
+      }
+      if (allowPorts.length === 0 || allowPorts.some(
+        (item) =>
+          !Number.isInteger(item.start) ||
+          !Number.isInteger(item.end) ||
+          item.start < 1024 ||
+          item.end > 65535 ||
+          item.start > item.end ||
+          (bindPort >= item.start && bindPort <= item.end),
+      )) {
+        toast.warning('允许端口范围无效，且不能包含 FRPS 控制端口')
+        return
+      }
+    }
+
+    setBusyAction('save-frps')
+    const current = generationRef.current
+    try {
+      const config = await putNodeFRPS(id, {
+        ...frpsDraft,
+        bind_addr: frpsDraft.bind_addr.trim(),
+        bind_port: bindPort,
+        proxy_bind_addr: frpsDraft.proxy_bind_addr.trim(),
+        allow_ports: allowPorts,
+        rotate_auth_token: options.rotateToken || undefined,
+        max_ports_per_client: Number.isFinite(maxPorts) ? maxPorts : 0,
+      })
+      if (isCurrentNode(id, current)) {
+        setFRPS(config)
+        setFRPSDraft({
+          enabled: config.enabled,
+          bind_addr: config.bind_addr,
+          bind_port: config.bind_port,
+          proxy_bind_addr: config.proxy_bind_addr,
+          allow_ports: config.allow_ports.map((item) => ({ ...item })),
+          tls_force: config.tls_force,
+          max_ports_per_client: config.max_ports_per_client,
+        })
+        setFRPSToken(config.generated_auth_token || '')
+        setFRPSTokenVisible(false)
+        setFRPSCopied(false)
+        setFRPSTouched(false)
+      }
+      toast.success(
+        options.rotateToken
+          ? 'FRPS 认证令牌已轮换，请更新所有 FRP 客户端'
+          : config.enabled
+            ? 'FRPS 已自动配置并启动'
+            : 'FRPS 配置已保存并停止',
+      )
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存 FRPS 配置失败')
+    } finally {
+      if (isCurrentNode(id, current)) setBusyAction(null)
+    }
+  }
+
+  async function rotateFRPSToken() {
+    if (busy || frpsDirty || !frpsDraft) return
+    if (!window.confirm('轮换 FRPS 认证令牌后，现有 FRP 客户端必须更新。确定继续吗？')) return
+    await saveFRPS({ rotateToken: true })
+  }
+
+  async function revealFRPSToken() {
+    if (busy || !frps?.has_auth_token) return
+    setBusyAction('reveal-frps-token')
+    const current = generationRef.current
+    try {
+      const result = await revealNodeFRPSToken(id)
+      if (isCurrentNode(id, current)) {
+        setFRPSToken(result.auth_token)
+        setFRPSTokenVisible(false)
+        setFRPSCopied(false)
+      }
+      toast.success('FRPS 客户端凭据已解锁')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '读取 FRPS 认证令牌失败')
+    } finally {
+      if (isCurrentNode(id, current)) setBusyAction(null)
+    }
+  }
+
+  async function copyFRPSClientConfig() {
+    if (!frpsToken || !frpsDraft || !node) return
+    const serverAddr = node.public_address || node.address
+    if (!serverAddr) {
+      toast.warning('请先填写节点公网地址或控制面地址')
+      return
+    }
+    const config = [
+      `serverAddr = ${JSON.stringify(serverAddr)}`,
+      `serverPort = ${frpsDraft.bind_port}`,
+      'auth.method = "token"',
+      `auth.token = ${JSON.stringify(frpsToken)}`,
+      'auth.additionalScopes = ["HeartBeats", "NewWorkConns"]',
+      'transport.tls.enable = true',
+    ].join('\n')
+    try {
+      await copyText(config)
+      setFRPSCopied(true)
+      toast.success('已复制 FRP 客户端基础配置')
+      window.setTimeout(() => setFRPSCopied(false), 2000)
+    } catch {
+      toast.error('复制失败')
+    }
+  }
+
+  async function runFRPSAction(action: 'start' | 'stop' | 'refresh') {
+    if (busy || frpsDirty) return
+    setBusyAction(action === 'start' ? 'start-frps' : action === 'stop' ? 'stop-frps' : 'refresh-frps')
+    const current = generationRef.current
+    try {
+      const config = action === 'start'
+        ? await startNodeFRPS(id)
+        : action === 'stop'
+          ? await stopNodeFRPS(id)
+          : await getNodeFRPSStatus(id)
+      if (isCurrentNode(id, current)) setFRPS(config)
+      toast.success(action === 'start' ? 'FRPS 已启动' : action === 'stop' ? 'FRPS 已停止' : 'FRPS 状态已刷新')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'FRPS 操作失败')
+    } finally {
+      if (isCurrentNode(id, current)) setBusyAction(null)
+    }
+  }
+
   async function startLogs() {
     if (streaming) return
     setStreaming(true)
@@ -916,6 +1137,9 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                   <TabsTrigger value="connection" className="data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100">连接 / NAT</TabsTrigger>
                   <TabsTrigger value="inbounds" className="data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100">
                     入站{attachedCount ? ` (${attachedCount})` : ''}
+                  </TabsTrigger>
+                  <TabsTrigger value="frps" className="data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100">
+                    FRPS
                   </TabsTrigger>
                   <TabsTrigger value="ops" className="data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-100">运维 & 日志</TabsTrigger>
                 </TabsList>
@@ -1478,6 +1702,358 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                       </div>
                     )}
                   </div>
+                </TabsContent>
+
+                {/* Embedded FRPS Tab */}
+                <TabsContent value="frps" className="space-y-6 mt-0">
+                  {frpsLoading ? (
+                    <div className="flex items-center justify-center p-8 gap-2 text-sm text-zinc-400">
+                      <RefreshCw className="h-4 w-4 animate-spin" /> 正在加载 FRPS 配置…
+                    </div>
+                  ) : frpsError || !frpsDraft ? (
+                    <Alert variant="destructive">
+                      <AlertTitle>FRPS 配置暂不可用</AlertTitle>
+                      <AlertDescription>{frpsError || '无法读取 FRPS 配置'}</AlertDescription>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-3"
+                        onClick={() => void loadFRPS(id, generationRef.current)}
+                      >
+                        重试
+                      </Button>
+                    </Alert>
+                  ) : (
+                    <div className="space-y-6">
+                      {node.capabilities?.length && !node.capabilities.includes('frps-v1') ? (
+                        <Alert variant="warning">
+                          <AlertTitle>Agent 版本不支持 FRPS</AlertTitle>
+                          <AlertDescription>请先升级节点 Agent；配置仍可编辑，但当前版本无法接收下发。</AlertDescription>
+                        </Alert>
+                      ) : null}
+
+                      <div className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900/20 p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-semibold text-zinc-200">内嵌 FRP Server</h3>
+                            <p className="text-xs text-zinc-500">
+                              FRPS 由 Agent 进程托管，配置持久化后会随 Agent 自动恢复。
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={runtimeTheme(frps?.runtime_state || 'stopped') as any}>
+                              {runtimeLabel(frps?.runtime_state || 'stopped')}
+                            </Badge>
+                            {frps?.frps_version ? (
+                              <Badge variant="outline">frps {frps.frps_version}</Badge>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-3">
+                          <Checkbox
+                            id="frps-enabled"
+                            checked={frpsDraft.enabled}
+                            disabled={busy}
+                            onCheckedChange={(checked) => updateFRPSDraft({ enabled: Boolean(checked) })}
+                          />
+                          <div>
+                            <Label htmlFor="frps-enabled" className="cursor-pointer text-zinc-200">启用 FRPS</Label>
+                            <p className="text-xs text-zinc-500">保存后立即应用；关闭时会停止 FRPS，但保留配置。</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <div className="rounded-md border border-zinc-800 bg-zinc-950/50 p-3">
+                            <span className="block text-[10px] uppercase tracking-wider text-zinc-600">控制入口</span>
+                            <code className="mt-1 block text-sm text-zinc-200">
+                              {node.public_address || node.address || '节点地址'}:{frpsDraft.bind_port}
+                            </code>
+                          </div>
+                          <div className="rounded-md border border-zinc-800 bg-zinc-950/50 p-3">
+                            <span className="block text-[10px] uppercase tracking-wider text-zinc-600">代理端口池</span>
+                            <code className="mt-1 block text-sm text-zinc-200">
+                              {frpsDraft.allow_ports.map((range) => `${range.start}-${range.end}`).join(', ') || '自动分配'}
+                            </code>
+                          </div>
+                          <div className="rounded-md border border-emerald-950 bg-emerald-950/10 p-3">
+                            <span className="block text-[10px] uppercase tracking-wider text-emerald-700">安全策略</span>
+                            <span className="mt-1 flex items-center gap-1.5 text-sm text-emerald-400">
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                              随机令牌 · 强制 TLS
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setFRPSAdvanced((open) => !open)}
+                          className="flex w-full items-center justify-between rounded-md border border-zinc-800 bg-zinc-950/30 px-3 py-2 text-left text-xs text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+                        >
+                          <span>高级设置：绑定地址、端口范围与客户端限额</span>
+                          <ChevronDown className={`h-4 w-4 transition-transform ${frpsAdvanced ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        {frpsAdvanced ? (
+                          <div className="grid grid-cols-1 gap-4 rounded-md border border-zinc-800 bg-zinc-950/30 p-4 sm:grid-cols-2">
+                            <div className="space-y-1.5">
+                              <Label htmlFor="frps-bind-addr" className="text-zinc-400">控制面绑定 IP</Label>
+                              <Input
+                                id="frps-bind-addr"
+                                value={frpsDraft.bind_addr}
+                                disabled={busy}
+                                onChange={(event) => updateFRPSDraft({ bind_addr: event.target.value })}
+                                className="bg-zinc-900 border-zinc-800 font-mono"
+                                placeholder="0.0.0.0"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label htmlFor="frps-bind-port" className="text-zinc-400">控制端口</Label>
+                              <Input
+                                id="frps-bind-port"
+                                type="number"
+                                min={1024}
+                                max={65535}
+                                value={frpsDraft.bind_port}
+                                disabled={busy}
+                                onChange={(event) => updateFRPSDraft({ bind_port: Number(event.target.value) })}
+                                className="bg-zinc-900 border-zinc-800 font-mono"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label htmlFor="frps-proxy-bind-addr" className="text-zinc-400">代理端口绑定 IP</Label>
+                              <Input
+                                id="frps-proxy-bind-addr"
+                                value={frpsDraft.proxy_bind_addr}
+                                disabled={busy}
+                                onChange={(event) => updateFRPSDraft({ proxy_bind_addr: event.target.value })}
+                                className="bg-zinc-900 border-zinc-800 font-mono"
+                                placeholder="0.0.0.0"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label htmlFor="frps-max-ports" className="text-zinc-400">每客户端最大端口数</Label>
+                              <Input
+                                id="frps-max-ports"
+                                type="number"
+                                min={0}
+                                value={frpsDraft.max_ports_per_client}
+                                disabled={busy}
+                                onChange={(event) => updateFRPSDraft({ max_ports_per_client: Number(event.target.value) })}
+                                className="bg-zinc-900 border-zinc-800"
+                                placeholder="默认 8；0 = 不限制"
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {frps?.has_auth_token ? (
+                        <div className="space-y-4 rounded-lg border border-amber-900/50 bg-amber-950/10 p-5">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+                                <KeyRound className="h-4 w-4" /> FRP 客户端凭据
+                              </h3>
+                              <p className="mt-1 text-xs text-amber-200/60">
+                                多个 FRPC 设备可以共用此 token。凭据默认隐藏，需要时可随时解锁并复制。
+                              </p>
+                            </div>
+                            {frpsToken ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void copyFRPSClientConfig()}
+                                className="gap-1 border-amber-900/60 text-amber-200 hover:bg-amber-950/40"
+                              >
+                                {frpsCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                                {frpsCopied ? '已复制' : '复制 FRPC 配置'}
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                loading={busyAction === 'reveal-frps-token'}
+                                disabled={busy}
+                                onClick={() => void revealFRPSToken()}
+                                className="gap-1 border-amber-900/60 text-amber-200 hover:bg-amber-950/40"
+                              >
+                                <Eye className="h-3.5 w-3.5" /> 查看凭据
+                              </Button>
+                            )}
+                          </div>
+                          {frpsToken ? (
+                            <div className="relative rounded-md border border-amber-900/40 bg-black/40 p-3 pr-11 font-mono text-xs text-amber-100">
+                              <span>{frpsTokenVisible ? frpsToken : '•'.repeat(32)}</span>
+                              <button
+                                type="button"
+                                onClick={() => setFRPSTokenVisible((visible) => !visible)}
+                                className="absolute right-3 top-2.5 text-amber-400/70 hover:text-amber-200"
+                                aria-label={frpsTokenVisible ? '隐藏 FRPS 令牌' : '显示 FRPS 令牌'}
+                              >
+                                {frpsTokenVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="rounded-md border border-dashed border-amber-900/40 bg-black/20 p-3 text-xs text-amber-200/50">
+                              Token 已由 Panel 加密保存，点击“查看凭据”后可显示或复制。
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+
+                      {frpsAdvanced ? (
+                      <div className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900/20 p-5">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <h3 className="text-sm font-semibold text-zinc-200">允许的代理端口</h3>
+                            <p className="mt-1 text-xs text-zinc-500">FRP 客户端只能申请下列范围，建议避免暴露整个端口空间。</p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => updateFRPSDraft({
+                              allow_ports: [...frpsDraft.allow_ports, { start: 20000, end: 30000 }],
+                            })}
+                            className="gap-1 border-zinc-800"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> 添加范围
+                          </Button>
+                        </div>
+                        <div className="space-y-2">
+                          {frpsDraft.allow_ports.map((range, index) => (
+                            <div key={index} className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
+                              <Input
+                                aria-label={`允许端口范围 ${index + 1} 起始端口`}
+                                type="number"
+                                min={1024}
+                                max={65535}
+                                value={range.start}
+                                disabled={busy}
+                                onChange={(event) => {
+                                  const next = frpsDraft.allow_ports.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, start: Number(event.target.value) } : item
+                                  )
+                                  updateFRPSDraft({ allow_ports: next })
+                                }}
+                                className="bg-zinc-900 border-zinc-800 font-mono"
+                              />
+                              <span className="text-zinc-600">—</span>
+                              <Input
+                                aria-label={`允许端口范围 ${index + 1} 结束端口`}
+                                type="number"
+                                min={1024}
+                                max={65535}
+                                value={range.end}
+                                disabled={busy}
+                                onChange={(event) => {
+                                  const next = frpsDraft.allow_ports.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, end: Number(event.target.value) } : item
+                                  )
+                                  updateFRPSDraft({ allow_ports: next })
+                                }}
+                                className="bg-zinc-900 border-zinc-800 font-mono"
+                              />
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                disabled={busy}
+                                onClick={() => updateFRPSDraft({
+                                  allow_ports: frpsDraft.allow_ports.filter((_, itemIndex) => itemIndex !== index),
+                                })}
+                                className="text-zinc-500 hover:text-red-400"
+                                aria-label={`删除允许端口范围 ${index + 1}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                          {frpsDraft.allow_ports.length === 0 ? (
+                            <p className="rounded-md border border-dashed border-zinc-800 p-4 text-center text-xs text-zinc-500">
+                              启用 FRPS 前至少添加一个允许端口范围。
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                      ) : null}
+
+                      <div className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900/20 p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="rounded-md border border-emerald-950 bg-emerald-950/20 p-2 text-emerald-400">
+                              <ShieldCheck className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <h3 className="text-sm font-semibold text-zinc-200">安全参数自动托管</h3>
+                              <p className="mt-1 text-xs text-zinc-500">
+                                {frps?.has_auth_token
+                                  ? '随机令牌已加密保存；TLS、心跳和工作连接认证已强制开启。'
+                                  : '首次部署时自动生成 256 位随机令牌，并强制启用 TLS。'}
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={busy || frpsDirty || !frps?.has_auth_token}
+                            onClick={() => void rotateFRPSToken()}
+                            className="gap-1 border-zinc-800"
+                          >
+                            <KeyRound className="h-3.5 w-3.5" /> 轮换令牌
+                          </Button>
+                        </div>
+                      </div>
+
+                      {frps?.last_error ? (
+                        <Alert variant="destructive">
+                          <AlertTitle>最近一次 FRPS 错误</AlertTitle>
+                          <AlertDescription>{frps.last_error}</AlertDescription>
+                        </Alert>
+                      ) : null}
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 pt-4">
+                        <Button
+                          loading={busyAction === 'save-frps'}
+                          disabled={busy || !frpsDirty}
+                          onClick={() => void saveFRPS()}
+                        >
+                          {!frps?.desired_hash && frpsDraft.enabled ? '自动配置并启动' : '保存并应用'}
+                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            loading={busyAction === 'refresh-frps'}
+                            disabled={busy || frpsDirty}
+                            onClick={() => void runFRPSAction('refresh')}
+                            className="border-zinc-800 gap-1"
+                          >
+                            <RefreshCw className="h-4 w-4" /> 刷新状态
+                          </Button>
+                          <Button
+                            loading={busyAction === 'start-frps'}
+                            disabled={busy || frpsDirty || !frps?.desired_hash}
+                            onClick={() => void runFRPSAction('start')}
+                            className="gap-1"
+                          >
+                            <Play className="h-4 w-4" /> 启动
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            loading={busyAction === 'stop-frps'}
+                            disabled={busy || frpsDirty || !frps?.desired_hash}
+                            onClick={() => void runFRPSAction('stop')}
+                            className="gap-1"
+                          >
+                            <Square className="h-4 w-4" /> 停止
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
 
                 {/* Operations & Logs Tab */}

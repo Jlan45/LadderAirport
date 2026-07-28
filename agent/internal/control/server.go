@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ladderairport/agent/internal/frpsruntime"
 	"github.com/ladderairport/agent/internal/protocolcert"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc/codes"
@@ -21,6 +22,7 @@ type Server struct {
 	logs            *LogBuf
 	publicAddresses *PublicAddressResolver
 	protocolCerts   *protocolcert.Manager
+	frps            *frpsruntime.Runtime
 }
 
 func (s *Server) SetPublicAddressResolver(resolver *PublicAddressResolver) {
@@ -29,6 +31,10 @@ func (s *Server) SetPublicAddressResolver(resolver *PublicAddressResolver) {
 
 func (s *Server) SetProtocolCertificateManager(manager *protocolcert.Manager) {
 	s.protocolCerts = manager
+}
+
+func (s *Server) SetFRPServerRuntime(runtime *frpsruntime.Runtime) {
+	s.frps = runtime
 }
 
 // NewServer constructs an AgentControl server.
@@ -53,10 +59,99 @@ func (s *Server) Ping(context.Context, *agentv1.PingRequest) (*agentv1.PingRespo
 	if s.protocolCerts != nil {
 		capabilities = append(capabilities, "protocol-cert-v1")
 	}
+	frpsVersion := ""
+	if s.frps != nil {
+		capabilities = append(capabilities, "frps-v1")
+		frpsVersion = frpsruntime.Version()
+	}
 	return &agentv1.PingResponse{
 		AgentVersion:   s.agentVersion,
 		SingboxVersion: s.singboxVersion,
 		Capabilities:   capabilities,
+		FrpsVersion:    frpsVersion,
+	}, nil
+}
+
+func (s *Server) ApplyFRPServerConfig(
+	ctx context.Context,
+	req *agentv1.ApplyFRPServerConfigRequest,
+) (*agentv1.ApplyFRPServerConfigResponse, error) {
+	if s.frps == nil {
+		return nil, status.Error(codes.FailedPrecondition, "FRPS 运行时尚未初始化")
+	}
+	if req == nil || req.GetConfig() == nil {
+		return nil, status.Error(codes.InvalidArgument, "必须提供 FRPS 配置")
+	}
+	input := req.GetConfig()
+	config := frpsruntime.Config{
+		Enabled:           input.GetEnabled(),
+		BindAddr:          input.GetBindAddr(),
+		BindPort:          int(input.GetBindPort()),
+		ProxyBindAddr:     input.GetProxyBindAddr(),
+		AuthToken:         input.GetAuthToken(),
+		TLSForce:          input.GetTlsForce(),
+		MaxPortsPerClient: input.GetMaxPortsPerClient(),
+	}
+	for _, portRange := range input.GetAllowPorts() {
+		config.AllowPorts = append(config.AllowPorts, frpsruntime.PortRange{
+			Start: int(portRange.GetStart()),
+			End:   int(portRange.GetEnd()),
+		})
+	}
+	if err := s.frps.Apply(ctx, config, req.GetConfigHash()); err != nil {
+		return &agentv1.ApplyFRPServerConfigResponse{
+			Ok:      false,
+			Message: err.Error(),
+		}, nil
+	}
+	current := s.frps.Status(ctx)
+	return &agentv1.ApplyFRPServerConfigResponse{
+		Ok:          true,
+		Message:     "FRPS 配置已下发",
+		AppliedHash: current.ConfigHash,
+	}, nil
+}
+
+func (s *Server) StartFRPServer(
+	ctx context.Context,
+	_ *agentv1.StartFRPServerRequest,
+) (*agentv1.StartFRPServerResponse, error) {
+	if s.frps == nil {
+		return nil, status.Error(codes.FailedPrecondition, "FRPS 运行时尚未初始化")
+	}
+	if err := s.frps.Start(ctx); err != nil {
+		return &agentv1.StartFRPServerResponse{Ok: false, Message: err.Error()}, nil
+	}
+	return &agentv1.StartFRPServerResponse{Ok: true, Message: "FRPS 已启动"}, nil
+}
+
+func (s *Server) StopFRPServer(
+	ctx context.Context,
+	_ *agentv1.StopFRPServerRequest,
+) (*agentv1.StopFRPServerResponse, error) {
+	if s.frps == nil {
+		return nil, status.Error(codes.FailedPrecondition, "FRPS 运行时尚未初始化")
+	}
+	if err := s.frps.Stop(ctx); err != nil {
+		return &agentv1.StopFRPServerResponse{Ok: false, Message: err.Error()}, nil
+	}
+	return &agentv1.StopFRPServerResponse{Ok: true, Message: "FRPS 已停止"}, nil
+}
+
+func (s *Server) GetFRPServerStatus(
+	ctx context.Context,
+	_ *agentv1.GetFRPServerStatusRequest,
+) (*agentv1.GetFRPServerStatusResponse, error) {
+	if s.frps == nil {
+		return nil, status.Error(codes.FailedPrecondition, "FRPS 运行时尚未初始化")
+	}
+	current := s.frps.Status(ctx)
+	return &agentv1.GetFRPServerStatusResponse{
+		State:         string(current.State),
+		ConfigHash:    current.ConfigHash,
+		StartedAtUnix: current.StartedAtUnix,
+		LastError:     current.LastError,
+		FrpsVersion:   frpsruntime.Version(),
 	}, nil
 }
 
