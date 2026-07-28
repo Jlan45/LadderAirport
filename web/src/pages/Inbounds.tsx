@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { Edit, RefreshCw, X, Copy, Check, Info } from 'lucide-react'
 import {
   createInbound,
@@ -265,9 +266,16 @@ export default function Inbounds() {
     }
   }
 
-  function onDelete(inbound: InboundConfig) {
-    const confirmDelete = window.confirm(`删除入站\n确定要删除入站配置「${inbound.name}」吗？关联到节点和订阅的引用也会失效。`)
-    if (!confirmDelete) return
+  const [deleteTarget, setDeleteTarget] = useState<InboundConfig | null>(null)
+
+  function onRequestDelete(inbound: InboundConfig) {
+    setDeleteTarget(inbound)
+  }
+
+  function confirmDeleteInbound() {
+    if (!deleteTarget) return
+    const inbound = deleteTarget
+    setDeleteTarget(null)
 
     if (!beginRowPending(inbound.id)) return
     void (async () => {
@@ -573,7 +581,7 @@ export default function Inbounds() {
                               size="sm"
                               variant="ghost"
                               disabled={rowPending}
-                              onClick={() => onDelete(row)}
+                              onClick={() => onRequestDelete(row)}
                               className="h-8 px-2 text-xs text-destructive hover:text-destructive/80 cursor-pointer"
                             >
                               删除
@@ -589,6 +597,17 @@ export default function Inbounds() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Delete Inbound Confirmation Modal */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="删除入站"
+        description={`确定要删除入站配置「${deleteTarget?.name || ''}」吗？关联到节点和订阅的引用也会失效。`}
+        confirmText="确认删除"
+        confirmVariant="destructive"
+        onConfirm={confirmDeleteInbound}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

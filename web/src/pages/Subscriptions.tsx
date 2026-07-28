@@ -26,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   Tabs,
   TabsContent,
@@ -361,9 +362,17 @@ export default function Subscriptions() {
     }
   }
 
-  async function rotateSubscriptionToken(subscription: Subscription) {
-    const confirmRotate = window.confirm(`确定重置「${subscription.name}」的订阅 Token 吗？重置后旧链接将失效。`)
-    if (!confirmRotate) return
+  const [rotateTarget, setRotateTarget] = useState<Subscription | null>(null)
+  const [deleteSubTarget, setDeleteSubTarget] = useState<Subscription | null>(null)
+
+  function onRequestRotateToken(sub: Subscription) {
+    setRotateTarget(sub)
+  }
+
+  async function confirmRotateSubscriptionToken() {
+    if (!rotateTarget) return
+    const subscription = rotateTarget
+    setRotateTarget(null)
     const key = `subscription-rotate:${subscription.id}`
     if (!beginOperation(key)) return
     try {
@@ -377,9 +386,14 @@ export default function Subscriptions() {
     }
   }
 
-  async function onDeleteSubscription(subscription: Subscription) {
-    const confirmDelete = window.confirm(`确定删除订阅「${subscription.name}」吗？此操作无法撤销。`)
-    if (!confirmDelete) return
+  function onRequestDeleteSubscription(sub: Subscription) {
+    setDeleteSubTarget(sub)
+  }
+
+  async function confirmDeleteSubscription() {
+    if (!deleteSubTarget) return
+    const subscription = deleteSubTarget
+    setDeleteSubTarget(null)
     const key = `subscription-delete:${subscription.id}`
     if (!beginOperation(key)) return
     try {
@@ -523,9 +537,16 @@ export default function Subscriptions() {
     }
   }
 
-  async function onDeleteSource(source: ExternalSource) {
-    const confirmDelete = window.confirm(`确定删除外部源「${source.name}」吗？此操作无法撤销。`)
-    if (!confirmDelete) return
+  const [deleteSourceTarget, setDeleteSourceTarget] = useState<ExternalSource | null>(null)
+
+  function onRequestDeleteSource(source: ExternalSource) {
+    setDeleteSourceTarget(source)
+  }
+
+  async function confirmDeleteSource() {
+    if (!deleteSourceTarget) return
+    const source = deleteSourceTarget
+    setDeleteSourceTarget(null)
     const key = `source-delete:${source.id}`
     if (!beginOperation(key)) return
     try {
@@ -791,7 +812,7 @@ export default function Subscriptions() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => void rotateSubscriptionToken(sub)}
+                          onClick={() => onRequestRotateToken(sub)}
                           loading={subPending}
                           disabled={subPending}
                           className="h-7 text-xs text-muted-foreground hover:text-warning px-2 cursor-pointer gap-1"
@@ -812,7 +833,7 @@ export default function Subscriptions() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => void onDeleteSubscription(sub)}
+                            onClick={() => onRequestDeleteSubscription(sub)}
                             disabled={subPending}
                             className="h-7 text-xs text-destructive hover:text-destructive/80 px-2.5 cursor-pointer gap-1"
                           >
@@ -948,7 +969,7 @@ export default function Subscriptions() {
                                   size="sm"
                                   variant="ghost"
                                   disabled={srcPending}
-                                  onClick={() => void onDeleteSource(src)}
+                                  onClick={() => onRequestDeleteSource(src)}
                                   className="h-8 px-2 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/20 cursor-pointer gap-1"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" /> 删除
@@ -1318,6 +1339,39 @@ export default function Subscriptions() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Rotate Token Confirm Modal */}
+      <ConfirmModal
+        open={!!rotateTarget}
+        title="重置订阅 Token"
+        description={`确定重置「${rotateTarget?.name || ''}」的订阅 Token 吗？重置后旧链接将立即失效。`}
+        confirmText="确认重置"
+        confirmVariant="default"
+        onConfirm={() => void confirmRotateSubscriptionToken()}
+        onCancel={() => setRotateTarget(null)}
+      />
+
+      {/* Delete Subscription Confirm Modal */}
+      <ConfirmModal
+        open={!!deleteSubTarget}
+        title="删除订阅"
+        description={`确定要删除订阅「${deleteSubTarget?.name || ''}」吗？此操作无法撤销。`}
+        confirmText="确认删除"
+        confirmVariant="destructive"
+        onConfirm={() => void confirmDeleteSubscription()}
+        onCancel={() => setDeleteSubTarget(null)}
+      />
+
+      {/* Delete External Source Confirm Modal */}
+      <ConfirmModal
+        open={!!deleteSourceTarget}
+        title="删除外部源"
+        description={`确定要删除外部源「${deleteSourceTarget?.name || ''}」吗？此操作无法撤销。`}
+        confirmText="确认删除"
+        confirmVariant="destructive"
+        onConfirm={() => void confirmDeleteSource()}
+        onCancel={() => setDeleteSourceTarget(null)}
+      />
     </div>
   )
 }

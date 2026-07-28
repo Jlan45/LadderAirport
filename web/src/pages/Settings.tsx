@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   getMeta,
   getSettings,
@@ -132,15 +133,19 @@ export default function Settings() {
     setDraft((current) => ({ ...current, ...patch }))
   }
 
+  const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false)
+
   function requestReload() {
     if (!dirty) {
       void load()
       return
     }
-    const confirmReload = window.confirm('放弃未保存的更改？\n重新加载会使用服务器上的设置覆盖您当前的修改。')
-    if (confirmReload) {
-      void load()
-    }
+    setReloadConfirmOpen(true)
+  }
+
+  function confirmReloadSettings() {
+    setReloadConfirmOpen(false)
+    void load()
   }
 
   async function onSave() {
@@ -454,6 +459,17 @@ export default function Settings() {
           </Card>
         </div>
       ) : null}
+
+      {/* Reload Settings Confirm Modal */}
+      <ConfirmModal
+        open={reloadConfirmOpen}
+        title="放弃未保存的更改？"
+        description="重新加载会使用服务器上的最新设置覆盖您当前修改但尚未保存的内容。"
+        confirmText="确认重新加载"
+        confirmVariant="destructive"
+        onConfirm={confirmReloadSettings}
+        onCancel={() => setReloadConfirmOpen(false)}
+      />
     </div>
   )
 }

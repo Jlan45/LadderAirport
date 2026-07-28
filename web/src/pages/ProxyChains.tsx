@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { StatusBadge } from '@/components/ui/status-badge'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   Dialog,
   DialogContent,
@@ -212,17 +213,16 @@ export default function ProxyChains() {
     }
   }
 
+  const [deleteTarget, setDeleteTarget] = useState<ProxyChain | null>(null)
+
   async function operate(chain: ProxyChain, action: 'enable' | 'disable' | 'probe' | 'delete') {
     if (pending.has(chain.id)) return
-    if (action === 'delete' && !window.confirm(`确定删除代理链「${chain.name}」吗？`)) return
+    if (action === 'delete') {
+      setDeleteTarget(chain)
+      return
+    }
     setPending((current) => new Set(current).add(chain.id))
     try {
-      if (action === 'delete') {
-        await deleteProxyChain(chain.id)
-        setChains((current) => current.filter((item) => item.id !== chain.id))
-        toast.success('代理链已删除')
-        return
-      }
       if (action === 'probe') {
         const result = await probeProxyChain(chain.id)
         if (result.ok) {
@@ -242,6 +242,26 @@ export default function ProxyChains() {
     } catch (err) {
       toast.error(errorText(err, `${actionText(action)}失败`))
       await refreshChain(chain.id).catch(() => undefined)
+    } finally {
+      setPending((current) => {
+        const next = new Set(current)
+        next.delete(chain.id)
+        return next
+      })
+    }
+  }
+
+  async function confirmDeleteChain() {
+    if (!deleteTarget) return
+    const chain = deleteTarget
+    setDeleteTarget(null)
+    setPending((current) => new Set(current).add(chain.id))
+    try {
+      await deleteProxyChain(chain.id)
+      setChains((current) => current.filter((item) => item.id !== chain.id))
+      toast.success('代理链已删除')
+    } catch (err) {
+      toast.error(errorText(err, '删除失败'))
     } finally {
       setPending((current) => {
         const next = new Set(current)
@@ -463,6 +483,17 @@ export default function ProxyChains() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Proxy Chain Confirm Modal */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="删除代理链"
+        description={`确定要删除代理链「${deleteTarget?.name || ''}」吗？此操作无法撤销。`}
+        confirmText="确认删除"
+        confirmVariant="destructive"
+        onConfirm={() => void confirmDeleteChain()}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { StatusBadge } from '@/components/ui/status-badge'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import { Loader2, Play, Plus, RefreshCw, TestTube2, Trash2 } from 'lucide-react'
 import {
   createACMEAccount,
@@ -87,12 +88,16 @@ export default function DNSCertificates() {
     }
   }
 
+  const [deleteTarget, setDeleteTarget] = useState<DNSAccount | null>(null)
+
   function removeDNSAccount(account: DNSAccount) {
-    const confirmed = window.confirm(
-      `确定删除 DNS 账号「${account.name}」吗？\n` +
-      '此操作无法撤销；如果账号仍有关联的托管域名，系统会拒绝删除。',
-    )
-    if (!confirmed) return
+    setDeleteTarget(account)
+  }
+
+  function confirmDeleteDNSAccount() {
+    if (!deleteTarget) return
+    const account = deleteTarget
+    setDeleteTarget(null)
     void action(
       `dns-delete-${account.id}`,
       () => deleteDNSAccount(account.id),
@@ -184,6 +189,17 @@ export default function DNSCertificates() {
           </CardContent></Card>
         </TabsContent>
       </Tabs>
+
+      {/* Delete DNS Account Confirm Modal */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="删除 DNS 账号"
+        description={`确定要删除 DNS 账号「${deleteTarget?.name || ''}」吗？如果账号仍有关联的托管域名，系统会拒绝删除。`}
+        confirmText="确认删除"
+        confirmVariant="destructive"
+        onConfirm={confirmDeleteDNSAccount}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

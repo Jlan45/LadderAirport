@@ -3,6 +3,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from '@/components/ui/status-badge'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   Table,
   TableBody,
@@ -60,9 +61,16 @@ export default function PKI() {
     void load()
   }, [load])
 
-  async function revoke(cert: PKICertificate) {
-    const label = nodeNames.get(cert.node_id ?? '') || cert.node_id || cert.serial
-    if (!window.confirm(`确认吊销 ${label} 的管理证书？吊销后 Panel 将停止信任该证书。`)) return
+  const [revokeTarget, setRevokeTarget] = useState<PKICertificate | null>(null)
+
+  function onRequestRevoke(cert: PKICertificate) {
+    setRevokeTarget(cert)
+  }
+
+  async function confirmRevoke() {
+    if (!revokeTarget) return
+    const cert = revokeTarget
+    setRevokeTarget(null)
     setRevoking(cert.serial)
     try {
       await revokePKICertificate(cert.serial, 'revoked by administrator')
@@ -173,7 +181,7 @@ export default function PKI() {
                           size="sm"
                           className="text-destructive hover:text-destructive/80"
                           loading={revoking === cert.serial}
-                          onClick={() => void revoke(cert)}
+                          onClick={() => onRequestRevoke(cert)}
                         >
                           {revoking !== cert.serial && <ShieldX className="mr-2 h-4 w-4" />}
                           吊销
@@ -187,6 +195,17 @@ export default function PKI() {
           )}
         </CardContent>
       </Card>
+
+      {/* Revoke Certificate Confirm Modal */}
+      <ConfirmModal
+        open={!!revokeTarget}
+        title="吊销管理证书"
+        description={`确认吊销 ${revokeTarget ? (nodeNames.get(revokeTarget.node_id ?? '') || revokeTarget.node_id || revokeTarget.serial) : ''} 的管理证书？吊销后 Panel 将停止信任该证书。`}
+        confirmText="确认吊销"
+        confirmVariant="destructive"
+        onConfirm={() => void confirmRevoke()}
+        onCancel={() => setRevokeTarget(null)}
+      />
     </div>
   )
 }

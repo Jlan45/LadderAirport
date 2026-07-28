@@ -54,6 +54,7 @@ import {
 import AddNodeModal from '../components/AddNodeModal'
 import NodeDetailDrawer from '../components/NodeDetailDrawer'
 import StatsBar from '../components/StatsBar'
+import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   formatBytes,
   formatTime,
@@ -363,9 +364,16 @@ export default function Fleet() {
     }
   }
 
-  function onDelete(id: string, name: string) {
-    const confirmDelete = window.confirm(`删除节点\n确定要删除节点「${name}」吗？此操作无法撤销。`)
-    if (!confirmDelete) return
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+
+  function onRequestDelete(id: string, name: string) {
+    setDeleteTarget({ id, name })
+  }
+
+  function confirmDeleteNode() {
+    if (!deleteTarget) return
+    const { id, name } = deleteTarget
+    setDeleteTarget(null)
 
     if (!beginNodeAction(id, 'delete')) return
     void (async () => {
@@ -835,7 +843,7 @@ export default function Fleet() {
                   onProbe={() => void onProbe(n.id)}
                   onInstall={() => void showInstall(n.id)}
                   onUpgrade={() => void showUpgrade(n.id)}
-                  onDelete={() => onDelete(n.id, n.name)}
+                  onDelete={() => onRequestDelete(n.id, n.name)}
                 />
               ))}
             </div>
@@ -992,7 +1000,7 @@ export default function Fleet() {
                               className="h-8 px-2 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/20 cursor-pointer"
                               loading={activeActions[n.id] === 'delete'}
                               disabled={actionBusy}
-                              onClick={() => onDelete(n.id, n.name)}
+                              onClick={() => onRequestDelete(n.id, n.name)}
                             >
                               删除
                             </Button>
@@ -1069,6 +1077,17 @@ export default function Fleet() {
         nodeId={detailId}
         onClose={closeDetail}
         onChanged={() => void loadCached()}
+      />
+
+      {/* Delete Node Confirmation Modal */}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="删除节点"
+        description={`确定要删除节点「${deleteTarget?.name || ''}」吗？此操作无法撤销。`}
+        confirmText="确认删除"
+        confirmVariant="destructive"
+        onConfirm={confirmDeleteNode}
+        onCancel={() => setDeleteTarget(null)}
       />
     </div>
   )
