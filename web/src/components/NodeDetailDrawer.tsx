@@ -27,6 +27,11 @@ import {
   stopNode,
   streamNodeLogs,
   putNodeInboundTLS,
+  putNodeFRPS,
+  getNodeFRPSStatus,
+  startNodeFRPS,
+  stopNodeFRPS,
+  revealNodeFRPSToken,
   updateNode,
   upgradeNode,
   type InboundConfig,
@@ -547,6 +552,90 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     }
   }
 
+  const frpsDirty = Boolean(
+    frpsDraft &&
+      frps &&
+      (frpsDraft.enabled !== frps.enabled ||
+        frpsDraft.bind_addr !== (frps.bind_addr || '0.0.0.0') ||
+        frpsDraft.bind_port !== (frps.bind_port || 7000) ||
+        frpsDraft.proxy_bind_addr !== (frps.proxy_bind_addr || '0.0.0.0') ||
+        frpsDraft.tls_force !== (frps.tls_force ?? true) ||
+        frpsDraft.max_ports_per_client !== (frps.max_ports_per_client || 0) ||
+        JSON.stringify(frpsDraft.allow_ports) !== JSON.stringify(frps.allow_ports || [])),
+  )
+
+  const saveFRPS = async () => {
+    if (busy || !frpsDraft) return
+    setBusyAction('save-frps')
+    const currentGen = generationRef.current
+    try {
+      const updated = await putNodeFRPS(id, frpsDraft)
+      if (isCurrentNode(id, currentGen)) {
+        setFRPS(updated)
+        setFRPSDraft({
+          enabled: updated.enabled,
+          bind_addr: updated.bind_addr || '0.0.0.0',
+          bind_port: updated.bind_port || 7000,
+          proxy_bind_addr: updated.proxy_bind_addr || '0.0.0.0',
+          allow_ports: updated.allow_ports || [],
+          tls_force: updated.tls_force ?? true,
+          max_ports_per_client: updated.max_ports_per_client || 0,
+        })
+      }
+      toast.success('FRPS Server 配置保存并下发成功')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存 FRPS 配置失败')
+    } finally {
+      if (isCurrentNode(id, currentGen)) setBusyAction(null)
+    }
+  }
+
+  const runFRPSAction = async (action: 'refresh' | 'start' | 'stop') => {
+    if (busy) return
+    setBusyAction(`${action}-frps` as DrawerAction)
+    const currentGen = generationRef.current
+    try {
+      let updated: FRPServerConfig
+      if (action === 'start') updated = await startNodeFRPS(id)
+      else if (action === 'stop') updated = await stopNodeFRPS(id)
+      else updated = await getNodeFRPSStatus(id)
+
+      if (isCurrentNode(id, currentGen)) {
+        setFRPS(updated)
+      }
+      toast.success(`FRPS ${action === 'start' ? '启动' : action === 'stop' ? '停止' : '状态刷新'}成功`)
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '操作失败')
+    } finally {
+      if (isCurrentNode(id, currentGen)) setBusyAction(null)
+    }
+  }
+
+  const revealFRPSToken = async (): Promise<string> => {
+    const res = await revealNodeFRPSToken(id)
+    return res.auth_token
+  }
+
+  const rotateFRPSToken = async () => {
+    if (busy || !frpsDraft) return
+    setBusyAction('save-frps')
+    const currentGen = generationRef.current
+    try {
+      const updated = await putNodeFRPS(id, { ...frpsDraft, rotate_auth_token: true })
+      if (isCurrentNode(id, currentGen)) {
+        setFRPS(updated)
+      }
+      toast.success('FRPS 认证 Token 已生成新密钥，旧客户端必须同步更新 Token')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '轮换 Token 失败')
+    } finally {
+      if (isCurrentNode(id, currentGen)) setBusyAction(null)
+    }
+  }
+
   const onPreview = async () => {
     if (busy) return
     setBusyAction('preview')
@@ -822,8 +911,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     node={node}
                     nodeId={id}
                     busy={busy}
+                    busyAction={busyAction}
                     frps={frps}
                     frpsDraft={frpsDraft}
+                    frpsDirty={frpsDirty}
                     frpsLoading={frpsLoading}
                     frpsError={frpsError}
                     frpsMappings={frpsMappings}
@@ -832,6 +923,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     updateFRPSDraft={updateFRPSDraft}
                     loadFRPS={() => void loadFRPS(id, generationRef.current)}
                     loadFRPSMappings={() => void loadFRPSMappings(id, generationRef.current)}
+                    saveFRPS={() => void saveFRPS()}
+                    runFRPSAction={(act) => void runFRPSAction(act)}
+                    revealFRPSToken={revealFRPSToken}
+                    rotateFRPSToken={() => void rotateFRPSToken()}
                   />
                 </TabsContent>
 
