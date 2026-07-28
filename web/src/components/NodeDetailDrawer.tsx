@@ -35,6 +35,10 @@ import {
   ChevronDown,
   KeyRound,
   ShieldCheck,
+  Network,
+  Server,
+  ArrowRight,
+  RadioTower,
 } from 'lucide-react'
 import {
   applyNode,
@@ -42,6 +46,7 @@ import {
   getNodeInboundTLS,
   getNodeMetrics,
   getNodeFRPS,
+  getNodeFRPSMappings,
   getNodeFRPSStatus,
   listInbounds,
   listNodeInbounds,
@@ -63,6 +68,8 @@ import {
   upgradeNode,
   type InboundConfig,
   type FRPServerConfig,
+  type FRPServerMapping,
+  type FRPServerMappings,
   type PutFRPServerConfigInput,
   type Metrics,
   type NetworkInterface,
@@ -156,6 +163,31 @@ function normalizeLabels(labels: string[]): string[] {
   return Array.from(new Set(labels.map((label) => label.trim()).filter(Boolean)))
 }
 
+function randomFRPClientID(): string {
+  const bytes = new Uint8Array(5)
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes)
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256)
+    }
+  }
+  return `device-${Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')}`
+}
+
+function frpsMappingExposure(mapping: FRPServerMapping, host: string): string {
+  if (mapping.remote_port) return `${host || '节点地址'}:${mapping.remote_port}`
+  if (mapping.custom_domains?.length) return mapping.custom_domains.join(', ')
+  if (mapping.subdomain) return mapping.subdomain
+  return '由访问端协商'
+}
+
+function frpsMappingBackend(mapping: FRPServerMapping): string {
+  if (mapping.plugin) return `plugin:${mapping.plugin}`
+  if (mapping.local_port) return `${mapping.local_ip || '127.0.0.1'}:${mapping.local_port}`
+  return mapping.local_ip || '客户端服务'
+}
+
 function inboundNATSnapshot(value: Record<string, InboundNATEdit>): string {
   return JSON.stringify(
     Object.entries(value)
@@ -207,6 +239,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const connectionRequestRef = useRef(0)
   const inboundsRequestRef = useRef(0)
   const interfacesRequestRef = useRef(0)
+  const frpsMappingsRequestRef = useRef(0)
   const logRequestRef = useRef(0)
   const logSequenceRef = useRef(0)
   nodeIdRef.current = nodeId
@@ -237,6 +270,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [frpsTouched, setFRPSTouched] = useState(false)
   const [frpsAdvanced, setFRPSAdvanced] = useState(false)
   const [frpsCopied, setFRPSCopied] = useState(false)
+  const [frpsClientID, setFRPSClientID] = useState(randomFRPClientID)
+  const [frpsMappings, setFRPSMappings] = useState<FRPServerMappings | null>(null)
+  const [frpsMappingsLoading, setFRPSMappingsLoading] = useState(false)
+  const [frpsMappingsError, setFRPSMappingsError] = useState('')
 
   const isCurrentNode = useCallback(
     (targetId: string, generation: number) =>
@@ -296,6 +333,40 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       setFRPSError(err instanceof Error ? err.message : '加载 FRPS 配置失败')
     } finally {
       if (isCurrentNode(targetId, generation)) setFRPSLoading(false)
+    }
+  }, [isCurrentNode])
+
+  const loadFRPSMappings = useCallback(async (
+    targetId: string,
+    generation: number,
+    silent = false,
+  ) => {
+    if (!targetId) return
+    const request = ++frpsMappingsRequestRef.current
+    if (!silent && isCurrentNode(targetId, generation)) {
+      setFRPSMappingsLoading(true)
+      setFRPSMappingsError('')
+    }
+    try {
+      const snapshot = await getNodeFRPSMappings(targetId)
+      if (!isCurrentNode(targetId, generation) || request !== frpsMappingsRequestRef.current) return
+      setFRPSMappings({
+        clients: snapshot.clients ?? [],
+        mappings: snapshot.mappings ?? [],
+        collected_at_unix: snapshot.collected_at_unix,
+      })
+      setFRPSMappingsError('')
+    } catch (err) {
+      if (!isCurrentNode(targetId, generation) || request !== frpsMappingsRequestRef.current) return
+      setFRPSMappingsError(err instanceof Error ? err.message : '读取 FRPS 在线映射失败')
+    } finally {
+      if (
+        !silent &&
+        isCurrentNode(targetId, generation) &&
+        request === frpsMappingsRequestRef.current
+      ) {
+        setFRPSMappingsLoading(false)
+      }
     }
   }, [isCurrentNode])
 
@@ -453,6 +524,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setFRPSTouched(false)
     setFRPSAdvanced(false)
     setFRPSCopied(false)
+    setFRPSClientID(randomFRPClientID())
+    setFRPSMappings(null)
+    setFRPSMappingsLoading(false)
+    setFRPSMappingsError('')
 
     void load(id, currentGeneration, { syncConnection: true, syncInbounds: true, fatal: true })
     void loadInterfaces(id, currentGeneration)
@@ -510,6 +585,33 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     }, 10000)
     return () => window.clearInterval(t)
   }, [id, open, activeTab, node, isOnlineStatus, isCurrentNode])
+
+  useEffect(() => {
+    if (
+      !open ||
+      activeTab !== 'frps' ||
+      !node ||
+      !isOnlineStatus(node.status) ||
+      frps?.runtime_state !== 'running' ||
+      !node.capabilities?.includes('frps-mappings-v1')
+    ) {
+      return
+    }
+    const currentGeneration = generationRef.current
+    void loadFRPSMappings(id, currentGeneration)
+    const timer = window.setInterval(() => {
+      void loadFRPSMappings(id, currentGeneration, true)
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [
+    activeTab,
+    frps?.runtime_state,
+    id,
+    isOnlineStatus,
+    loadFRPSMappings,
+    node,
+    open,
+  ])
 
   useEffect(() => {
     if (activeTab === 'ops' && streaming && logViewerRef.current && logsFollowing) {
@@ -952,9 +1054,12 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       toast.warning('请先填写节点公网地址或控制面地址')
       return
     }
+    const clientID = frpsClientID.trim() || randomFRPClientID()
+    if (clientID !== frpsClientID) setFRPSClientID(clientID)
     const config = [
       `serverAddr = ${JSON.stringify(serverAddr)}`,
       `serverPort = ${frpsDraft.bind_port}`,
+      `clientID = ${JSON.stringify(clientID)}`,
       'auth.method = "token"',
       `auth.token = ${JSON.stringify(frpsToken)}`,
       'auth.additionalScopes = ["HeartBeats", "NewWorkConns"]',
@@ -1848,6 +1953,187 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                         ) : null}
                       </div>
 
+                      <div className="overflow-hidden rounded-lg border border-cyan-950/80 bg-[linear-gradient(135deg,rgba(8,47,73,0.18),rgba(9,9,11,0.65)_42%)]">
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-cyan-950/70 px-5 py-4">
+                          <div>
+                            <h3 className="flex items-center gap-2 text-sm font-semibold text-cyan-100">
+                              <RadioTower className="h-4 w-4 text-cyan-400" />
+                              在线设备与端口映射
+                              {frps?.runtime_state === 'running' ? (
+                                <span className="relative flex h-2 w-2">
+                                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                                  <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                                </span>
+                              ) : null}
+                            </h3>
+                            <p className="mt-1 text-xs text-zinc-500">
+                              运行态直接来自节点 Agent；仅在此页面打开时每 5 秒刷新，不写入数据库。
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {frpsMappings?.collected_at_unix ? (
+                              <span className="font-mono text-[10px] text-zinc-600">
+                                {new Date(frpsMappings.collected_at_unix * 1000).toLocaleTimeString('zh-CN', {
+                                  hour12: false,
+                                })}
+                              </span>
+                            ) : null}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              loading={frpsMappingsLoading}
+                              disabled={
+                                frps?.runtime_state !== 'running' ||
+                                !node.capabilities?.includes('frps-mappings-v1')
+                              }
+                              onClick={() => void loadFRPSMappings(id, generationRef.current)}
+                              className="h-8 gap-1 border-cyan-950 text-cyan-200 hover:bg-cyan-950/30"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" /> 刷新
+                            </Button>
+                          </div>
+                        </div>
+
+                        {!node.capabilities?.includes('frps-mappings-v1') ? (
+                          <div className="px-5 py-5 text-sm text-amber-300/80">
+                            当前 Agent 不支持在线映射查询，请升级到包含该能力的版本。
+                          </div>
+                        ) : frps?.runtime_state !== 'running' ? (
+                          <div className="flex items-center gap-3 px-5 py-6 text-sm text-zinc-500">
+                            <Server className="h-5 w-5 text-zinc-700" />
+                            FRPS 启动后会在这里显示已连接设备和映射关系。
+                          </div>
+                        ) : (
+                          <div className="space-y-5 p-5">
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                              <div className="border-l-2 border-cyan-500/70 bg-black/20 px-3 py-2">
+                                <span className="block font-mono text-xl text-cyan-100">
+                                  {frpsMappings?.clients?.length ?? 0}
+                                </span>
+                                <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">在线设备</span>
+                              </div>
+                              <div className="border-l-2 border-emerald-500/70 bg-black/20 px-3 py-2">
+                                <span className="block font-mono text-xl text-emerald-100">
+                                  {frpsMappings?.mappings?.length ?? 0}
+                                </span>
+                                <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">在线映射</span>
+                              </div>
+                              <div className="border-l-2 border-amber-500/70 bg-black/20 px-3 py-2">
+                                <span className="block font-mono text-xl text-amber-100">
+                                  {(frpsMappings?.mappings ?? []).reduce(
+                                    (total, mapping) => total + (mapping.current_connections ?? 0),
+                                    0,
+                                  )}
+                                </span>
+                                <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">活动连接</span>
+                              </div>
+                              <div className="border-l-2 border-zinc-600 bg-black/20 px-3 py-2">
+                                <span className="block font-mono text-sm leading-7 text-zinc-300">
+                                  {formatBytes((frpsMappings?.mappings ?? []).reduce(
+                                    (total, mapping) =>
+                                      total +
+                                      (mapping.traffic_in_bytes ?? 0) +
+                                      (mapping.traffic_out_bytes ?? 0),
+                                    0,
+                                  ))}
+                                </span>
+                                <span className="text-[10px] uppercase tracking-[0.16em] text-zinc-600">今日流量</span>
+                              </div>
+                            </div>
+
+                            {frpsMappingsError ? (
+                              <div className="rounded border border-red-950 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+                                自动刷新失败：{frpsMappingsError}
+                              </div>
+                            ) : null}
+
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">
+                                <Network className="h-3.5 w-3.5" /> Clients
+                              </div>
+                              {(frpsMappings?.clients?.length ?? 0) > 0 ? (
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  {(frpsMappings?.clients ?? []).map((client) => (
+                                    <div
+                                      key={client.key || client.run_id}
+                                      className="flex items-center justify-between gap-3 rounded border border-zinc-800/80 bg-zinc-950/55 px-3 py-2.5"
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="truncate font-mono text-xs text-zinc-200">
+                                          {client.client_id || client.run_id || 'anonymous'}
+                                        </div>
+                                        <div className="mt-1 truncate text-[11px] text-zinc-600">
+                                          {client.hostname || '未报告主机名'} · {client.client_ip || '未知来源'}
+                                        </div>
+                                      </div>
+                                      <div className="shrink-0 text-right">
+                                        <span className="block text-[10px] text-emerald-400">ONLINE</span>
+                                        <span className="font-mono text-[10px] text-zinc-700">
+                                          {client.version || 'frpc'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="rounded border border-dashed border-zinc-800 px-3 py-4 text-center text-xs text-zinc-600">
+                                  暂无在线 FRPC 设备
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-600">
+                                <ArrowRight className="h-3.5 w-3.5" /> Live mappings
+                              </div>
+                              {(frpsMappings?.mappings?.length ?? 0) > 0 ? (
+                                <div className="space-y-2">
+                                  {(frpsMappings?.mappings ?? []).map((mapping) => (
+                                    <div
+                                      key={`${mapping.type}:${mapping.name}`}
+                                      className="group rounded border border-zinc-800/80 bg-zinc-950/55 px-3 py-3 transition-colors hover:border-cyan-900/80"
+                                    >
+                                      <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div className="flex min-w-0 items-center gap-2">
+                                          <Badge variant="outline" className="font-mono uppercase text-cyan-300">
+                                            {mapping.type}
+                                          </Badge>
+                                          <span className="truncate font-mono text-xs text-zinc-200">{mapping.name}</span>
+                                          {mapping.client_id ? (
+                                            <span className="hidden text-[10px] text-zinc-600 sm:inline">
+                                              @{mapping.client_id}
+                                            </span>
+                                          ) : null}
+                                        </div>
+                                        <div className="flex items-center gap-3 font-mono text-[10px] text-zinc-500">
+                                          <span>{mapping.current_connections ?? 0} conn</span>
+                                          <span>
+                                            ↓{formatBytes(mapping.traffic_in_bytes ?? 0)} ↑{formatBytes(mapping.traffic_out_bytes ?? 0)}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <div className="mt-3 grid items-center gap-2 sm:grid-cols-[1fr_auto_1fr]">
+                                        <code className="truncate rounded bg-black/30 px-2 py-1.5 text-[11px] text-zinc-400">
+                                          {frpsMappingBackend(mapping)}
+                                        </code>
+                                        <ArrowRight className="mx-auto hidden h-3.5 w-3.5 text-cyan-800 sm:block" />
+                                        <code className="truncate rounded bg-cyan-950/20 px-2 py-1.5 text-[11px] text-cyan-200">
+                                          {frpsMappingExposure(mapping, node.public_address || node.address)}
+                                        </code>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="rounded border border-dashed border-zinc-800 px-3 py-4 text-center text-xs text-zinc-600">
+                                  设备已连接，但尚未注册在线映射
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {frps?.has_auth_token ? (
                         <div className="space-y-4 rounded-lg border border-amber-900/50 bg-amber-950/10 p-5">
                           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1856,7 +2142,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                                 <KeyRound className="h-4 w-4" /> FRP 客户端凭据
                               </h3>
                               <p className="mt-1 text-xs text-amber-200/60">
-                                多个 FRPC 设备可以共用此 token。凭据默认隐藏，需要时可随时解锁并复制。
+                                多个 FRPC 设备可以共用 token，但每台设备应使用不同的 clientID。
                               </p>
                             </div>
                             {frpsToken ? (
@@ -1881,6 +2167,30 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                                 <Eye className="h-3.5 w-3.5" /> 查看凭据
                               </Button>
                             )}
+                          </div>
+                          <div className="grid gap-1.5 sm:grid-cols-[1fr_auto]">
+                            <div className="space-y-1.5">
+                              <Label htmlFor="frps-client-id" className="text-xs text-amber-200/70">
+                                此设备 clientID
+                              </Label>
+                              <Input
+                                id="frps-client-id"
+                                value={frpsClientID}
+                                disabled={busy}
+                                onChange={(event) => setFRPSClientID(event.target.value)}
+                                className="border-amber-950 bg-black/30 font-mono text-amber-100"
+                              />
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => setFRPSClientID(randomFRPClientID())}
+                              className="self-end gap-1 border-amber-900/60 text-amber-200 hover:bg-amber-950/40"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" /> 换一台设备
+                            </Button>
                           </div>
                           {frpsToken ? (
                             <div className="relative rounded-md border border-amber-900/40 bg-black/40 p-3 pr-11 font-mono text-xs text-amber-100">

@@ -222,6 +222,42 @@ func (s *Server) handleGetNodeFRPSStatus(w http.ResponseWriter, r *http.Request)
 	s.handleNodeFRPSAction(w, r, "status")
 }
 
+func (s *Server) handleGetNodeFRPSMappings(w http.ResponseWriter, r *http.Request) {
+	nodeID := pathID(r)
+	node, err := s.Store.GetNode(nodeID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if isNotFound(err) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, "frps-mappings-v1") {
+		writeError(w, http.StatusConflict, "节点 Agent 不支持 FRPS 在线映射，请先升级 Agent")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
+	defer cancel()
+	client, _, ok := s.dialNodeFRPS(w, ctx, node)
+	if !ok {
+		return
+	}
+	defer client.Close()
+	mappingsClient, ok := client.(NodeFRPSMappings)
+	if !ok {
+		writeError(w, http.StatusConflict, "节点 Agent 不支持 FRPS 在线映射，请先升级 Agent")
+		return
+	}
+	response, err := mappingsClient.GetFRPServerMappings(ctx)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("读取 FRPS 在线映射失败：%v", err))
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleRevealNodeFRPSToken(w http.ResponseWriter, r *http.Request) {
 	nodeID := pathID(r)
 	if _, err := s.Store.GetNode(nodeID); err != nil {

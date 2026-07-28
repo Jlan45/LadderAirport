@@ -32,6 +32,16 @@ func TestRuntimeApplyStopAndRestore(t *testing.T) {
 	if status := runtime.Status(context.Background()); status.State != StateRunning {
 		t.Fatalf("state = %s, want running; error=%s", status.State, status.LastError)
 	}
+	snapshot, err := runtime.Mappings(context.Background())
+	if err != nil {
+		t.Fatalf("Mappings: %v", err)
+	}
+	if len(snapshot.Clients) != 0 || len(snapshot.Mappings) != 0 {
+		t.Fatalf("unexpected empty-runtime mappings: %+v", snapshot)
+	}
+	if snapshot.CollectedAtUnix == 0 {
+		t.Fatal("Mappings collected_at_unix is empty")
+	}
 	if err := runtime.Apply(context.Background(), config, "hash-1"); err != nil {
 		t.Fatalf("idempotent Apply: %v", err)
 	}

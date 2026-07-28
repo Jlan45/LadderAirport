@@ -46,6 +46,7 @@ type Runtime struct {
 	dataDir string
 	service *server.Service
 	cancel  context.CancelFunc
+	admin   adminEndpoint
 
 	config        Config
 	configHash    string
@@ -128,6 +129,14 @@ func (r *Runtime) startServiceLocked(ctx context.Context, config Config, hash st
 	if err != nil {
 		return err
 	}
+	admin, err := newAdminEndpoint()
+	if err != nil {
+		return fmt.Errorf("初始化 FRPS 本机管理面失败：%w", err)
+	}
+	cfg.WebServer.Addr = admin.host
+	cfg.WebServer.Port = admin.port
+	cfg.WebServer.User = admin.username
+	cfg.WebServer.Password = admin.password
 	service, err := server.NewService(cfg)
 	if err != nil {
 		return fmt.Errorf("创建 FRPS 服务失败：%w", err)
@@ -137,6 +146,7 @@ func (r *Runtime) startServiceLocked(ctx context.Context, config Config, hash st
 	r.mu.Lock()
 	r.service = service
 	r.cancel = cancel
+	r.admin = admin
 	r.config = config
 	r.configHash = hash
 	r.startedAtUnix = time.Now().Unix()
@@ -150,6 +160,7 @@ func (r *Runtime) startServiceLocked(ctx context.Context, config Config, hash st
 		if r.service == current {
 			r.service = nil
 			r.cancel = nil
+			r.admin = adminEndpoint{}
 			r.startedAtUnix = 0
 			if runCtx.Err() == nil {
 				r.state = StateError
@@ -199,6 +210,7 @@ func (r *Runtime) stopServiceLocked() {
 	service, cancel := r.service, r.cancel
 	r.service = nil
 	r.cancel = nil
+	r.admin = adminEndpoint{}
 	r.startedAtUnix = 0
 	r.state = StateStopped
 	r.mu.Unlock()

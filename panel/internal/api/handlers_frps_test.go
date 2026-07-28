@@ -52,6 +52,21 @@ func (m *frpsMockLive) GetFRPServerStatus(context.Context) (*agentv1.GetFRPServe
 	}, nil
 }
 
+func (m *frpsMockLive) GetFRPServerMappings(context.Context) (*agentv1.GetFRPServerMappingsResponse, error) {
+	return &agentv1.GetFRPServerMappingsResponse{
+		CollectedAtUnix: 456,
+		Clients: []*agentv1.FRPServerClient{{
+			Key: "edge-a", ClientId: "edge-a", Hostname: "nas-a",
+			ClientIp: "198.51.100.8:41230", Version: "0.69.0", Online: true,
+		}},
+		Mappings: []*agentv1.FRPServerMapping{{
+			Name: "edge-a.ssh", Type: "tcp", Status: "online", ClientId: "edge-a",
+			LocalIp: "127.0.0.1", LocalPort: 22, RemotePort: 22022,
+			CurrentConnections: 2, TrafficInBytes: 1024, TrafficOutBytes: 2048,
+		}},
+	}, nil
+}
+
 func TestNodeFRPSConfigEncryptsAndPreservesToken(t *testing.T) {
 	live := &frpsMockLive{mockLive: &mockLive{pingOK: true}, state: "stopped"}
 	ts, client, st := newTestServer(t, nil, func(
@@ -64,7 +79,7 @@ func TestNodeFRPSConfigEncryptsAndPreservesToken(t *testing.T) {
 
 	node := &store.Node{
 		Name: "frps-node", Address: "127.0.0.1", GRPCPort: 50051,
-		Status: "online", Capabilities: []string{"frps-v1"},
+		Status: "online", Capabilities: []string{"frps-v1", "frps-mappings-v1"},
 	}
 	if err := st.CreateNode(node); err != nil {
 		t.Fatal(err)
@@ -110,6 +125,24 @@ func TestNodeFRPSConfigEncryptsAndPreservesToken(t *testing.T) {
 	}
 	if live.lastConfig.GetAuthToken() != "frps-secret-token" {
 		t.Fatalf("preserved agent token = %q", live.lastConfig.GetAuthToken())
+	}
+
+	response, payload = doJSON(
+		t, client, http.MethodGet,
+		ts.URL+"/api/v1/nodes/"+node.ID+"/frps/mappings", nil,
+	)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("mappings status = %d, response = %#v", response.StatusCode, payload)
+	}
+	if response.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("mappings Cache-Control = %q", response.Header.Get("Cache-Control"))
+	}
+	if payload["collected_at_unix"] != float64(456) {
+		t.Fatalf("collected_at_unix = %#v", payload["collected_at_unix"])
+	}
+	mappings, _ := payload["mappings"].([]any)
+	if len(mappings) != 1 {
+		t.Fatalf("mappings = %#v", payload["mappings"])
 	}
 }
 

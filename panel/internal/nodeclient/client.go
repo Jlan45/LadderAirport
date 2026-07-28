@@ -209,6 +209,10 @@ func (c *Client) GetFRPServerStatus(ctx context.Context) (*agentv1.GetFRPServerS
 	return c.api.GetFRPServerStatus(c.withAuth(ctx), &agentv1.GetFRPServerStatusRequest{})
 }
 
+func (c *Client) GetFRPServerMappings(ctx context.Context) (*agentv1.GetFRPServerMappingsResponse, error) {
+	return c.api.GetFRPServerMappings(c.withAuth(ctx), &agentv1.GetFRPServerMappingsRequest{})
+}
+
 func (c *Client) ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (*agentv1.ProbeOutboundResponse, error) {
 	return c.api.ProbeOutbound(c.withAuth(ctx), &agentv1.ProbeOutboundRequest{
 		OutboundTag: outboundTag,

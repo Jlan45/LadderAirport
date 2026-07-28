@@ -38,6 +38,7 @@ const (
 	AgentControl_StartFRPServer_FullMethodName                      = "/agent.v1.AgentControl/StartFRPServer"
 	AgentControl_StopFRPServer_FullMethodName                       = "/agent.v1.AgentControl/StopFRPServer"
 	AgentControl_GetFRPServerStatus_FullMethodName                  = "/agent.v1.AgentControl/GetFRPServerStatus"
+	AgentControl_GetFRPServerMappings_FullMethodName                = "/agent.v1.AgentControl/GetFRPServerMappings"
 )
 
 // AgentControlClient is the client API for AgentControl service.
@@ -66,6 +67,7 @@ type AgentControlClient interface {
 	StartFRPServer(ctx context.Context, in *StartFRPServerRequest, opts ...grpc.CallOption) (*StartFRPServerResponse, error)
 	StopFRPServer(ctx context.Context, in *StopFRPServerRequest, opts ...grpc.CallOption) (*StopFRPServerResponse, error)
 	GetFRPServerStatus(ctx context.Context, in *GetFRPServerStatusRequest, opts ...grpc.CallOption) (*GetFRPServerStatusResponse, error)
+	GetFRPServerMappings(ctx context.Context, in *GetFRPServerMappingsRequest, opts ...grpc.CallOption) (*GetFRPServerMappingsResponse, error)
 }
 
 type agentControlClient struct {
@@ -275,6 +277,16 @@ func (c *agentControlClient) GetFRPServerStatus(ctx context.Context, in *GetFRPS
 	return out, nil
 }
 
+func (c *agentControlClient) GetFRPServerMappings(ctx context.Context, in *GetFRPServerMappingsRequest, opts ...grpc.CallOption) (*GetFRPServerMappingsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFRPServerMappingsResponse)
+	err := c.cc.Invoke(ctx, AgentControl_GetFRPServerMappings_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentControlServer is the server API for AgentControl service.
 // All implementations must embed UnimplementedAgentControlServer
 // for forward compatibility.
@@ -301,6 +313,7 @@ type AgentControlServer interface {
 	StartFRPServer(context.Context, *StartFRPServerRequest) (*StartFRPServerResponse, error)
 	StopFRPServer(context.Context, *StopFRPServerRequest) (*StopFRPServerResponse, error)
 	GetFRPServerStatus(context.Context, *GetFRPServerStatusRequest) (*GetFRPServerStatusResponse, error)
+	GetFRPServerMappings(context.Context, *GetFRPServerMappingsRequest) (*GetFRPServerMappingsResponse, error)
 	mustEmbedUnimplementedAgentControlServer()
 }
 
@@ -367,6 +380,9 @@ func (UnimplementedAgentControlServer) StopFRPServer(context.Context, *StopFRPSe
 }
 func (UnimplementedAgentControlServer) GetFRPServerStatus(context.Context, *GetFRPServerStatusRequest) (*GetFRPServerStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetFRPServerStatus not implemented")
+}
+func (UnimplementedAgentControlServer) GetFRPServerMappings(context.Context, *GetFRPServerMappingsRequest) (*GetFRPServerMappingsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFRPServerMappings not implemented")
 }
 func (UnimplementedAgentControlServer) mustEmbedUnimplementedAgentControlServer() {}
 func (UnimplementedAgentControlServer) testEmbeddedByValue()                      {}
@@ -724,6 +740,24 @@ func _AgentControl_GetFRPServerStatus_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AgentControl_GetFRPServerMappings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFRPServerMappingsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentControlServer).GetFRPServerMappings(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentControl_GetFRPServerMappings_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentControlServer).GetFRPServerMappings(ctx, req.(*GetFRPServerMappingsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentControl_ServiceDesc is the grpc.ServiceDesc for AgentControl service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -802,6 +836,10 @@ var AgentControl_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetFRPServerStatus",
 			Handler:    _AgentControl_GetFRPServerStatus_Handler,
+		},
+		{
+			MethodName: "GetFRPServerMappings",
+			Handler:    _AgentControl_GetFRPServerMappings_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

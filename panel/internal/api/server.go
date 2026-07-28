@@ -48,6 +48,12 @@ type NodeFRPS interface {
 	GetFRPServerStatus(ctx context.Context) (*agentv1.GetFRPServerStatusResponse, error)
 }
 
+// NodeFRPSMappings is a separately negotiated extension so existing frps-v1
+// clients and test doubles remain compatible.
+type NodeFRPSMappings interface {
+	GetFRPServerMappings(ctx context.Context) (*agentv1.GetFRPServerMappingsResponse, error)
+}
+
 // LiveDialFunc dials a node for live RPCs (probe/metrics/logs).
 // Tests may inject a fake implementation.
 type LiveDialFunc func(ctx context.Context, n store.Node, token string) (NodeLive, error)
@@ -201,6 +207,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/nodes/{id}/frps", s.handleGetNodeFRPS)
 	mux.HandleFunc("PUT /api/v1/nodes/{id}/frps", s.handlePutNodeFRPS)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/frps/status", s.handleGetNodeFRPSStatus)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/frps/mappings", s.handleGetNodeFRPSMappings)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/start", s.handleStartNodeFRPS)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/stop", s.handleStopNodeFRPS)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/token/reveal", s.handleRevealNodeFRPSToken)

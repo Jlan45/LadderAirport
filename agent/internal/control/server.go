@@ -61,7 +61,7 @@ func (s *Server) Ping(context.Context, *agentv1.PingRequest) (*agentv1.PingRespo
 	}
 	frpsVersion := ""
 	if s.frps != nil {
-		capabilities = append(capabilities, "frps-v1")
+		capabilities = append(capabilities, "frps-v1", "frps-mappings-v1")
 		frpsVersion = frpsruntime.Version()
 	}
 	return &agentv1.PingResponse{
@@ -153,6 +153,46 @@ func (s *Server) GetFRPServerStatus(
 		LastError:     current.LastError,
 		FrpsVersion:   frpsruntime.Version(),
 	}, nil
+}
+
+func (s *Server) GetFRPServerMappings(
+	ctx context.Context,
+	_ *agentv1.GetFRPServerMappingsRequest,
+) (*agentv1.GetFRPServerMappingsResponse, error) {
+	if s.frps == nil {
+		return nil, status.Error(codes.FailedPrecondition, "FRPS 运行时尚未初始化")
+	}
+	snapshot, err := s.frps.Mappings(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "读取 FRPS 在线映射失败：%v", err)
+	}
+	response := &agentv1.GetFRPServerMappingsResponse{
+		CollectedAtUnix: snapshot.CollectedAtUnix,
+		Clients:         make([]*agentv1.FRPServerClient, 0, len(snapshot.Clients)),
+		Mappings:        make([]*agentv1.FRPServerMapping, 0, len(snapshot.Mappings)),
+	}
+	for _, client := range snapshot.Clients {
+		response.Clients = append(response.Clients, &agentv1.FRPServerClient{
+			Key: client.Key, User: client.User, ClientId: client.ClientID,
+			RunId: client.RunID, Version: client.Version, WireProtocol: client.WireProtocol,
+			Hostname: client.Hostname, ClientIp: client.ClientIP,
+			ConnectedAtUnix: client.ConnectedAtUnix, Online: client.Online,
+		})
+	}
+	for _, mapping := range snapshot.Mappings {
+		response.Mappings = append(response.Mappings, &agentv1.FRPServerMapping{
+			Name: mapping.Name, Type: mapping.Type, Status: mapping.Status,
+			User: mapping.User, ClientId: mapping.ClientID,
+			LocalIp: mapping.LocalIP, LocalPort: uint32(mapping.LocalPort),
+			RemotePort:         uint32(mapping.RemotePort),
+			CustomDomains:      append([]string{}, mapping.CustomDomains...),
+			Subdomain:          mapping.Subdomain,
+			CurrentConnections: mapping.CurrentConnections,
+			TrafficInBytes:     mapping.TrafficInBytes, TrafficOutBytes: mapping.TrafficOutBytes,
+			LastStartTime: mapping.LastStartTime, Plugin: mapping.Plugin,
+		})
+	}
+	return response, nil
 }
 
 func (s *Server) GetPublicAddresses(

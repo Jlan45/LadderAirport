@@ -27,6 +27,7 @@ service AgentControl {
   rpc StartFRPServer(StartFRPServerRequest) returns (StartFRPServerResponse);
   rpc StopFRPServer(StopFRPServerRequest) returns (StopFRPServerResponse);
   rpc GetFRPServerStatus(GetFRPServerStatusRequest) returns (GetFRPServerStatusResponse);
+  rpc GetFRPServerMappings(GetFRPServerMappingsRequest) returns (GetFRPServerMappingsResponse);
 }
 
 message PingRequest {}
@@ -83,6 +84,45 @@ message GetFRPServerStatusResponse {
   int64 started_at_unix = 3;
   string last_error = 4;
   string frps_version = 5;
+}
+
+message GetFRPServerMappingsRequest {}
+
+message FRPServerClient {
+  string key = 1;
+  string user = 2;
+  string client_id = 3;
+  string run_id = 4;
+  string version = 5;
+  string wire_protocol = 6;
+  string hostname = 7;
+  string client_ip = 8;
+  int64 connected_at_unix = 9;
+  bool online = 10;
+}
+
+message FRPServerMapping {
+  string name = 1;
+  string type = 2;
+  string status = 3;
+  string user = 4;
+  string client_id = 5;
+  string local_ip = 6;
+  uint32 local_port = 7;
+  uint32 remote_port = 8;
+  repeated string custom_domains = 9;
+  string subdomain = 10;
+  int64 current_connections = 11;
+  int64 traffic_in_bytes = 12;
+  int64 traffic_out_bytes = 13;
+  string last_start_time = 14;
+  string plugin = 15;
+}
+
+message GetFRPServerMappingsResponse {
+  repeated FRPServerClient clients = 1;
+  repeated FRPServerMapping mappings = 2;
+  int64 collected_at_unix = 3;
 }
 
 message ProbeOutboundRequest {

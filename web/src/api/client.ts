@@ -162,6 +162,43 @@ export interface PutFRPServerConfigInput {
   max_ports_per_client: number
 }
 
+export interface FRPServerClient {
+  key: string
+  user?: string
+  client_id?: string
+  run_id?: string
+  version?: string
+  wire_protocol?: string
+  hostname?: string
+  client_ip?: string
+  connected_at_unix?: number
+  online: boolean
+}
+
+export interface FRPServerMapping {
+  name: string
+  type: string
+  status: string
+  user?: string
+  client_id?: string
+  local_ip?: string
+  local_port?: number
+  remote_port?: number
+  custom_domains?: string[]
+  subdomain?: string
+  current_connections?: number
+  traffic_in_bytes?: number
+  traffic_out_bytes?: number
+  last_start_time?: string
+  plugin?: string
+}
+
+export interface FRPServerMappings {
+  clients?: FRPServerClient[]
+  mappings?: FRPServerMapping[]
+  collected_at_unix: number
+}
+
 export interface NetworkInterface {
   name: string
   addresses: string[]
@@ -697,6 +734,10 @@ export function putNodeFRPS(id: string, body: PutFRPServerConfigInput): Promise<
 
 export function getNodeFRPSStatus(id: string): Promise<FRPServerConfig> {
   return request('GET', `/nodes/${id}/frps/status`)
+}
+
+export function getNodeFRPSMappings(id: string): Promise<FRPServerMappings> {
+  return request('GET', `/nodes/${id}/frps/mappings`)
 }
 
 export function startNodeFRPS(id: string): Promise<FRPServerConfig> {
