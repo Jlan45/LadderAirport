@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/ladderairport/panel/internal/store"
@@ -100,7 +101,7 @@ func CollectEndpointsFromAttachments(nodes []store.Node, nodeAttachments map[str
 			if server == "" || server == "0.0.0.0" || server == "::" {
 				continue
 			}
-			name := sanitizeName(fmt.Sprintf("%s-%s", n.Name, in.Name))
+			name := SanitizeName(fmt.Sprintf("%s-%s", n.Name, in.Name))
 			out = append(out, ProxyEndpoint{
 				Name:     name,
 				Node:     n,
@@ -779,7 +780,24 @@ func resolveRealityPublicKey(params map[string]any) (string, error) {
 	return realityPublicKey(priv)
 }
 
-func sanitizeName(s string) string {
+// IsDomainHost reports whether host is a domain name (not a raw IP address).
+func IsDomainHost(host string) bool {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return false
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+	if net.ParseIP(host) != nil {
+		return false
+	}
+	return strings.Contains(host, ".")
+}
+
+func SanitizeName(s string) string {
 	s = strings.TrimSpace(s)
 	repl := strings.NewReplacer(" ", "-", "/", "-", "\\", "-", ",", "-", ":", "-")
 	s = repl.Replace(s)
@@ -787,6 +805,10 @@ func sanitizeName(s string) string {
 		return "proxy"
 	}
 	return s
+}
+
+func sanitizeName(s string) string {
+	return SanitizeName(s)
 }
 
 func paramString(m map[string]any, key string) (string, bool) {

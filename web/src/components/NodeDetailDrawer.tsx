@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Sheet,
-  SheetContent,
-} from './ui/sheet'
+  Dialog,
+  DialogContent,
+} from './ui/dialog'
 import { Button } from './ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Badge } from './ui/badge'
@@ -754,8 +754,8 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   ).length
 
   return (
-    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <SheetContent className="bg-background border-border text-foreground p-0 sm:max-w-3xl flex flex-col h-full focus-visible:outline-none">
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="max-w-4xl w-[92vw] h-[85vh] max-h-[85vh] bg-background border-border text-foreground p-0 flex flex-col focus-visible:outline-none overflow-hidden sm:rounded-lg shadow-2xl">
         {loading ? (
           <div className="flex flex-col items-center justify-center flex-1 space-y-3">
             <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -782,7 +782,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
           <div className="flex flex-col h-full overflow-hidden">
             {/* Header */}
             <header className="p-6 border-b border-border bg-card/40">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between pr-8">
                 <div className="space-y-1">
                   <h2 className="text-xl font-bold tracking-tight text-foreground">{node.name}</h2>
                   <div className="flex flex-wrap gap-1.5 pt-1">
@@ -956,7 +956,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
             </Tabs>
           </div>
         )}
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   )
 }

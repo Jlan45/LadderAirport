@@ -1072,7 +1072,7 @@ export default function Fleet() {
         onOpenDetail={openDetail}
       />
 
-      {/* Node Detail Sheet Drawer */}
+      {/* Node Detail Modal */}
       <NodeDetailDrawer
         nodeId={detailId}
         onClose={closeDetail}

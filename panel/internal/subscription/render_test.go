@@ -295,3 +295,23 @@ func TestRenderV2ray(t *testing.T) {
 		t.Fatalf("expected ss:// prefix in decoded string, got %q", decStr)
 	}
 }
+
+func TestIsDomainHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"example.com", true},
+		{"sub.domain.co.uk", true},
+		{"1.2.3.4", false},
+		{"2001:db8::1", false},
+		{"[2001:db8::1]:443", false},
+		{"0.0.0.0", false},
+		{"localhost", false},
+	}
+	for _, tt := range tests {
+		if got := IsDomainHost(tt.host); got != tt.want {
+			t.Errorf("IsDomainHost(%q) = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+}

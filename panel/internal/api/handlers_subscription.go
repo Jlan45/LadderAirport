@@ -334,22 +334,35 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		if err != nil {
 			return nil, "", err
 		}
+		nodeManagedDomains := map[string]string{}
+		if mds, err := s.Store.ListManagedDomains(); err == nil {
+			for _, md := range mds {
+				if md.Enabled && strings.TrimSpace(md.FQDN) != "" && md.NodeID != "" {
+					nodeManagedDomains[md.NodeID] = strings.TrimSpace(md.FQDN)
+				}
+			}
+		}
+
 		builder := &nodeconfig.Builder{Store: s.Store}
 		for i := range local {
+			nodeID := local[i].Node.ID
+			boundDomain := nodeManagedDomains[nodeID]
+
 			resolved, hostname, managed, err := builder.ResolveManagedTLS(
-				local[i].Node.ID, local[i].Inbound,
+				nodeID, local[i].Inbound,
 			)
 			if err != nil {
 				return nil, "", err
 			}
-			if !managed {
-				continue
+			if managed && hostname != "" {
+				verify := false
+				local[i].Inbound = resolved
+				local[i].Params = resolved.Params
+				local[i].Server = hostname
+				local[i].TLSSkipVerify = &verify
+			} else if boundDomain != "" && !subscription.IsDomainHost(local[i].Server) {
+				local[i].Server = boundDomain
 			}
-			verify := false
-			local[i].Inbound = resolved
-			local[i].Params = resolved.Params
-			local[i].Server = hostname
-			local[i].TLSSkipVerify = &verify
 		}
 	}
 	if sub.IncludeAllChains || len(sub.ChainIDs) > 0 {
