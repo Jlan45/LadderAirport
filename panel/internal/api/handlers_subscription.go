@@ -260,6 +260,27 @@ func detectFormat(r *http.Request) string {
 	return "v2ray"
 }
 
+func parseUseDomain(r *http.Request) bool {
+	if r == nil {
+		return true
+	}
+	q := r.URL.Query()
+	for _, key := range []string{"use_domain", "domain", "fqdn", "use_fqdn"} {
+		if val := strings.ToLower(strings.TrimSpace(q.Get(key))); val != "" {
+			switch val {
+			case "false", "0", "no", "off":
+				return false
+			case "true", "1", "yes", "on":
+				return true
+			}
+		}
+	}
+	if q.Get("no_domain") == "true" || q.Get("no_domain") == "1" {
+		return false
+	}
+	return true
+}
+
 func (s *Server) handlePreviewSubscription(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	sub, err := s.Store.GetSubscription(id)
@@ -272,7 +293,8 @@ func (s *Server) handlePreviewSubscription(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	format := detectFormat(r)
-	body, ctype, err := s.renderSubscription(r.Context(), sub, format)
+	useDomain := parseUseDomain(r)
+	body, ctype, err := s.renderSubscription(r.Context(), sub, format, useDomain)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -299,7 +321,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 	format := detectFormat(r)
-	body, ctype, err := s.renderSubscription(r.Context(), sub, format)
+	useDomain := parseUseDomain(r)
+	body, ctype, err := s.renderSubscription(r.Context(), sub, format, useDomain)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -311,7 +334,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	_, _ = w.Write(body)
 }
 
-func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription, format string) ([]byte, string, error) {
+func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription, format string, useDomain bool) ([]byte, string, error) {
 	nodes, err := s.Store.ListNodes()
 	if err != nil {
 		return nil, "", err
@@ -358,10 +381,16 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 				verify := false
 				local[i].Inbound = resolved
 				local[i].Params = resolved.Params
-				local[i].Server = hostname
+				if useDomain {
+					local[i].Server = hostname
+				} else if local[i].Node.Address != "" {
+					local[i].Server = strings.TrimSpace(local[i].Node.Address)
+				}
 				local[i].TLSSkipVerify = &verify
-			} else if boundDomain != "" && !subscription.IsDomainHost(local[i].Server) {
+			} else if useDomain && boundDomain != "" && !subscription.IsDomainHost(local[i].Server) {
 				local[i].Server = boundDomain
+			} else if !useDomain && subscription.IsDomainHost(local[i].Server) && local[i].Node.Address != "" {
+				local[i].Server = strings.TrimSpace(local[i].Node.Address)
 			}
 		}
 	}

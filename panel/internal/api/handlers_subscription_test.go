@@ -66,3 +66,28 @@ func TestSanitizeFilename(t *testing.T) {
 		t.Fatalf("empty = %q", got)
 	}
 }
+
+func TestParseUseDomain(t *testing.T) {
+	cases := []struct {
+		urlStr string
+		want   bool
+	}{
+		{"http://example.com/sub/token", true},
+		{"http://example.com/sub/token?use_domain=true", true},
+		{"http://example.com/sub/token?use_domain=1", true},
+		{"http://example.com/sub/token?domain=true", true},
+		{"http://example.com/sub/token?domain=1", true},
+		{"http://example.com/sub/token?use_domain=false", false},
+		{"http://example.com/sub/token?use_domain=0", false},
+		{"http://example.com/sub/token?domain=false", false},
+		{"http://example.com/sub/token?domain=0", false},
+		{"http://example.com/sub/token?no_domain=1", false},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", tc.urlStr, nil)
+		got := parseUseDomain(req)
+		if got != tc.want {
+			t.Errorf("url=%q got %v want %v", tc.urlStr, got, tc.want)
+		}
+	}
+}
