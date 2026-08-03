@@ -12,6 +12,7 @@ import {
   LogOut,
   Server,
   Network,
+  Route as RouteIcon,
   Share2,
   Waypoints,
   Settings as SettingsIcon,
@@ -23,13 +24,14 @@ import {
 } from 'lucide-react'
 import { ApiError, AUTH_EXPIRED_EVENT, listNodes, logout } from './api/client'
 import { toast } from './lib/toast'
-import { LOGO_DARK_BASE64, LOGO_LIGHT_BASE64 } from './lib/logos'
+import { LOGO_DARK_URL, LOGO_LIGHT_URL } from './lib/logos'
 
 const Login = lazy(() => import('./pages/Login'))
 const Fleet = lazy(() => import('./pages/Fleet'))
 const Inbounds = lazy(() => import('./pages/Inbounds'))
 const Subscriptions = lazy(() => import('./pages/Subscriptions'))
 const ProxyChains = lazy(() => import('./pages/ProxyChains'))
+const RoutePlans = lazy(() => import('./pages/RoutePlans'))
 const Settings = lazy(() => import('./pages/Settings'))
 const PKI = lazy(() => import('./pages/PKI'))
 const DNSCertificates = lazy(() => import('./pages/DNSCertificates'))
@@ -38,6 +40,7 @@ const NAV = [
   { path: '/', label: '节点', icon: <Server className="h-4 w-4" /> },
   { path: '/inbounds', label: '入站', icon: <Network className="h-4 w-4" /> },
   { path: '/chains', label: '代理链', icon: <Waypoints className="h-4 w-4" /> },
+  { path: '/route-plans', label: '路由计划', icon: <RouteIcon className="h-4 w-4" /> },
   { path: '/subscriptions', label: '订阅', icon: <Share2 className="h-4 w-4" /> },
   { path: '/pki', label: '证书', icon: <ShieldCheck className="h-4 w-4" /> },
   { path: '/dns-certificates', label: 'DNS/ACME', icon: <Globe2 className="h-4 w-4" /> },
@@ -115,6 +118,7 @@ function AppLayout() {
     const path = location.pathname
     if (path.startsWith('/inbounds')) return '/inbounds'
     if (path.startsWith('/chains')) return '/chains'
+    if (path.startsWith('/route-plans')) return '/route-plans'
     if (path.startsWith('/subscriptions')) return '/subscriptions'
     if (path.startsWith('/settings')) return '/settings'
     if (path.startsWith('/pki')) return '/pki'
@@ -172,7 +176,7 @@ function AppLayout() {
           <div className="flex items-center gap-6">
             <Link className="flex items-center gap-2.5 text-sm font-bold tracking-tight text-foreground hover:opacity-90 group" to="/" aria-label="Ladder Airport 节点管理">
               <div className="relative flex items-center justify-center rounded-md overflow-hidden transition-all duration-300 group-hover:scale-105 shadow-[0_0_10px_rgba(6,182,212,0.4)] dark:shadow-[0_0_12px_rgba(168,85,247,0.45)]">
-                <img src={theme === 'dark' ? LOGO_DARK_BASE64 : LOGO_LIGHT_BASE64} alt="Logo" className="w-8 h-8 object-contain" />
+                <img src={theme === 'dark' ? LOGO_DARK_URL : LOGO_LIGHT_URL} alt="Logo" className="w-8 h-8 object-contain" />
               </div>
               <span className="hidden sm:inline">Ladder Airport</span>
             </Link>
@@ -189,7 +193,7 @@ function AppLayout() {
                   aria-current={active === item.path ? 'page' : undefined}
                 >
                   {item.icon}
-                  <span className="hidden xs:inline">{item.label}</span>
+                  <span className="hidden sm:inline">{item.label}</span>
                 </Link>
               ))}
             </nav>
@@ -253,6 +257,7 @@ export default function App() {
             <Route path="/" element={<Fleet />} />
             <Route path="/inbounds" element={<Inbounds />} />
             <Route path="/chains" element={<ProxyChains />} />
+            <Route path="/route-plans" element={<RoutePlans />} />
             <Route path="/subscriptions" element={<Subscriptions />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/pki" element={<PKI />} />

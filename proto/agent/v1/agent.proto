@@ -28,6 +28,15 @@ service AgentControl {
   rpc StopFRPServer(StopFRPServerRequest) returns (StopFRPServerResponse);
   rpc GetFRPServerStatus(GetFRPServerStatusRequest) returns (GetFRPServerStatusResponse);
   rpc GetFRPServerMappings(GetFRPServerMappingsRequest) returns (GetFRPServerMappingsResponse);
+  // GetNodeMetrics returns system-level node metrics (CPU/memory/disk/network rates).
+  // Requires agent capability "node-metrics-v1"; panels MUST tolerate Unimplemented.
+  rpc GetNodeMetrics(GetNodeMetricsRequest) returns (GetNodeMetricsResponse);
+  // GetBBRStatus reports kernel TCP congestion-control state (BBR availability).
+  // Requires agent capability "bbr-v1"; panels MUST tolerate Unimplemented.
+  rpc GetBBRStatus(GetBBRStatusRequest) returns (GetBBRStatusResponse);
+  // SetBBR enables/disables BBR congestion control on the node.
+  // Requires agent capability "bbr-v1"; panels MUST tolerate Unimplemented.
+  rpc SetBBR(SetBBRRequest) returns (SetBBRResponse);
 }
 
 message PingRequest {}
@@ -79,7 +88,7 @@ message StopFRPServerResponse {
 
 message GetFRPServerStatusRequest {}
 message GetFRPServerStatusResponse {
-  string state = 1;
+  string state = 1; // running | stopped | error
   string config_hash = 2;
   int64 started_at_unix = 3;
   string last_error = 4;
@@ -94,7 +103,7 @@ message FRPServerClient {
   string client_id = 3;
   string run_id = 4;
   string version = 5;
-  string wire_protocol = 6;
+  string wire_protocol = 6; // frp wire protocol version: v1 | v2
   string hostname = 7;
   string client_ip = 8;
   int64 connected_at_unix = 9;
@@ -103,8 +112,8 @@ message FRPServerClient {
 
 message FRPServerMapping {
   string name = 1;
-  string type = 2;
-  string status = 3;
+  string type = 2;   // proxy type: tcp | udp | http | https | tcpmux | stcp | xtcp | sudp
+  string status = 3; // frps admin status, e.g. online | offline
   string user = 4;
   string client_id = 5;
   string local_ip = 6;
@@ -181,7 +190,7 @@ message StreamLogsRequest {
 }
 message LogLine {
   int64 ts_unix_ms = 1;
-  string level = 2;
+  string level = 2; // debug | info | warn | error
   string message = 3;
 }
 
@@ -285,6 +294,41 @@ message DeleteProtocolCertificateGenerationRequest {
 }
 
 message DeleteProtocolCertificateGenerationResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+// GetNodeMetrics: system-level node metrics.
+// Requires agent capability "node-metrics-v1"; panels MUST tolerate Unimplemented.
+message GetNodeMetricsRequest {}
+message GetNodeMetricsResponse {
+  double cpu_percent = 1;          // whole-machine CPU usage percent (0-100)
+  uint64 memory_total_bytes = 2;
+  uint64 memory_used_bytes = 3;
+  uint64 disk_total_bytes = 4;
+  uint64 disk_used_bytes = 5;
+  uint64 uplink_bps = 6;           // send rate over the sampling interval, bits/s
+  uint64 downlink_bps = 7;         // receive rate over the sampling interval, bits/s
+  int64 collected_at_unix = 8;     // sample timestamp (unix seconds)
+}
+
+// GetBBRStatus: kernel congestion-control introspection.
+// Requires agent capability "bbr-v1"; panels MUST tolerate Unimplemented.
+message GetBBRStatusRequest {}
+message GetBBRStatusResponse {
+  bool bbr_available = 1;                    // kernel supports BBR
+  bool bbr_enabled = 2;                      // BBR is the active default congestion control
+  string current_congestion_control = 3;     // net.ipv4.tcp_congestion_control, e.g. cubic | bbr
+  string current_qdisc = 4;                  // net.core.default_qdisc, e.g. fq | fq_codel | pfifo_fast
+  repeated string supported_controls = 5;    // net.ipv4.tcp_available_congestion_control
+}
+
+// SetBBR: toggle BBR congestion control.
+// Requires agent capability "bbr-v1"; panels MUST tolerate Unimplemented.
+message SetBBRRequest {
+  bool enabled = 1;
+}
+message SetBBRResponse {
   bool ok = 1;
   string message = 2;
 }

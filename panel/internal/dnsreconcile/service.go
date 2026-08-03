@@ -44,7 +44,23 @@ func (s *Service) Reconcile(ctx context.Context, domainID string) error {
 		return nil
 	}
 	now := s.now()
-	if err := s.reconcile(ctx, domain, now); err != nil {
+	if domain.AddressSource == "agent_public" {
+		node, err := s.Store.GetNode(domain.NodeID)
+		if err != nil {
+			return err
+		}
+		if !node.DDNSEnabled {
+			// Node-level DDNS switch is off: skip the probe entirely but keep
+			// the regular schedule so reconcile resumes once re-enabled.
+			domain.State = "paused"
+			domain.RetryCount = 0
+			domain.LastError = "节点已关闭 DDNS 自动解析，公网探测已暂停"
+			domain.NextReconcileUnix = now.Add(reconcileInterval).Unix()
+			return s.Store.UpdateManagedDomain(domain)
+		}
+	}
+	note, err := s.reconcile(ctx, domain, now)
+	if err != nil {
 		domain.State = "retry_wait"
 		domain.RetryCount++
 		domain.NextReconcileUnix = now.Add(retryDelay(domain.RetryCount)).Unix()
@@ -54,7 +70,7 @@ func (s *Service) Reconcile(ctx context.Context, domainID string) error {
 	}
 	domain.State = "ready"
 	domain.RetryCount = 0
-	domain.LastError = ""
+	domain.LastError = note
 	domain.LastReconcileUnix = now.Unix()
 	domain.NextReconcileUnix = now.Add(reconcileInterval).Unix()
 	return s.Store.UpdateManagedDomain(domain)
@@ -105,24 +121,27 @@ func (s *Service) Cleanup(ctx context.Context, domainID string) error {
 	return s.Store.DeleteManagedDomain(domain.ID)
 }
 
-func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, now time.Time) error {
+// reconcile converges the DNS records. The returned note is an informational
+// message persisted on the domain (e.g. fallback to the node control address);
+// it is empty on a straight success.
+func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, now time.Time) (string, error) {
 	if s == nil || s.Store == nil || s.Secrets == nil || s.Providers == nil {
-		return fmt.Errorf("DNS 同步服务尚未初始化")
+		return "", fmt.Errorf("DNS 同步服务尚未初始化")
 	}
 	provider, credentials, err := s.providerForDomain(domain)
 	if err != nil {
-		return err
+		return "", err
 	}
 	previousIPv4, previousIPv6 := domain.DesiredIPv4, domain.DesiredIPv6
-	ipv4, ipv6, err := s.desiredAddresses(ctx, domain)
+	ipv4, ipv6, note, err := s.desiredAddresses(ctx, domain)
 	if err != nil {
-		return err
+		return "", err
 	}
 	domain.DesiredIPv4, domain.DesiredIPv6 = ipv4, ipv6
 	zone := dnsprovider.Zone{Name: domain.Zone}
 	name, err := dnsprovider.RelativeName(domain.FQDN, domain.Zone)
 	if err != nil {
-		return err
+		return "", err
 	}
 	opCtx, cancel := context.WithTimeout(ctx, s.timeout())
 	defer cancel()
@@ -131,7 +150,7 @@ func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, no
 			opCtx, provider, zone, name, dnsprovider.TypeA, previousIPv4,
 			domain.ProviderRecordAID, domain.CreatedAByPanel,
 		); err != nil {
-			return secretstoreError(err, credentials)
+			return "", secretstoreError(err, credentials)
 		}
 		domain.DesiredIPv4, domain.ObservedIPv4 = "", []string{}
 		domain.ProviderRecordAID, domain.CreatedAByPanel = "", false
@@ -141,7 +160,7 @@ func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, no
 			opCtx, provider, zone, name, dnsprovider.TypeAAAA, previousIPv6,
 			domain.ProviderRecordAAAAID, domain.CreatedAAAAByPanel,
 		); err != nil {
-			return secretstoreError(err, credentials)
+			return "", secretstoreError(err, credentials)
 		}
 		domain.DesiredIPv6, domain.ObservedIPv6 = "", []string{}
 		domain.ProviderRecordAAAAID, domain.CreatedAAAAByPanel = "", false
@@ -161,13 +180,13 @@ func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, no
 				reconcileRecord(opCtx, provider, zone, name, dnsprovider.TypeAAAA, ipv6, time.Duration(domain.TTL)*time.Second, domain.CreatedAAAAByPanel)
 		}
 	default:
-		return fmt.Errorf("记录模式无效：%s", domain.RecordMode)
+		return "", fmt.Errorf("记录模式无效：%s", domain.RecordMode)
 	}
 	if err != nil {
-		return secretstoreError(err, credentials)
+		return "", secretstoreError(err, credentials)
 	}
 	domain.LastReconcileUnix = now.Unix()
-	return nil
+	return note, nil
 }
 
 func cleanupDisabledRecord(
@@ -256,52 +275,78 @@ func reconcileRecord(
 	return observed, ref.ID, created, nil
 }
 
-func (s *Service) desiredAddresses(ctx context.Context, domain *store.ManagedDomain) (string, string, error) {
+// desiredAddresses resolves the target A/AAAA values. The note return value
+// describes a degraded but usable resolution (agent probe fell back to the
+// node control address); it is empty for the normal path.
+func (s *Service) desiredAddresses(ctx context.Context, domain *store.ManagedDomain) (string, string, string, error) {
 	switch domain.AddressSource {
 	case "manual":
-		return validateDesired(domain.ManualIPv4, domain.ManualIPv6, domain.RecordMode)
+		ipv4, ipv6, err := validateDesired(domain.ManualIPv4, domain.ManualIPv6, domain.RecordMode)
+		return ipv4, ipv6, "", err
 	case "node_address":
 		node, err := s.Store.GetNode(domain.NodeID)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
-		address, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(node.Address), "[]"))
-		if err != nil || !publicAddress(address) {
-			return "", "", fmt.Errorf("节点控制地址不是可用公网 IP")
-		}
-		if address.Is4() {
-			return validateDesired(address.String(), "", domain.RecordMode)
-		}
-		return validateDesired("", address.String(), domain.RecordMode)
+		ipv4, ipv6, err := nodeAddressDesired(node, domain.RecordMode)
+		return ipv4, ipv6, "", err
 	case "agent_public":
 		if s.DialAgent == nil {
-			return "", "", fmt.Errorf("Agent 公网地址连接器不可用")
+			return "", "", "", fmt.Errorf("Agent 公网地址连接器不可用")
 		}
 		node, err := s.Store.GetNode(domain.NodeID)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
-		token := node.Token
-		if token == "" && s.DefaultToken != nil {
-			token = s.DefaultToken()
+		ipv4, ipv6, probeErr := s.probeAgentPublic(ctx, node, domain.RecordMode)
+		if probeErr == nil {
+			return ipv4, ipv6, "", nil
 		}
-		opCtx, cancel := context.WithTimeout(ctx, s.timeout())
-		defer cancel()
-		client, err := s.DialAgent(opCtx, *node, token)
-		if err != nil {
-			return "", "", fmt.Errorf("连接 Agent 获取公网地址失败：%w", err)
+		// Probe failed (RPC error or no public address reported): fall back
+		// to the node control address when it is itself a usable public IP.
+		fallbackIPv4, fallbackIPv6, fallbackErr := nodeAddressDesired(node, domain.RecordMode)
+		if fallbackErr == nil {
+			return fallbackIPv4, fallbackIPv6,
+				fmt.Sprintf("Agent 公网探测失败（%v），已回退使用节点控制地址", probeErr), nil
 		}
-		defer func() { _ = client.Close() }()
-		want4 := domain.RecordMode == "a" || domain.RecordMode == "dual"
-		want6 := domain.RecordMode == "aaaa" || domain.RecordMode == "dual"
-		response, err := client.GetPublicAddresses(opCtx, want4, want6)
-		if err != nil {
-			return "", "", fmt.Errorf("Agent 公网地址探测失败：%w", err)
-		}
-		return validateDesired(response.GetIpv4(), response.GetIpv6(), domain.RecordMode)
+		return "", "", "", probeErr
 	default:
-		return "", "", fmt.Errorf("地址来源无效：%s", domain.AddressSource)
+		return "", "", "", fmt.Errorf("地址来源无效：%s", domain.AddressSource)
 	}
+}
+
+// nodeAddressDesired derives desired records from the node control address.
+// It fails when the control address is not a usable public IP.
+func nodeAddressDesired(node *store.Node, mode string) (string, string, error) {
+	address, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(node.Address), "[]"))
+	if err != nil || !publicAddress(address) {
+		return "", "", fmt.Errorf("节点控制地址不是可用公网 IP")
+	}
+	if address.Is4() {
+		return validateDesired(address.String(), "", mode)
+	}
+	return validateDesired("", address.String(), mode)
+}
+
+func (s *Service) probeAgentPublic(ctx context.Context, node *store.Node, mode string) (string, string, error) {
+	token := node.Token
+	if token == "" && s.DefaultToken != nil {
+		token = s.DefaultToken()
+	}
+	opCtx, cancel := context.WithTimeout(ctx, s.timeout())
+	defer cancel()
+	client, err := s.DialAgent(opCtx, *node, token)
+	if err != nil {
+		return "", "", fmt.Errorf("连接 Agent 获取公网地址失败：%w", err)
+	}
+	defer func() { _ = client.Close() }()
+	want4 := mode == "a" || mode == "dual"
+	want6 := mode == "aaaa" || mode == "dual"
+	response, err := client.GetPublicAddresses(opCtx, want4, want6)
+	if err != nil {
+		return "", "", fmt.Errorf("Agent 公网地址探测失败：%w", err)
+	}
+	return validateDesired(response.GetIpv4(), response.GetIpv6(), mode)
 }
 
 func validateDesired(ipv4, ipv6, mode string) (string, string, error) {

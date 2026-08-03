@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	acmeservice "github.com/ladderairport/panel/internal/acme"
@@ -30,7 +32,7 @@ import (
 func main() {
 	dbPath := flag.String("db", "./data/panel.db", "SQLite 数据库路径")
 	listen := flag.String("listen", "", "HTTP 监听地址（默认读取 settings.listen_addr 或使用 :8080）")
-	sessionSecret := flag.String("session-secret", "", "JWT 会话 HMAC 密钥（为空时随机生成）")
+	sessionSecret := flag.String("session-secret", "", "JWT 会话 HMAC 密钥（为空时依次尝试 LADDER_SESSION_SECRET、持久化文件，最后随机生成）")
 	bootstrap := flag.Bool("bootstrap", true, "启动时向所有已注册节点下发配置并启动 sing-box")
 	bootstrapTimeout := flag.Duration("bootstrap-timeout", 3*time.Minute, "首次启动下发的超时时间")
 	bootstrapRetry := flag.Bool("bootstrap-retry", true, "定期重试尚未在线或运行节点的下发与启动")
@@ -103,6 +105,7 @@ func main() {
 		return
 	}
 	log.Printf("管理 PKI 已启用（目录=%s，中间 CA 到期时间=%s）", dir, time.Unix(ca.Status().IntermediateNotAfterUnix, 0).Format(time.RFC3339))
+	ca.AuditLog = st.AddPKIAudit
 	go ca.Run(context.Background())
 
 	if err := api.EnsureAdminPassword(st); err != nil {
@@ -115,12 +118,31 @@ func main() {
 	}
 
 	secret := []byte(*sessionSecret)
+	secretSource := "-session-secret"
+	if len(secret) == 0 {
+		if env := os.Getenv("LADDER_SESSION_SECRET"); env != "" {
+			secret = []byte(env)
+			secretSource = "LADDER_SESSION_SECRET"
+		}
+	}
+	if len(secret) == 0 {
+		// Persist next to the PKI directory so sessions survive restarts.
+		secretFile := filepath.Join(filepath.Dir(dir), "session.secret")
+		secret, err = loadOrCreateSessionSecret(secretFile)
+		if err != nil {
+			log.Printf("读取会话密钥文件失败：%v", err)
+		} else {
+			secretSource = secretFile
+		}
+	}
 	if len(secret) == 0 {
 		secret, err = randomSecret(32)
 		if err != nil {
 			log.Fatalf("生成会话密钥失败：%v", err)
 		}
 		log.Printf("未设置会话密钥，已生成临时密钥（重启后现有会话将失效）")
+	} else {
+		log.Printf("会话密钥来源=%s", secretSource)
 	}
 
 	runner := batch.NewRunner(st, func() string {
@@ -132,16 +154,16 @@ func main() {
 	})
 	runner.PKI = ca
 	if settings.GRPCTimeoutSec > 0 {
-		runner.Timeout = time.Duration(settings.GRPCTimeoutSec) * time.Second
+		runner.Timeout.Store(int64(time.Duration(settings.GRPCTimeoutSec) * time.Second))
 	}
 	if settings.MaxConcurrency > 0 {
-		runner.MaxConcurrency = settings.MaxConcurrency
+		runner.MaxConcurrency.Store(int64(settings.MaxConcurrency))
 	}
 	dnsService := &dnsreconcile.Service{
 		Store:     st,
 		Secrets:   secrets,
 		Providers: dnsRegistry,
-		Timeout:   runner.Timeout,
+		Timeout:   runner.OperationTimeout(),
 		DefaultToken: func() string {
 			cur, err := st.GetSettings()
 			if err != nil {
@@ -233,8 +255,37 @@ func main() {
 	go chainService.RunProbeLoop(context.Background())
 	go automationRunner.Run(context.Background())
 
+	// Retention cleanup: once at startup, then hourly.
+	go func() {
+		prune := func() {
+			summary, err := st.PruneExpiredData(time.Now())
+			if err != nil {
+				log.Printf("数据清理失败：%v", err)
+				return
+			}
+			if summary.Total() > 0 {
+				log.Printf("数据清理完成：任务=%d，快照=%d，PKI 审计=%d，自动化审计=%d，注册令牌=%d",
+					summary.Tasks, summary.Snapshots, summary.PKIAuditLogs,
+					summary.AutomationAuditLogs, summary.EnrollmentTokens)
+			}
+		}
+		prune()
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			prune()
+		}
+	}()
+
 	log.Printf("Panel 正在监听 %s（数据库=%s，版本=%s）", addr, *dbPath, version.Version)
-	if err := http.ListenAndServe(addr, srv.Handler()); err != nil {
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatalf("启动监听失败：%v", err)
 	}
 }
@@ -260,4 +311,43 @@ func randomSecret(n int) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// loadOrCreateSessionSecret reads a hex-encoded session secret from path,
+// generating a fresh 32-byte secret (mode 0600) when the file is missing.
+func loadOrCreateSessionSecret(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		secret, err := hex.DecodeString(strings.TrimSpace(string(data)))
+		if err != nil || len(secret) == 0 {
+			return nil, fmt.Errorf("会话密钥文件 %s 内容无效", path)
+		}
+		return secret, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	secret, err := randomSecret(32)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if os.IsExist(err) {
+		// Another process won the creation race.
+		return loadOrCreateSessionSecret(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := file.WriteString(hex.EncodeToString(secret) + "\n"); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+	return secret, nil
 }

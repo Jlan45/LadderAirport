@@ -26,8 +26,8 @@ type createExternalSourceBody struct {
 
 func (s *Server) handleCreateExternalSource(w http.ResponseWriter, r *http.Request) {
 	var body createExternalSourceBody
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	name := strings.TrimSpace(body.Name)
@@ -91,8 +91,8 @@ func (s *Server) handleUpdateExternalSource(w http.ResponseWriter, r *http.Reque
 		Enabled            *bool             `json:"enabled"`
 		RefreshIntervalSec *int              `json:"refresh_interval_sec"`
 	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) != "" {

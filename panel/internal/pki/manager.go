@@ -40,6 +40,11 @@ type Manager struct {
 	bundlePEM    []byte
 	clientMu     sync.RWMutex
 	clientCert   tls.Certificate
+	// AuditLog, when set, persists CA lifecycle warnings (e.g. intermediate
+	// expiry) via the Panel audit mechanism.
+	AuditLog func(action, nodeID, serial, actor, detail string) error
+	// lastExpiryWarning rate-limits expiry warnings (Run goroutine only).
+	lastExpiryWarning time.Time
 }
 
 type IssuedCertificate struct {
@@ -135,7 +140,12 @@ func (m *Manager) ClientCertificate() tls.Certificate {
 	return m.clientCert
 }
 
+// intermediateExpiryWarning triggers an alert when the online intermediate CA
+// has less than this lifetime remaining. Rotation stays operator-driven.
+const intermediateExpiryWarning = 30 * 24 * time.Hour
+
 // Run renews the Panel client identity without requiring a Panel restart.
+// It also warns when the intermediate CA approaches expiry.
 func (m *Manager) Run(ctx context.Context) {
 	ticker := time.NewTicker(12 * time.Hour)
 	defer ticker.Stop()
@@ -144,6 +154,7 @@ func (m *Manager) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			m.warnIntermediateExpiry(time.Now())
 			current := m.ClientCertificate()
 			if current.Leaf != nil && time.Until(current.Leaf.NotAfter) > 7*24*time.Hour {
 				continue
@@ -152,6 +163,24 @@ func (m *Manager) Run(ctx context.Context) {
 				log.Printf("管理 PKI：续签 Panel 客户端证书失败：%v", err)
 			}
 		}
+	}
+}
+
+// warnIntermediateExpiry logs (and audits, at most once per 24h) when the
+// intermediate CA expires within intermediateExpiryWarning.
+func (m *Manager) warnIntermediateExpiry(now time.Time) {
+	remaining := time.Until(m.intermediate.NotAfter)
+	if remaining > intermediateExpiryWarning {
+		return
+	}
+	if now.Sub(m.lastExpiryWarning) < 24*time.Hour {
+		return
+	}
+	m.lastExpiryWarning = now
+	detail := fmt.Sprintf("中间 CA 到期时间=%s，剩余=%s", m.intermediate.NotAfter.UTC().Format(time.RFC3339), remaining.Truncate(time.Minute))
+	log.Printf("管理 PKI：%s，请尽快离线轮换（-pki-rotate-intermediate）", detail)
+	if m.AuditLog != nil {
+		_ = m.AuditLog("intermediate.expiry-warning", "", "", "panel", detail)
 	}
 }
 

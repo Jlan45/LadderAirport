@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ladderairport/panel/internal/nodeclient"
@@ -29,14 +30,22 @@ type DialFunc func(ctx context.Context, n store.Node, token string) (NodeRPC, er
 
 // Runner executes batch tasks against agent nodes.
 type Runner struct {
-	Store          *store.Store
-	DefaultToken   func() string
-	Timeout        time.Duration
-	MaxConcurrency int
+	Store        *store.Store
+	DefaultToken func() string
+	// Timeout is the per-operation dial/RPC timeout in nanoseconds
+	// (atomic; updated live from settings).
+	Timeout atomic.Int64
+	// MaxConcurrency bounds parallel node operations (atomic; updated live).
+	MaxConcurrency atomic.Int64
 	Dial           DialFunc
 	ConfigBuilder  *nodeconfig.Builder
 	Coordinator    *sync.Mutex
 	PKI            *pki.Manager
+
+	// bootstrapCache memoizes config hashes per node fingerprint for the
+	// bootstrap retry loop (see nodesNeedingBootstrap).
+	bootstrapCacheMu sync.Mutex
+	bootstrapCache   map[string]bootstrapHashCache
 }
 
 // NewRunner constructs a Runner with sensible defaults.
@@ -44,15 +53,31 @@ type Runner struct {
 // Dial defaults to nodeclient.Dial using the node's address/port/TLS settings.
 func NewRunner(s *store.Store, defaultToken func() string) *Runner {
 	r := &Runner{
-		Store:          s,
-		DefaultToken:   defaultToken,
-		Timeout:        10 * time.Second,
-		MaxConcurrency: 10,
+		Store:        s,
+		DefaultToken: defaultToken,
 	}
+	r.Timeout.Store(int64(10 * time.Second))
+	r.MaxConcurrency.Store(10)
 	r.Dial = r.defaultDial
 	r.ConfigBuilder = &nodeconfig.Builder{Store: s}
 	r.Coordinator = &sync.Mutex{}
 	return r
+}
+
+// OperationTimeout returns the configured timeout, or 10s when unset.
+func (r *Runner) OperationTimeout() time.Duration {
+	if timeout := time.Duration(r.Timeout.Load()); timeout > 0 {
+		return timeout
+	}
+	return 10 * time.Second
+}
+
+// ConcurrencyLimit returns the configured concurrency, or 10 when unset.
+func (r *Runner) ConcurrencyLimit() int {
+	if n := r.MaxConcurrency.Load(); n > 0 {
+		return int(n)
+	}
+	return 10
 }
 
 func (r *Runner) defaultDial(ctx context.Context, n store.Node, token string) (NodeRPC, error) {
@@ -72,7 +97,7 @@ func (r *Runner) DialClient(ctx context.Context, n store.Node, token string) (*n
 	cfg := nodeclient.DialConfig{
 		Address:           net.JoinHostPort(n.Address, fmt.Sprintf("%d", n.GRPCPort)),
 		Token:             token,
-		Timeout:           r.Timeout,
+		Timeout:           time.Duration(r.Timeout.Load()),
 		CACertPEM:         []byte(n.PKICABundlePEM),
 		ClientCertificate: &clientCert,
 		ExpectedPeerURI:   pki.AgentURI(n.ID),
@@ -105,14 +130,8 @@ func (r *Runner) RunTask(ctx context.Context, taskID string) error {
 		return fmt.Errorf("标记任务运行状态失败：%w", err)
 	}
 
-	maxConc := r.MaxConcurrency
-	if maxConc <= 0 {
-		maxConc = 10
-	}
-	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
+	maxConc := r.ConcurrencyLimit()
+	timeout := r.OperationTimeout()
 
 	sem := make(chan struct{}, maxConc)
 	var (

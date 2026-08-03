@@ -1,0 +1,11 @@
+# 由 scripts/install-agent.sh 写入 /etc/systemd/system/ladder-agent-bbr.path；
+# DATA_DIR 非默认值时 PathExistsModified 会按实际数据目录展开。
+[Unit]
+Description=Watch LadderAirport agent BBR request file
+
+[Path]
+PathExistsModified=/var/lib/ladder-agent/bbr.request
+Unit=ladder-agent-bbr.service
+
+[Install]
+WantedBy=multi-user.target

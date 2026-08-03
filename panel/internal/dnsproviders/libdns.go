@@ -23,12 +23,26 @@ type libdnsProvider struct {
 	name        string
 	defaultZone string
 	backend     libdnsBackend
+	// httpTimeout bounds each provider API call (Config.HTTPTimeout); some
+	// libdns backends ignore context deadlines, so cloudflare additionally
+	// receives an *http.Client with this timeout (see register.go).
+	httpTimeout time.Duration
+}
+
+// callCtx applies the configured per-call HTTP timeout.
+func (p *libdnsProvider) callCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if p.httpTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, p.httpTimeout)
 }
 
 func (p *libdnsProvider) Test(ctx context.Context) error {
 	if p.defaultZone == "" {
 		return fmt.Errorf("DNS 账号尚未配置管理区域")
 	}
+	ctx, cancel := p.callCtx(ctx)
+	defer cancel()
 	_, err := p.backend.GetRecords(ctx, libdnsZone(p.defaultZone))
 	return p.wrap("测试连接", err)
 }
@@ -57,6 +71,8 @@ func (p *libdnsProvider) Lookup(
 	name string,
 	typ dnsprovider.RecordType,
 ) ([]dnsprovider.Record, error) {
+	ctx, cancel := p.callCtx(ctx)
+	defer cancel()
 	records, err := p.backend.GetRecords(ctx, libdnsZone(zone.Name))
 	if err != nil {
 		return nil, p.wrap("查询记录", err)
@@ -78,6 +94,8 @@ func (p *libdnsProvider) Upsert(
 	zone dnsprovider.Zone,
 	record dnsprovider.Record,
 ) (dnsprovider.RecordRef, error) {
+	ctx, cancel := p.callCtx(ctx)
+	defer cancel()
 	normalized, err := dnsprovider.NormalizeRecord(record, time.Minute, 24*time.Hour)
 	if err != nil {
 		return dnsprovider.RecordRef{}, err
@@ -127,6 +145,8 @@ func (p *libdnsProvider) Delete(
 	zone dnsprovider.Zone,
 	ref dnsprovider.RecordRef,
 ) error {
+	ctx, cancel := p.callCtx(ctx)
+	defer cancel()
 	records, err := p.backend.GetRecords(ctx, libdnsZone(zone.Name))
 	if err != nil {
 		return p.wrap("删除前查询记录", err)

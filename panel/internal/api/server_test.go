@@ -172,6 +172,19 @@ func newTestServer(t *testing.T, dial batch.DialFunc, live api.LiveDialFunc) (*h
 	if err := api.EnsureAdminPassword(st); err != nil {
 		t.Fatalf("EnsureAdminPassword: %v", err)
 	}
+	// The generated initial password is random; tests log in with a fixed one.
+	settings, err := st.GetSettings()
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	hash, err := api.HashPassword("admin")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	settings.AdminPasswordHash = hash
+	if err := st.SaveSettings(settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
 
 	runner := batch.NewRunner(st, func() string {
 		s, _ := st.GetSettings()
@@ -639,7 +652,7 @@ func TestFleetFlow(t *testing.T) {
 	if bootID == "" || bootToken == "" {
 		t.Fatalf("bootstrap node id/token missing: %v", boot)
 	}
-	resp, inst := doJSON(t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+bootID+"/install-command", nil)
+	resp, inst := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/nodes/"+bootID+"/install-command", nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("install-command status = %d", resp.StatusCode)
 	}
@@ -900,5 +913,110 @@ func TestBatchByLabels(t *testing.T) {
 	results, _ := task["results"].([]any)
 	if len(results) != 2 {
 		t.Fatalf("batch apply results = %v, want 2", results)
+	}
+}
+
+func TestPasswordChangeRevokesSession(t *testing.T) {
+	ts, client, _ := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("login status = %d", resp.StatusCode)
+	}
+
+	resp, _ = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/settings", map[string]any{
+		"new_password": "rotated-password",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put settings status = %d", resp.StatusCode)
+	}
+
+	// The pre-change cookie must be rejected even though it is unexpired.
+	resp, err := client.Get(ts.URL + "/api/v1/nodes")
+	if err != nil {
+		t.Fatal(err)
+		resp.Body.Close()
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("nodes after password change status = %d, want 401", resp.StatusCode)
+	}
+
+	// Old password is gone; new one works.
+	resp = login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("old password status = %d, want 401", resp.StatusCode)
+	}
+	resp = login(t, client, ts.URL, "rotated-password")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("new password status = %d", resp.StatusCode)
+	}
+}
+
+func TestLoginRateLimitedAfterFailures(t *testing.T) {
+	ts, client, _ := newTestServer(t, nil, nil)
+	for i := 0; i < 5; i++ {
+		resp := login(t, client, ts.URL, "wrong-password")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status = %d, want 401", i+1, resp.StatusCode)
+		}
+	}
+	// Sixth attempt is throttled even with the correct password.
+	resp := login(t, client, ts.URL, "admin")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("throttled login status = %d, want 429", resp.StatusCode)
+	}
+	if resp.Header.Get("Retry-After") == "" {
+		t.Fatal("missing Retry-After header")
+	}
+}
+
+func TestUpdateNodeDDNSEnabled(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	n := &store.Node{Name: "ddns-node", Address: "192.0.2.40", GRPCPort: 50051, DDNSEnabled: true}
+	if err := st.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, body := doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+n.ID, map[string]any{
+		"ddns_enabled": false,
+	})
+	if resp.StatusCode != http.StatusOK || body["ddns_enabled"] != false {
+		t.Fatalf("disable status = %d body = %#v", resp.StatusCode, body)
+	}
+	got, err := st.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DDNSEnabled {
+		t.Fatal("ddns_enabled was not persisted as false")
+	}
+
+	// Omitted field preserves the stored value.
+	resp, _ = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+n.ID, map[string]any{
+		"name": "ddns-node-renamed",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rename status = %d", resp.StatusCode)
+	}
+	got, err = st.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DDNSEnabled {
+		t.Fatal("omitted ddns_enabled was not preserved")
+	}
+
+	resp, body = doJSON(t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+n.ID, map[string]any{
+		"ddns_enabled": true,
+	})
+	if resp.StatusCode != http.StatusOK || body["ddns_enabled"] != true {
+		t.Fatalf("re-enable status = %d body = %#v", resp.StatusCode, body)
 	}
 }

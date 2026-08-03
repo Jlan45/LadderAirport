@@ -19,10 +19,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ladderairport/agent/internal/fileutil"
 )
 
 type Config struct {
@@ -173,11 +174,11 @@ func (m *Manager) Renew(ctx context.Context) error {
 	if err := validateAgentCertificate(&pair, []byte(issued.CABundlePEM), m.cfg.NodeID, time.Now()); err != nil {
 		return fmt.Errorf("校验签发证书失败：%w", err)
 	}
-	if err := atomicWrite(m.cfg.CertPath, []byte(issued.CertPEM), 0o640); err != nil {
+	if err := fileutil.AtomicWrite(m.cfg.CertPath, []byte(issued.CertPEM), 0o640); err != nil {
 		return err
 	}
 	if m.cfg.CAPath != "" {
-		if err := atomicWrite(m.cfg.CAPath, []byte(issued.CABundlePEM), 0o644); err != nil {
+		if err := fileutil.AtomicWrite(m.cfg.CAPath, []byte(issued.CABundlePEM), 0o644); err != nil {
 			return err
 		}
 	}
@@ -333,6 +334,40 @@ func ClientCAPool(path string) (*x509.CertPool, error) {
 	return pool, nil
 }
 
+// ClientCAPoolCache caches the parsed client CA pool and rebuilds it only when
+// the CA file's mtime changes (certificate renewal rewrites the file). It is
+// safe for concurrent use from TLS handshakes.
+type ClientCAPoolCache struct {
+	path  string
+	mu    sync.Mutex
+	pool  *x509.CertPool
+	mtime time.Time
+}
+
+func NewClientCAPoolCache(path string) *ClientCAPoolCache {
+	return &ClientCAPoolCache{path: path}
+}
+
+// Pool returns the cached CA pool, reloading from disk when the file changed.
+func (c *ClientCAPoolCache) Pool() (*x509.CertPool, error) {
+	info, err := os.Stat(c.path)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pool != nil && info.ModTime().Equal(c.mtime) {
+		return c.pool, nil
+	}
+	pool, err := ClientCAPool(c.path)
+	if err != nil {
+		return nil, err
+	}
+	c.pool = pool
+	c.mtime = info.ModTime()
+	return pool, nil
+}
+
 func VerifyPanelIdentity(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	if len(rawCerts) == 0 {
 		return fmt.Errorf("必须提供 Panel 客户端证书")
@@ -359,19 +394,4 @@ func ParsePanelURL(value string) error {
 		return fmt.Errorf("Panel URL 无效")
 	}
 	return nil
-}
-
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp, mode); err != nil {
-		_ = os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, path)
 }

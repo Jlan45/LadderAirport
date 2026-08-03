@@ -42,8 +42,8 @@ type createSubBody struct {
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
 	var body createSubBody
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(body.Name) == "" {
@@ -127,11 +127,12 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		ChainIDs           []string `json:"chain_ids"`
 		IncludeAllChains   *bool    `json:"include_all_chains"`
 		ExternalSourceIDs  []string `json:"external_source_ids"`
+		RoutePlanID        *string  `json:"route_plan_id"`
 		Enabled            *bool    `json:"enabled"`
 		Rotate             bool     `json:"rotate_token"`
 	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	before := *existing
@@ -167,6 +168,25 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if body.Enabled != nil {
 		existing.Enabled = *body.Enabled
+	}
+	if body.RoutePlanID != nil {
+		planID := strings.TrimSpace(*body.RoutePlanID)
+		if planID != "" {
+			plan, err := s.Store.GetRoutePlan(planID)
+			if err != nil {
+				if isNotFound(err) {
+					writeError(w, http.StatusBadRequest, fmt.Sprintf("路由计划不存在：%s", planID))
+					return
+				}
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if plan.Scope != "subscription" {
+				writeError(w, http.StatusBadRequest, "只能绑定订阅级路由计划（scope=subscription）")
+				return
+			}
+		}
+		existing.RoutePlanID = planID
 	}
 	if body.Rotate {
 		tok, err := randomToken(16)
@@ -316,6 +336,11 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusNotFound, "订阅不存在")
 		return
 	}
+	if sub.Disabled {
+		// Disabled subscriptions are indistinguishable from unknown tokens.
+		writeError(w, http.StatusNotFound, "订阅不存在")
+		return
+	}
 	if !sub.Enabled {
 		writeError(w, http.StatusForbidden, "订阅已禁用")
 		return
@@ -339,13 +364,10 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 	if err != nil {
 		return nil, "", err
 	}
-	nodeAttachments := map[string][]store.NodeInboundAttachment{}
-	for _, n := range nodes {
-		atts, err := s.Store.ListNodeInboundAttachments(n.ID)
-		if err != nil {
-			return nil, "", err
-		}
-		nodeAttachments[n.ID] = atts
+	// Batch-prefetch attachments for all nodes (avoids one query per node).
+	nodeAttachments, err := s.Store.ListAllNodeInboundAttachments()
+	if err != nil {
+		return nil, "", err
 	}
 	local := []subscription.ProxyEndpoint{}
 	if sub.IncludeStandalone && (sub.IncludeAllInbounds || len(sub.InboundIDs) > 0) {
@@ -367,12 +389,17 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		}
 
 		builder := &nodeconfig.Builder{Store: s.Store}
+		// Preload TLS bindings/domains/certificates once for all endpoints.
+		tlsIndex, err := builder.LoadManagedTLSIndex()
+		if err != nil {
+			return nil, "", err
+		}
 		for i := range local {
 			nodeID := local[i].Node.ID
 			boundDomain := nodeManagedDomains[nodeID]
 
-			resolved, hostname, managed, err := builder.ResolveManagedTLS(
-				nodeID, local[i].Inbound,
+			resolved, hostname, managed, err := builder.ResolveManagedTLSIndexed(
+				tlsIndex, nodeID, local[i].Inbound,
 			)
 			if err != nil {
 				return nil, "", err
@@ -432,12 +459,22 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		return nil, "", fmt.Errorf("没有可用的代理端点，请检查节点地址、入站关联和外部源")
 	}
 
+	// Inject the bound subscription-scope route plan (dangling, disabled or
+	// non-subscription-scope bindings are ignored).
+	planRules := []store.RoutePlanRule{}
+	if sub.RoutePlanID != "" {
+		if plan, err := s.Store.GetRoutePlan(sub.RoutePlanID); err == nil &&
+			plan.Enabled && plan.Scope == "subscription" {
+			planRules = plan.Rules
+		}
+	}
+
 	switch format {
 	case "clash":
-		b, err := subscription.RenderClash(eps)
+		b, err := subscription.RenderClashWithRules(eps, planRules)
 		return b, "text/yaml; charset=utf-8", err
 	case "singbox":
-		b, err := subscription.RenderSingbox(eps)
+		b, err := subscription.RenderSingboxWithRules(eps, planRules)
 		return b, "application/json; charset=utf-8", err
 	case "v2ray":
 		b, err := subscription.RenderV2ray(eps)
@@ -446,6 +483,61 @@ func (s *Server) renderSubscription(ctx context.Context, sub *store.Subscription
 		b, err := subscription.RenderV2ray(eps)
 		return b, "text/plain; charset=utf-8", err
 	}
+}
+
+// handleRotateSubscriptionToken issues a new subscription token, immediately
+// invalidating the previous public link.
+func (s *Server) handleRotateSubscriptionToken(w http.ResponseWriter, r *http.Request) {
+	sub, err := s.Store.GetSubscription(pathID(r))
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	token, err := randomToken(16)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	sub.Token = token
+	if err := s.Store.UpdateSubscription(sub); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}
+
+// handleDisableSubscription cuts off the public subscription link (404 for
+// /sub/{token}) without deleting the subscription.
+func (s *Server) handleDisableSubscription(w http.ResponseWriter, r *http.Request) {
+	s.setSubscriptionDisabled(w, r, true)
+}
+
+func (s *Server) handleEnableSubscription(w http.ResponseWriter, r *http.Request) {
+	s.setSubscriptionDisabled(w, r, false)
+}
+
+func (s *Server) setSubscriptionDisabled(w http.ResponseWriter, r *http.Request, disabled bool) {
+	sub, err := s.Store.GetSubscription(pathID(r))
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if sub.Disabled != disabled {
+		sub.Disabled = disabled
+		if err := s.Store.UpdateSubscription(sub); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 type subView struct {
@@ -472,13 +564,7 @@ func (s *Server) subURL(r *http.Request, token string) string {
 		base = strings.TrimRight(st.PublicBaseURL, "/")
 	}
 	if base == "" && r != nil {
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		if xf := r.Header.Get("X-Forwarded-Proto"); xf != "" {
-			scheme = xf
-		}
+		scheme := s.requestScheme(r)
 		host := r.Host
 		if host == "" {
 			host = "localhost"

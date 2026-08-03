@@ -8,11 +8,12 @@
 
 ## 功能
 
-- **节点**：登记 / 探测 / 启停 / 远程升级，卡片与表格总览
+- **节点**：登记 / 探测 / 启停 / 远程升级，系统指标与 BBR 拥塞控制开关，卡片与表格总览
 - **入站模板**：SS / Trojan / VLESS(Reality) / Hysteria2 / TUIC / AnyTLS / VMess
 - **配置下发**：关联入站 → 完整 sing-box JSON → gRPC 热更新；启动时自动同步并重试
 - **FRP Server**：节点内嵌 FRPS，Panel 加密保存认证令牌并独立下发、启停和查看状态
-- **订阅**：Clash / sing-box 链接，基础 CN 分流；可聚合外部机场订阅源
+- **订阅**：Clash / sing-box 链接，基础 CN 分流；可聚合外部机场订阅源；订阅令牌支持轮换与停用
+- **路由计划**：全局计划下发节点 sing-box 路由规则，订阅级计划注入订阅渲染输出；域名 / 关键字 / IP / 进程名匹配，代理链 / 直连 / 拦截动作（见 [路由计划](docs/route-plans.md)）
 - **DNS / ACME**：AliDNS、DNSPod、Cloudflare 自动解析；DNS-01 自动签发和续期协议 TLS 证书，私钥只留在 Agent
 - **部署**：一键装成 systemd 服务
 
@@ -24,10 +25,10 @@
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
-  | sudo LADDER_SESSION_SECRET='请换成长随机串' bash
+  | sudo bash
 ```
 
-浏览器打开 `http://<host>:8080`，默认密码 `admin`（立刻改）。详见 [deploy/README-panel.md](deploy/README-panel.md)。
+浏览器打开 `http://<host>:8080`。首次启动自动生成随机管理员密码并打印一次到日志（`journalctl -u ladder-panel` 查看）；要预置需在首次启动前把 `LADDER_ADMIN_PASSWORD` 写入 `/etc/ladder-panel/panel.env`（安装脚本不覆盖已有 panel.env）。登录后立刻在「设置」修改。详见 [deploy/README-panel.md](deploy/README-panel.md)。
 
 **Agent**
 
@@ -41,14 +42,32 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 git clone --recurse-submodules https://github.com/Jlan45/LadderAirport.git
 cd LadderAirport
 
-make agent   # → bin/ladder-agent
-make panel   # 构建 web 并 → bin/panel
-make test
+make agent   # → bin/ladder-agent（tags: with_quic,with_utls）
+make panel   # 先 npm 构建 web，再 → bin/panel；离线用 make panel-bin（编译已提交的 embed dist，无需 npm）
+make test    # go vet + go test -race（agent 带 with_quic,with_utls tags）
+make e2e     # panel-bin + agent 后执行 scripts/e2e-smoke.sh
+make proto   # 由 proto/agent/v1/agent.proto 重新生成 gRPC 代码
 ```
 
 ```bash
-./bin/panel -listen :8080 -db ./data/panel.db -session-secret 'dev-secret'
+./bin/panel -listen :8080 -db ./data/panel.db
 ```
+
+本地开发首次启动同样会生成随机管理员密码并打印到控制台；可用 `LADDER_ADMIN_PASSWORD=dev-pass ./bin/panel ...` 预置。
+
+### 常用 Panel 参数
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `-listen` | 空 → settings.listen_addr → `:8080` | HTTP 监听地址 |
+| `-db` | `./data/panel.db` | SQLite 路径 |
+| `-session-secret` | 空 → `LADDER_SESSION_SECRET` → `<db目录>/session.secret` → 临时随机值 | JWT 会话 HMAC 密钥 |
+| `-bootstrap` / `-bootstrap-retry` | `true` / `true` | 启动时全量下发 + Start；定时重试未就绪节点 |
+| `-bootstrap-timeout` / `-bootstrap-retry-interval` | `3m` / `30s` | 首次下发超时；重试间隔 |
+| `-pki-dir` | `<db目录>/pki` | 管理 PKI 目录 |
+| `-pki-rotate-intermediate` | `false` | 轮换在线中间 CA 和 Panel 客户端证书后退出 |
+| `-credentials-key-file` | `<db目录>/secrets/credentials.key` | DNS/ACME/FRPS 凭据主密钥文件（亦可用 `LADDER_CREDENTIALS_KEY`） |
+| `-version` | — | 显示版本后退出 |
 
 | 目录 | 作用 |
 |------|------|
@@ -62,7 +81,8 @@ make test
 
 ## 安全
 
-- 改掉默认管理员密码与节点 Token；Panel 用固定 `LADDER_SESSION_SECRET`
+- 管理员密码无默认值：首次启动随机生成并打印一次到日志（或预置 `LADDER_ADMIN_PASSWORD`），登录后立刻修改；Agent Token 由 Panel 签发随机值，拒绝空值与弱默认值
+- 会话密钥未设置时自动生成并持久化（`session.secret`，与 `panel.db` 同目录）；备份 `panel.db` 时一并备份
 - 节点强制使用 Panel 管理 CA 和 mTLS；不兼容的旧 Agent 需全清卸载后重新创建并注册
 - 首次初始化后离线保存并移走根 CA 私钥；Panel 日常只保留中间 CA 私钥
 - 公网 Panel 必须反代 HTTPS；代理入站公网证书继续使用 ACME，不与管理 CA 混用

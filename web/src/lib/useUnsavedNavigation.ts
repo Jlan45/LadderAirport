@@ -33,16 +33,21 @@ export function useUnsavedNavigation({
     shouldBlock,
   )
 
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return
+  const blockerRef = useRef(blocker)
+  blockerRef.current = blocker
+  const blocked = blocker.state === 'blocked'
 
+  useEffect(() => {
+    if (!blocked) return
+
+    const current = blockerRef.current
     const confirmLeave = window.confirm(`${title}\n${message}`)
     if (confirmLeave) {
-      blocker.proceed()
+      current.proceed?.()
     } else {
-      blocker.reset()
+      current.reset?.()
     }
-  }, [blocker, message, title])
+  }, [blocked, message, title])
 
   return useCallback(() => {
     allowNextRef.current = true

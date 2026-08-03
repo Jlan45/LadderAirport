@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   RefreshCw,
   ShieldCheck,
@@ -29,11 +30,15 @@ import {
   type FRPServerMapping,
   type FRPServerMappings,
   type PutFRPServerConfigInput,
+  type ManagedDomain,
   type Node,
 } from '@/api/client'
 import { formatBytes, runtimeLabel, runtimeTheme } from '@/lib/nodeDisplay'
 import { copyText } from '@/lib/clipboard'
 import { toast } from '@/lib/toast'
+
+/** Radix Select rejects empty-string item values; sentinel for the default node address. */
+const FRPS_DOMAIN_DEFAULT_VALUE = '__node_address__'
 
 export interface NodeFRPSTabProps {
   node: Node
@@ -48,6 +53,7 @@ export interface NodeFRPSTabProps {
   frpsMappings: FRPServerMappings | null
   frpsMappingsLoading: boolean
   frpsMappingsError: string
+  managedDomains: ManagedDomain[]
   updateFRPSDraft: (patch: Partial<PutFRPServerConfigInput>) => void
   loadFRPS: () => void
   loadFRPSMappings: () => void
@@ -82,6 +88,7 @@ export function NodeFRPSTab({
   frpsMappings,
   frpsMappingsLoading,
   frpsMappingsError,
+  managedDomains,
   updateFRPSDraft,
   loadFRPS,
   loadFRPSMappings,
@@ -158,6 +165,10 @@ export function NodeFRPSTab({
     )
   }
 
+  const boundDomain = managedDomains.find((domain) => domain.id === frpsDraft.managed_domain_id)
+  const frpcServerAddr =
+    boundDomain?.fqdn || frps?.server_addr || node.public_address || node.address || '节点地址'
+
   return (
     <div className="space-y-6">
       {node.capabilities?.length && !node.capabilities.includes('frps-v1') ? (
@@ -176,7 +187,7 @@ export function NodeFRPSTab({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Badge variant={runtimeTheme(frps?.runtime_state || 'stopped') as any}>
+            <Badge variant={runtimeTheme(frps?.runtime_state || 'stopped')}>
               {runtimeLabel(frps?.runtime_state || 'stopped')}
             </Badge>
             {frps?.frps_version ? (
@@ -198,11 +209,37 @@ export function NodeFRPSTab({
           </div>
         </div>
 
+        <div className="space-y-1.5">
+          <Label htmlFor="frps-managed-domain" className="text-muted-foreground">绑定域名</Label>
+          <Select
+            value={frpsDraft.managed_domain_id || FRPS_DOMAIN_DEFAULT_VALUE}
+            onValueChange={(value) =>
+              updateFRPSDraft({ managed_domain_id: value === FRPS_DOMAIN_DEFAULT_VALUE ? '' : value })
+            }
+            disabled={busy}
+          >
+            <SelectTrigger id="frps-managed-domain">
+              <SelectValue placeholder="使用节点地址" />
+            </SelectTrigger>
+            <SelectContent className="bg-popover border-border">
+              <SelectItem value={FRPS_DOMAIN_DEFAULT_VALUE}>使用节点地址（默认）</SelectItem>
+              {managedDomains.map((domain) => (
+                <SelectItem key={domain.id} value={domain.id}>
+                  {domain.fqdn}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            绑定后 frpc 客户端通过域名连接 FRPS，A 记录由托管域名自动维护；FRPS 监听配置不变。
+          </p>
+        </div>
+
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <div className="rounded-md border border-border bg-background p-3">
             <span className="block text-[10px] uppercase tracking-wider text-muted-foreground">控制入口</span>
             <code className="mt-1 block text-sm text-foreground">
-              {node.public_address || node.address || '节点地址'}:{frpsDraft.bind_port}
+              {frpcServerAddr}:{frpsDraft.bind_port}
             </code>
           </div>
           <div className="rounded-md border border-border bg-background p-3">
@@ -271,7 +308,7 @@ export function NodeFRPSTab({
             <ul className="list-disc pl-4 space-y-1 font-mono text-[11px]">
               <li>
                 <span className="text-foreground font-medium">1. 服务端地址 & 端口：</span>
-                <code>server_addr = "{node.public_address || node.address || '节点地址'}"</code>, <code>server_port = {frpsDraft.bind_port}</code>
+                <code>server_addr = "{frpcServerAddr}"</code>, <code>server_port = {frpsDraft.bind_port}</code>
               </li>
               <li>
                 <span className="text-foreground font-medium">2. 认证 Token：</span>
@@ -321,7 +358,7 @@ export function NodeFRPSTab({
                 <Input
                   id="frps-bind-port"
                   type="number"
-                  min={1024}
+                  min={1}
                   max={65535}
                   value={frpsDraft.bind_port}
                   disabled={busy}
@@ -395,7 +432,7 @@ export function NodeFRPSTab({
                   <div key={index} className="grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
                     <Input
                       type="number"
-                      min={1024}
+                      min={1}
                       max={65535}
                       value={range.start}
                       disabled={busy}
@@ -410,7 +447,7 @@ export function NodeFRPSTab({
                     <span className="text-muted-foreground">—</span>
                     <Input
                       type="number"
-                      min={1024}
+                      min={1}
                       max={65535}
                       value={range.end}
                       disabled={busy}

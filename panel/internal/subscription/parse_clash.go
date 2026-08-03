@@ -173,12 +173,18 @@ func clashMapToEndpoint(m map[string]any) (ProxyEndpoint, error) {
 		return ProxyEndpoint{}, fmt.Errorf("不支持类型 %q", typ)
 	}
 
+	var skipVerify *bool
+	if v, ok := m["skip-cert-verify"]; ok {
+		skip := anyToBool(v)
+		skipVerify = &skip
+	}
 	return ProxyEndpoint{
-		Name:     sanitizeName(name),
-		Server:   server,
-		Port:     port,
-		Protocol: protocol,
-		Params:   params,
+		Name:          sanitizeName(name),
+		Server:        server,
+		Port:          port,
+		Protocol:      protocol,
+		Params:        params,
+		TLSSkipVerify: skipVerify,
 	}, nil
 }
 

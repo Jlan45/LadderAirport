@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/tooltip'
 import {
   Plus,
+  Power,
   RefreshCw,
   Edit,
   Copy,
@@ -61,18 +62,24 @@ import {
   createSubscription,
   deleteExternalSource,
   deleteSubscription,
+  disableSubscription,
+  enableSubscription,
+  getSettings,
   listExternalSources,
   listInbounds,
   listProxyChains,
+  listRoutePlans,
   listSubscriptions,
   previewExternalSource,
   previewSubscription,
   refreshExternalSource,
+  rotateSubscriptionToken,
   updateExternalSource,
   updateSubscription,
   type ExternalSource,
   type InboundConfig,
   type ProxyChain,
+  type RoutePlan,
   type Subscription,
 } from '../api/client'
 import { copyText } from '../lib/clipboard'
@@ -93,6 +100,7 @@ type SubscriptionEditor = {
   includeAllChains: boolean
   chainIds: Set<string>
   sourceIds: Set<string>
+  routePlanId: string
 }
 
 type SourceEditor = {
@@ -117,6 +125,7 @@ const EMPTY_SUB_EDITOR: SubscriptionEditor = {
   includeAllChains: true,
   chainIds: new Set(),
   sourceIds: new Set(),
+  routePlanId: '',
 }
 
 const EMPTY_SOURCE_EDITOR: SourceEditor = {
@@ -134,6 +143,7 @@ export default function Subscriptions() {
   const [inbounds, setInbounds] = useState<InboundConfig[]>([])
   const [sources, setSources] = useState<ExternalSource[]>([])
   const [chains, setChains] = useState<ProxyChain[]>([])
+  const [routePlans, setRoutePlans] = useState<RoutePlan[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [pending, setPending] = useState<Set<string>>(new Set())
@@ -156,6 +166,8 @@ export default function Subscriptions() {
   const loadVersion = useRef(0)
   const pendingRef = useRef<Set<string>>(new Set())
   const savingRef = useRef(false)
+  const copyTimerRef = useRef<number | undefined>(undefined)
+  const [publicBaseUrl, setPublicBaseUrl] = useState('')
 
   const load = useCallback(async () => {
     if (savingRef.current || pendingRef.current.size > 0) return
@@ -167,6 +179,7 @@ export default function Subscriptions() {
       listInbounds(),
       listExternalSources(),
       listProxyChains(),
+      listRoutePlans(),
     ])
     if (version !== loadVersion.current) return
 
@@ -179,6 +192,8 @@ export default function Subscriptions() {
     else errors.push(errorText(results[2].reason, '外部源列表加载失败'))
     if (results[3].status === 'fulfilled') setChains(results[3].value ?? [])
     else errors.push(errorText(results[3].reason, '代理链列表加载失败'))
+    if (results[4].status === 'fulfilled') setRoutePlans(results[4].value ?? [])
+    else errors.push(errorText(results[4].reason, '路由计划列表加载失败'))
     setLoadError(errors.join('；'))
     setLoading(false)
   }, [])
@@ -186,6 +201,26 @@ export default function Subscriptions() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    let cancelled = false
+    getSettings()
+      .then((settings) => {
+        if (!cancelled) setPublicBaseUrl((settings.public_base_url || '').replace(/\/+$/, ''))
+      })
+      .catch(() => {
+        // Fall back to window.location.origin when settings are unavailable.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== undefined) window.clearTimeout(copyTimerRef.current)
+    }
+  }, [])
 
   function beginOperation(key: string): boolean {
     const separator = key.lastIndexOf(':')
@@ -264,6 +299,7 @@ export default function Subscriptions() {
       includeAllChains: subscription.include_all_chains ?? false,
       chainIds: new Set(subscription.chain_ids ?? []),
       sourceIds: new Set(subscription.external_source_ids ?? []),
+      routePlanId: subscription.route_plan_id ?? '',
     })
   }
 
@@ -324,6 +360,7 @@ export default function Subscriptions() {
       include_all_chains: subEditor.includeAllChains,
       chain_ids: subEditor.includeAllChains ? [] : Array.from(subEditor.chainIds),
       external_source_ids: Array.from(subEditor.sourceIds),
+      route_plan_id: subEditor.routePlanId,
     }
     try {
       const saved = subEditor.id
@@ -363,6 +400,8 @@ export default function Subscriptions() {
   }
 
   const [rotateTarget, setRotateTarget] = useState<Subscription | null>(null)
+  const [rotatedLink, setRotatedLink] = useState<{ name: string; url: string } | null>(null)
+  const [rotatedCopied, setRotatedCopied] = useState(false)
   const [deleteSubTarget, setDeleteSubTarget] = useState<Subscription | null>(null)
 
   function onRequestRotateToken(sub: Subscription) {
@@ -376,11 +415,56 @@ export default function Subscriptions() {
     const key = `subscription-rotate:${subscription.id}`
     if (!beginOperation(key)) return
     try {
-      const updated = await updateSubscription(subscription.id, { rotate_token: true })
-      setSubscriptions((current) => current.map((item) => (item.id === updated.id ? updated : item)))
-      toast.success('Token 已重置，旧链接已失效')
+      const rotated = await rotateSubscriptionToken(subscription.id)
+      // 重新拉取以拿到后端下发的权威 URL；失败时退回 /sub/{token} 拼接。
+      const latest = await listSubscriptions().catch(() => null)
+      if (latest) setSubscriptions(latest)
+      const refreshed = latest?.find((item) => item.id === subscription.id)
+      const path = refreshed?.url || `/sub/${rotated.token}`
+      setRotatedCopied(false)
+      setRotatedLink({ name: subscription.name, url: getFullSubscriptionUrl(path) })
+      toast.success('订阅链接已重置，旧链接已失效')
     } catch (err) {
-      toast.error(errorText(err, '重置 Token 失败'))
+      toast.error(errorText(err, '重置订阅链接失败'))
+    } finally {
+      endOperation(key)
+    }
+  }
+
+  async function copyRotatedLink() {
+    if (!rotatedLink) return
+    try {
+      await copyText(rotatedLink.url)
+      setRotatedCopied(true)
+      toast.success('已复制新订阅链接')
+      if (copyTimerRef.current !== undefined) window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = window.setTimeout(() => setRotatedCopied(false), 2000)
+    } catch {
+      toast.error('复制失败')
+    }
+  }
+
+  async function toggleSubscriptionDisabled(subscription: Subscription) {
+    const key = `subscription-disable:${subscription.id}`
+    if (!beginOperation(key)) return
+    try {
+      if (subscription.disabled) await enableSubscription(subscription.id)
+      else await disableSubscription(subscription.id)
+      const latest = await listSubscriptions().catch(() => null)
+      if (latest) {
+        setSubscriptions(latest)
+      } else {
+        setSubscriptions((current) =>
+          current.map((item) =>
+            item.id === subscription.id ? { ...item, disabled: !subscription.disabled } : item,
+          ),
+        )
+      }
+      toast.success(
+        subscription.disabled ? '订阅已启用，公开链接恢复访问' : '订阅已停用，公开链接将返回 404',
+      )
+    } catch (err) {
+      toast.error(errorText(err, subscription.disabled ? '启用订阅失败' : '停用订阅失败'))
     } finally {
       endOperation(key)
     }
@@ -487,7 +571,7 @@ export default function Subscriptions() {
     const body = {
       name,
       url,
-      interval_seconds: Math.floor(interval),
+      refresh_interval_sec: Math.floor(interval),
       headers,
       enabled: sourceEditor.enabled,
     }
@@ -563,8 +647,8 @@ export default function Subscriptions() {
   function getFullSubscriptionUrl(path: string | undefined): string {
     if (!path) return ''
     if (path.startsWith('http://') || path.startsWith('https://')) return path
-    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-    return `${origin}${path.startsWith('/') ? '' : '/'}${path}`
+    const base = publicBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '')
+    return `${base}${path.startsWith('/') ? '' : '/'}${path}`
   }
 
   async function copySubscriptionUrl(path: string | undefined, id: string) {
@@ -573,7 +657,8 @@ export default function Subscriptions() {
       await copyText(fullUrl)
       setCopiedId(id)
       toast.success('已复制完整订阅链接')
-      setTimeout(() => setCopiedId(null), 2000)
+      if (copyTimerRef.current !== undefined) window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = window.setTimeout(() => setCopiedId(null), 2000)
     } catch {
       toast.error('复制失败')
     }
@@ -693,6 +778,11 @@ export default function Subscriptions() {
                             >
                               通用分发 (Clash / sing-box / V2Ray)
                             </Badge>
+                            {sub.disabled && (
+                              <Badge variant="destructive" className="text-[11px]">
+                                已停用
+                              </Badge>
+                            )}
                           </div>
                         </div>
 
@@ -809,16 +899,32 @@ export default function Subscriptions() {
 
                       {/* Footer Actions */}
                       <div className="flex items-center justify-between pt-3 border-t border-border text-xs text-muted-foreground">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => onRequestRotateToken(sub)}
-                          loading={subPending}
-                          disabled={subPending}
-                          className="h-7 text-xs text-muted-foreground hover:text-warning px-2 cursor-pointer gap-1"
-                        >
-                          <RotateCw className="h-3 w-3" /> 重置 Token
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => onRequestRotateToken(sub)}
+                            loading={subPending}
+                            disabled={subPending}
+                            className="h-7 text-xs text-muted-foreground hover:text-warning px-2 cursor-pointer gap-1"
+                          >
+                            <RotateCw className="h-3 w-3" /> 重置链接
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void toggleSubscriptionDisabled(sub)}
+                            loading={subPending}
+                            disabled={subPending}
+                            className={`h-7 text-xs px-2 cursor-pointer gap-1 ${
+                              sub.disabled
+                                ? 'text-success hover:text-success/80'
+                                : 'text-muted-foreground hover:text-destructive'
+                            }`}
+                          >
+                            <Power className="h-3 w-3" /> {sub.disabled ? '启用' : '停用'}
+                          </Button>
+                        </div>
 
                         <div className="flex items-center gap-1">
                           <Button
@@ -1138,6 +1244,28 @@ export default function Subscriptions() {
               )}
             </div>
 
+            <div className="space-y-2 pt-2 border-t border-zinc-900">
+              <Label className="text-xs text-zinc-300 block">路由计划</Label>
+              <p className="text-[10px] text-zinc-500 -mt-0.5">
+                按规则决定订阅内流量走代理链、直连或拦截；仅可选择订阅级路由计划
+              </p>
+              <select
+                value={subEditor.routePlanId}
+                onChange={(e) => setSubEditor({ ...subEditor, routePlanId: e.target.value })}
+                className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 cursor-pointer"
+              >
+                <option value="">无</option>
+                {routePlans
+                  .filter((plan) => plan.scope === 'subscription')
+                  .map((plan) => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.name}
+                      {plan.enabled ? '' : '（已停用）'}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
             <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
               <Label className="text-xs text-zinc-300">启用该订阅分发</Label>
               <Switch
@@ -1340,11 +1468,45 @@ export default function Subscriptions() {
         </DialogContent>
       </Dialog>
 
+      {/* Rotated Link Result Modal */}
+      <Dialog open={rotatedLink !== null} onOpenChange={(v) => !v && setRotatedLink(null)}>
+        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4 shadow-xl">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-base font-bold text-zinc-100">
+              订阅链接已重置 · {rotatedLink?.name}
+            </DialogTitle>
+            <p className="text-xs text-zinc-400">
+              旧链接已立即作废，请将下方新链接更新到所有客户端。
+            </p>
+          </DialogHeader>
+
+          <div className="flex items-center gap-2 p-2 rounded-lg bg-zinc-900 border border-zinc-800">
+            <code className="text-xs font-mono text-zinc-100 break-all flex-1 select-all px-1">
+              {rotatedLink?.url}
+            </code>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setRotatedLink(null)}
+              className="border-zinc-800 cursor-pointer"
+            >
+              关闭
+            </Button>
+            <Button onClick={() => void copyRotatedLink()} className="cursor-pointer gap-1.5">
+              {rotatedCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              一键复制
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Rotate Token Confirm Modal */}
       <ConfirmModal
         open={!!rotateTarget}
-        title="重置订阅 Token"
-        description={`确定重置「${rotateTarget?.name || ''}」的订阅 Token 吗？重置后旧链接将立即失效。`}
+        title="重置订阅链接"
+        description={`确定重置「${rotateTarget?.name || ''}」的订阅链接吗？重置后旧链接将立即作废，所有使用旧链接的客户端都需要更新。`}
         confirmText="确认重置"
         confirmVariant="default"
         onConfirm={() => void confirmRotateSubscriptionToken()}

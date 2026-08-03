@@ -114,3 +114,90 @@ func TestBuildOverlaysManagedTLSWithoutMutatingGlobalInbound(t *testing.T) {
 		t.Fatalf("managed chain endpoint = %+v", endpoint)
 	}
 }
+
+func TestResolveManagedTLSIndexedMatchesPerNodeLookup(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	node := &store.Node{Name: "edge", Address: "192.0.2.10", GRPCPort: 50051, Status: "online"}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	managed := &store.InboundConfig{
+		Name: "trojan", Protocol: "trojan", Enabled: true,
+		Params: map[string]any{"listen": "0.0.0.0", "port": 443, "password": "secret"},
+	}
+	plain := &store.InboundConfig{
+		Name: "ss", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{"listen": "0.0.0.0", "port": 8388, "method": "aes-128-gcm", "password": "p"},
+	}
+	for _, in := range []*store.InboundConfig{managed, plain} {
+		if err := st.CreateInbound(in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SetNodeInbounds(node.ID, []string{managed.ID, plain.ID}); err != nil {
+		t.Fatal(err)
+	}
+	dnsAccount := &store.DNSAccount{
+		Name: "DNS", Provider: "cloudflare", Zone: "example.com",
+		CredentialsCiphertext: "encrypted", Settings: map[string]any{}, Enabled: true,
+	}
+	if err := st.CreateDNSAccount(dnsAccount); err != nil {
+		t.Fatal(err)
+	}
+	domain := &store.ManagedDomain{
+		NodeID: node.ID, DNSAccountID: dnsAccount.ID, Zone: "example.com",
+		FQDN: "edge.example.com", RecordMode: "a", AddressSource: "manual",
+		ManualIPv4: "192.0.2.10", TTL: 300, Enabled: true, State: "ready",
+	}
+	if err := st.CreateManagedDomain(domain); err != nil {
+		t.Fatal(err)
+	}
+	acmeAccount := &store.ACMEAccount{
+		Name: "CA", DirectoryURL: "https://ca.example/directory",
+		AccountKeyCiphertext: "encrypted", Status: "active",
+	}
+	if err := st.CreateACMEAccount(acmeAccount); err != nil {
+		t.Fatal(err)
+	}
+	certificate := &store.ProtocolCertificate{
+		NodeID: node.ID, ManagedDomainID: domain.ID, ACMEAccountID: acmeAccount.ID,
+		Domains: []string{domain.FQDN}, Status: "active",
+		ActiveCertPath: "/managed/r1/fullchain.pem",
+		ActiveKeyPath:  "/managed/r1/privkey.pem", Revision: 1,
+	}
+	if err := st.CreateProtocolCertificate(certificate); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutNodeInboundTLSBinding(&store.NodeInboundTLSBinding{
+		NodeID: node.ID, InboundID: managed.ID, Mode: "managed",
+		ManagedDomainID: domain.ID, CertificateID: certificate.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	b := &Builder{Store: st}
+	idx, err := b.LoadManagedTLSIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []*store.InboundConfig{managed, plain} {
+		want, wantHost, wantManaged, err := b.ResolveManagedTLS(node.ID, *in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, gotHost, gotManaged, err := b.ResolveManagedTLSIndexed(idx, node.ID, *in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gotManaged != wantManaged || gotHost != wantHost {
+			t.Fatalf("inbound %s: indexed=(%v,%q) direct=(%v,%q)", in.Name, gotManaged, gotHost, wantManaged, wantHost)
+		}
+		if wantManaged && got.Params["tls_cert_path"] != want.Params["tls_cert_path"] {
+			t.Fatalf("inbound %s: params diverge: %+v vs %+v", in.Name, got.Params, want.Params)
+		}
+	}
+}

@@ -156,12 +156,47 @@ func TestNodeFRPSRejectsUnsafeConfiguration(t *testing.T) {
 	}
 	response, payload := doJSON(t, client, http.MethodPut,
 		ts.URL+"/api/v1/nodes/"+node.ID+"/frps", map[string]any{
-			"enabled": true, "bind_addr": "0.0.0.0", "bind_port": 80,
+			"enabled": true, "bind_addr": "0.0.0.0", "bind_port": 65536,
 			"proxy_bind_addr": "0.0.0.0",
 			"allow_ports":     []map[string]int{{"start": 20000, "end": 20100}},
 		})
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, response = %#v", response.StatusCode, payload)
+	}
+}
+
+func TestNodeFRPSAcceptsPrivilegedPorts(t *testing.T) {
+	live := &frpsMockLive{mockLive: &mockLive{pingOK: true}, state: "stopped"}
+	ts, client, st := newTestServer(t, nil, func(
+		context.Context, store.Node, string,
+	) (api.NodeLive, error) {
+		return live, nil
+	})
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	node := &store.Node{
+		Name: "frps-privileged", Address: "127.0.0.1", GRPCPort: 50051,
+		Status: "online", Capabilities: []string{"frps-v1"},
+	}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	response, payload := doJSON(t, client, http.MethodPut,
+		ts.URL+"/api/v1/nodes/"+node.ID+"/frps", map[string]any{
+			"enabled": true, "bind_addr": "0.0.0.0", "bind_port": 80,
+			"proxy_bind_addr": "0.0.0.0",
+			"allow_ports":     []map[string]int{{"start": 443, "end": 443}},
+		})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, response = %#v", response.StatusCode, payload)
+	}
+	if live.lastConfig.GetBindPort() != 80 {
+		t.Fatalf("agent bind port = %d, want 80", live.lastConfig.GetBindPort())
+	}
+	if len(live.lastConfig.GetAllowPorts()) != 1 ||
+		live.lastConfig.GetAllowPorts()[0].GetStart() != 443 ||
+		live.lastConfig.GetAllowPorts()[0].GetEnd() != 443 {
+		t.Fatalf("allow ports = %+v", live.lastConfig.GetAllowPorts())
 	}
 }
 
@@ -222,5 +257,115 @@ func TestNodeFRPSAutoFillsSafeDefaultsAndToken(t *testing.T) {
 	}
 	if response.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("Cache-Control = %q", response.Header.Get("Cache-Control"))
+	}
+}
+
+func createFRPSTestDomain(t *testing.T, st *store.Store, nodeID, fqdn string, enabled bool) *store.ManagedDomain {
+	t.Helper()
+	account := &store.DNSAccount{
+		ID: "acct-" + nodeID, Name: "acct-" + nodeID, Provider: "memory",
+		Zone: "example.com", Enabled: true,
+	}
+	if err := st.CreateDNSAccount(account); err != nil {
+		t.Fatal(err)
+	}
+	domain := &store.ManagedDomain{
+		NodeID: nodeID, DNSAccountID: account.ID, Zone: "example.com",
+		FQDN: fqdn, RecordMode: "a", AddressSource: "agent_public",
+		Enabled: enabled, State: "ready",
+	}
+	if err := st.CreateManagedDomain(domain); err != nil {
+		t.Fatal(err)
+	}
+	return domain
+}
+
+func TestNodeFRPSManagedDomainBinding(t *testing.T) {
+	live := &frpsMockLive{mockLive: &mockLive{pingOK: true}, state: "stopped"}
+	ts, client, st := newTestServer(t, nil, func(
+		context.Context, store.Node, string,
+	) (api.NodeLive, error) {
+		return live, nil
+	})
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	node := &store.Node{
+		Name: "frps-node", Address: "192.0.2.20", GRPCPort: 50051,
+		Status: "online", Capabilities: []string{"frps-v1"},
+	}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	domain := createFRPSTestDomain(t, st, node.ID, "frps.example.com", true)
+
+	body := map[string]any{
+		"enabled": true, "auth_token": "frps-secret-token",
+		"managed_domain_id": domain.ID,
+	}
+	response, payload := doJSON(
+		t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+node.ID+"/frps", body,
+	)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status = %d, response = %#v", response.StatusCode, payload)
+	}
+	if payload["managed_domain_id"] != domain.ID {
+		t.Fatalf("managed_domain_id = %#v", payload["managed_domain_id"])
+	}
+	if payload["server_addr"] != "frps.example.com" {
+		t.Fatalf("server_addr = %#v, want bound fqdn", payload["server_addr"])
+	}
+
+	response, payload = doJSON(
+		t, client, http.MethodGet, ts.URL+"/api/v1/nodes/"+node.ID+"/frps", nil,
+	)
+	if response.StatusCode != http.StatusOK || payload["server_addr"] != "frps.example.com" {
+		t.Fatalf("GET status = %d, server_addr = %#v", response.StatusCode, payload["server_addr"])
+	}
+
+	// Clearing the binding falls back to the node address for display only.
+	body["managed_domain_id"] = ""
+	response, payload = doJSON(
+		t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+node.ID+"/frps", body,
+	)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unbind PUT status = %d, response = %#v", response.StatusCode, payload)
+	}
+	if _, bound := payload["managed_domain_id"]; bound {
+		t.Fatalf("managed_domain_id should be cleared: %#v", payload)
+	}
+	if payload["server_addr"] != "192.0.2.20" {
+		t.Fatalf("server_addr = %#v, want node address fallback", payload["server_addr"])
+	}
+}
+
+func TestNodeFRPSManagedDomainBindingValidation(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	node := &store.Node{Name: "frps-node", Address: "192.0.2.20", GRPCPort: 50051}
+	other := &store.Node{Name: "other-node", Address: "192.0.2.30", GRPCPort: 50051}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateNode(other); err != nil {
+		t.Fatal(err)
+	}
+	otherDomain := createFRPSTestDomain(t, st, other.ID, "other.example.com", true)
+	disabledDomain := createFRPSTestDomain(t, st, node.ID, "disabled.example.com", false)
+
+	cases := map[string]map[string]any{
+		"cross node":    {"enabled": false, "managed_domain_id": otherDomain.ID},
+		"missing":       {"enabled": false, "managed_domain_id": "no-such-domain"},
+		"disabled fqdn": {"enabled": false, "managed_domain_id": disabledDomain.ID},
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			response, payload := doJSON(
+				t, client, http.MethodPut, ts.URL+"/api/v1/nodes/"+node.ID+"/frps", body,
+			)
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400, response = %#v", response.StatusCode, payload)
+			}
+		})
 	}
 }

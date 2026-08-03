@@ -8,6 +8,7 @@ require (
 	github.com/ladderairport/proto v0.0.0
 	github.com/sagernet/sing v0.7.18
 	github.com/sagernet/sing-box v1.12.22
+	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.82.0
 )
 
@@ -143,7 +144,6 @@ require (
 	golang.org/x/mod v0.37.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/term v0.44.0 // indirect
 	golang.org/x/text v0.40.0 // indirect

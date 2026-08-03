@@ -3,7 +3,6 @@ package api
 import (
 	"crypto/subtle"
 	"crypto/x509"
-	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -37,8 +36,8 @@ func (s *Server) handleIssueAgentCertificate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req issueAgentCertificateRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	req.NodeID = strings.TrimSpace(req.NodeID)
@@ -203,8 +202,8 @@ func (s *Server) handleRevokePKICertificate(w http.ResponseWriter, r *http.Reque
 		Reason string `json:"reason"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+		if err := decodeJSON(w, r, &body); err != nil {
+			writeDecodeError(w, err)
 			return
 		}
 	}

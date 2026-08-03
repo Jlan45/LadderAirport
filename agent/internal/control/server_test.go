@@ -3,6 +3,8 @@ package control_test
 import (
 	"context"
 	"net"
+	"runtime"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -143,8 +145,14 @@ func TestPingCapabilityAndProbeOutbound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ping.Capabilities) != 1 || ping.Capabilities[0] != "proxy_chain_v1" {
-		t.Fatalf("capabilities = %v", ping.Capabilities)
+	wantCapabilities := []string{"proxy_chain_v1"}
+	if runtime.GOOS == "linux" {
+		wantCapabilities = append(wantCapabilities, "node-metrics-v1", "bbr-v1")
+	}
+	for _, capability := range wantCapabilities {
+		if !slices.Contains(ping.Capabilities, capability) {
+			t.Fatalf("capabilities = %v，缺少 %q", ping.Capabilities, capability)
+		}
 	}
 	probe, err := client.ProbeOutbound(ctx, &agentv1.ProbeOutboundRequest{
 		OutboundTag: "chain-next",
@@ -160,5 +168,69 @@ func TestPingCapabilityAndProbeOutbound(t *testing.T) {
 	defer rt.mu.Unlock()
 	if rt.probeTag != "chain-next" || rt.probeURL != "https://probe.example/204" {
 		t.Fatalf("runtime probe args = %q %q", rt.probeTag, rt.probeURL)
+	}
+}
+
+// StreamLogs must deliver the historical tail and then live lines, without
+// dropping or duplicating lines appended around the subscribe/tail boundary.
+func TestStreamLogsHistoryThenLive(t *testing.T) {
+	rt := &stubRuntime{state: control.StateStopped}
+	logs := control.NewLogBuf(0)
+	logs.Append("info", "history-1")
+	logs.Append("warn", "history-2")
+
+	lis := bufconn.Listen(bufSize)
+	s := grpc.NewServer(
+		grpc.UnaryInterceptor(auth.UnaryServerInterceptor("secret")),
+		grpc.StreamInterceptor(auth.StreamServerInterceptor("secret")),
+	)
+	agentv1.RegisterAgentControlServer(s, control.NewServer(rt, "0.1.0-test", "sing-box-test", logs))
+	go func() {
+		_ = s.Serve(lis)
+	}()
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = conn.Close()
+		s.Stop()
+	}()
+
+	client := agentv1.NewAgentControlClient(conn)
+	ctx := auth.AppendBearerToken(context.Background(), "secret")
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	stream, err := client.StreamLogs(streamCtx, &agentv1.StreamLogsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	received := map[string]int{}
+	for i := 0; i < 2; i++ {
+		line, err := stream.Recv()
+		if err != nil {
+			t.Fatalf("recv history %d: %v", i, err)
+		}
+		received[line.Message]++
+	}
+	// Append after the tail was delivered: must arrive live, exactly once.
+	logs.Append("info", "live-1")
+	line, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("recv live: %v", err)
+	}
+	received[line.Message]++
+
+	want := map[string]int{"history-1": 1, "history-2": 1, "live-1": 1}
+	for message, count := range want {
+		if received[message] != count {
+			t.Fatalf("message %q received %d times (all: %v)", message, received[message], received)
+		}
 	}
 }

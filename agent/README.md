@@ -19,7 +19,6 @@ FRPS follows the same source pinning model:
 | Pinned tag | `v0.69.0` |
 | Submodule path | `agent/frp` |
 | Go module | `github.com/fatedier/frp` |
-| Default build tags | `with_quic,with_utls` |
 
 `agent/go.mod` uses:
 
@@ -49,7 +48,7 @@ Agent always uses **in-process sing-box** (`control.BoxRuntime`). FRPS is also l
 
 The runtimes are independent: applying or stopping FRPS does not restart sing-box. The latest FRPS configuration is stored as `frps/frps-current.json` under the Agent data directory with mode `0600`, restored at Agent startup, and controlled through the `frps-v1` gRPC capability.
 
-Log line on start: `runtime=box agent_version=... singbox_version=...`.
+Log line on start: `运行模式=内置代理实例 Agent版本=... sing-box版本=... frps版本=... 数据目录=...`.
 
 ## Build
 
@@ -119,14 +118,14 @@ All Apply/Start/Stop share one mutex — concurrent Panel RPCs queue, never dual
 |-------|--------|
 | `Connections` | Active routed connections via in-process `ConnectionTracker` |
 | `UplinkBytes` / `DownlinkBytes` | Cumulative bytes (client→node / node→client); survives hot-reload |
-| `MemoryRSSBytes` | `runtime.MemStats.Sys` (approx process memory, not exact RSS) |
+| `MemoryRSSBytes` | Linux: `/proc/self/statm` RSS; other platforms fall back to `runtime.MemStats.Sys` |
 | `CPUPercent` | Linux: `/proc/self/stat` sample between polls; first sample is 0 |
 
 ## Upgrade policy
 
 1. Bump submodule to a new **stable** tag (`v1.12.x` or `v1.13.x`).
-2. Update `agent/go.mod` require version comment, `SingboxVersion` fallback, Makefile/`AGENT_LDFLAGS`, CI env.
-3. Fix glue under `agent/internal` only if APIs break (do not edit upstream tree under `agent/sing-box/` unless deliberately forking).
+2. Update the `agent/go.mod` require version + comment and the `SingboxVersion` fallback in `runtime_box.go`; Makefile and CI derive `SINGBOX_VERSION` from the submodule tag automatically.
+3. Fix glue under `agent/internal` only if APIs break.
 4. Run `make test` and a short Apply/Start smoke.
 
 Do not edit upstream files under `agent/sing-box/` unless deliberately forking; keep 二开 glue in `agent/internal` and `agent/cmd`.

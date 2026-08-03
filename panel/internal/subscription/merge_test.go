@@ -2,8 +2,11 @@ package subscription
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDedupeSameIPDifferentPortKept(t *testing.T) {
@@ -187,5 +190,49 @@ func TestMergeDropsPlaceholderExternal(t *testing.T) {
 		if ep.Server == "0.0.0.0" {
 			t.Fatalf("placeholder leaked: %+v", ep)
 		}
+	}
+}
+
+func TestDedupeConcurrentLookupBounded(t *testing.T) {
+	orig := lookupHostIPs
+	t.Cleanup(func() { lookupHostIPs = orig })
+	var inflight atomic.Int32
+	var peak atomic.Int32
+	lookupHostIPs = func(ctx context.Context, host string) ([]net.IP, error) {
+		cur := inflight.Add(1)
+		for {
+			prev := peak.Load()
+			if cur <= prev || peak.CompareAndSwap(prev, cur) {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		inflight.Add(-1)
+		return []net.IP{net.ParseIP("10.9.9.9")}, nil
+	}
+
+	eps := make([]ProxyEndpoint, 0, 16)
+	for i := 0; i < 16; i++ {
+		eps = append(eps, ProxyEndpoint{
+			Name: fmt.Sprintf("h%d", i), Server: fmt.Sprintf("h%d.example.com", i),
+			Port: 443, Protocol: "trojan",
+		})
+	}
+	start := time.Now()
+	out := dedupeByHost(context.Background(), eps)
+	elapsed := time.Since(start)
+	// All hosts resolve to the same IP:port — only the first survives.
+	if len(out) != 1 || out[0].Name != "h0" {
+		t.Fatalf("%+v", out)
+	}
+	if got := peak.Load(); got > hostLookupConcurrency {
+		t.Fatalf("lookup concurrency %d exceeds limit %d", got, hostLookupConcurrency)
+	}
+	if peak.Load() < 2 {
+		t.Fatalf("lookups did not run concurrently (peak=%d)", peak.Load())
+	}
+	// Serial would take 16*20ms = 320ms; bounded concurrency needs ~2 rounds.
+	if elapsed > 300*time.Millisecond {
+		t.Fatalf("lookups look serial: %s", elapsed)
 	}
 }

@@ -9,11 +9,15 @@ User=ladder
 Group=ladder
 WorkingDirectory=/var/lib/ladder-agent
 EnvironmentFile=/etc/ladder-agent/agent.env
-ExecStart=/usr/local/bin/ladder-agent -listen=${LADDER_LISTEN} -token=${LADDER_TOKEN} -data-dir=${LADDER_DATA_DIR} -tls-cert=${LADDER_TLS_CERT} -tls-key=${LADDER_TLS_KEY} -tls-client-ca=${LADDER_TLS_CLIENT_CA} -panel-url=${LADDER_PANEL_URL} -node-id=${LADDER_NODE_ID} -report-address=${LADDER_REPORT_ADDRESS} -tls-sans=${LADDER_TLS_EXTRA_SANS}
+# LADDER_TOKEN 由 EnvironmentFile 注入环境（agent 从环境变量回退读取），不放命令行
+ExecStart=/usr/local/bin/ladder-agent -listen=${LADDER_LISTEN} -data-dir=${LADDER_DATA_DIR} -tls-cert=${LADDER_TLS_CERT} -tls-key=${LADDER_TLS_KEY} -tls-client-ca=${LADDER_TLS_CLIENT_CA} -panel-url=${LADDER_PANEL_URL} -node-id=${LADDER_NODE_ID} -report-address=${LADDER_REPORT_ADDRESS} -tls-sans=${LADDER_TLS_EXTRA_SANS}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
 NoNewPrivileges=true
+# NoNewPrivileges=true 下 file capabilities 不生效；用 AmbientCapabilities 授予
+# 非 root 监听 1024 以下端口能力（与二进制上的 setcap cap_net_bind_service+ep 并存）
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/ladder-agent /etc/ladder-agent/tls

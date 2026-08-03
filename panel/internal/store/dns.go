@@ -332,6 +332,25 @@ func (s *Store) ListManagedDomains() ([]ManagedDomain, error) {
 	return out, rows.Err()
 }
 
+// ListManagedDomainsByNode returns managed domains bound to one node.
+func (s *Store) ListManagedDomainsByNode(nodeID string) ([]ManagedDomain, error) {
+	rows, err := s.db.Query(`SELECT `+managedDomainCols+`
+		FROM managed_domains WHERE node_id = ? ORDER BY fqdn`, nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("查询节点托管域名失败：%w", err)
+	}
+	defer rows.Close()
+	out := []ManagedDomain{}
+	for rows.Next() {
+		domain, err := scanManagedDomain(rows)
+		if err != nil {
+			return nil, fmt.Errorf("读取托管域名失败：%w", err)
+		}
+		out = append(out, *domain)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListManagedDomainsDue(now int64, limit int) ([]ManagedDomain, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100

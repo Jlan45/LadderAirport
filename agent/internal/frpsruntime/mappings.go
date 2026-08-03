@@ -13,7 +13,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -187,32 +190,43 @@ func (r *Runtime) Mappings(ctx context.Context) (MappingSnapshot, error) {
 		})
 	}
 
+	// Fetch all proxy types concurrently; each type is an independent admin call.
+	var mu sync.Mutex
+	group, groupCtx := errgroup.WithContext(ctx)
 	for _, proxyType := range proxyTypes {
-		var response adminProxyList
-		path := "/api/proxy/" + url.PathEscape(proxyType)
-		if err := getAdminJSONWithRetry(ctx, admin, path, &response); err != nil {
-			return MappingSnapshot{}, fmt.Errorf("读取 FRPS %s 映射失败：%w", proxyType, err)
-		}
-		for _, item := range response.Proxies {
-			if !strings.EqualFold(item.Status, "online") {
-				continue
+		group.Go(func() error {
+			var response adminProxyList
+			path := "/api/proxy/" + url.PathEscape(proxyType)
+			if err := getAdminJSONWithRetry(groupCtx, admin, path, &response); err != nil {
+				return fmt.Errorf("读取 FRPS %s 映射失败：%w", proxyType, err)
 			}
-			resolvedType := item.Conf.Type
-			if resolvedType == "" {
-				resolvedType = proxyType
+			mu.Lock()
+			defer mu.Unlock()
+			for _, item := range response.Proxies {
+				if !strings.EqualFold(item.Status, "online") {
+					continue
+				}
+				resolvedType := item.Conf.Type
+				if resolvedType == "" {
+					resolvedType = proxyType
+				}
+				snapshot.Mappings = append(snapshot.Mappings, Mapping{
+					Name: item.Name, Type: resolvedType, Status: item.Status,
+					User: item.User, ClientID: item.ClientID,
+					LocalIP: item.Conf.LocalIP, LocalPort: item.Conf.LocalPort,
+					RemotePort:         item.Conf.RemotePort,
+					CustomDomains:      append([]string{}, item.Conf.CustomDomains...),
+					Subdomain:          item.Conf.Subdomain,
+					CurrentConnections: item.CurConns,
+					TrafficInBytes:     item.TodayTrafficIn, TrafficOutBytes: item.TodayTrafficOut,
+					LastStartTime: item.LastStartTime, Plugin: item.Conf.Plugin.Type,
+				})
 			}
-			snapshot.Mappings = append(snapshot.Mappings, Mapping{
-				Name: item.Name, Type: resolvedType, Status: item.Status,
-				User: item.User, ClientID: item.ClientID,
-				LocalIP: item.Conf.LocalIP, LocalPort: item.Conf.LocalPort,
-				RemotePort:         item.Conf.RemotePort,
-				CustomDomains:      append([]string{}, item.Conf.CustomDomains...),
-				Subdomain:          item.Conf.Subdomain,
-				CurrentConnections: item.CurConns,
-				TrafficInBytes:     item.TodayTrafficIn, TrafficOutBytes: item.TodayTrafficOut,
-				LastStartTime: item.LastStartTime, Plugin: item.Conf.Plugin.Type,
-			})
-		}
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return MappingSnapshot{}, err
 	}
 	sort.Slice(snapshot.Clients, func(i, j int) bool {
 		left := snapshot.Clients[i].ClientID

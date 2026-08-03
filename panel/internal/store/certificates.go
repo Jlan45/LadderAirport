@@ -416,7 +416,40 @@ func (s *Store) ListNodeInboundTLSBindings(nodeID string) ([]NodeInboundTLSBindi
 		return nil, fmt.Errorf("查询节点入站 TLS 绑定失败：%w", err)
 	}
 	defer rows.Close()
-	out := []NodeInboundTLSBinding{}
+	bindings, err := scanNodeInboundTLSBindings(rows)
+	if err != nil {
+		return nil, err
+	}
+	if bindings == nil {
+		bindings = []NodeInboundTLSBinding{}
+	}
+	return bindings, nil
+}
+
+// ListAllNodeInboundTLSBindings returns every TLS binding in one query,
+// grouped by node ID, for bulk resolution (subscription rendering).
+func (s *Store) ListAllNodeInboundTLSBindings() (map[string][]NodeInboundTLSBinding, error) {
+	rows, err := s.db.Query(`
+		SELECT node_id, inbound_id, mode, managed_domain_id, certificate_id,
+			created_at_unix, updated_at_unix
+		FROM node_inbound_tls_bindings ORDER BY node_id, inbound_id`)
+	if err != nil {
+		return nil, fmt.Errorf("查询全部节点入站 TLS 绑定失败：%w", err)
+	}
+	defer rows.Close()
+	out := map[string][]NodeInboundTLSBinding{}
+	bindings, err := scanNodeInboundTLSBindings(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		out[binding.NodeID] = append(out[binding.NodeID], binding)
+	}
+	return out, nil
+}
+
+func scanNodeInboundTLSBindings(rows *sql.Rows) ([]NodeInboundTLSBinding, error) {
+	var out []NodeInboundTLSBinding
 	for rows.Next() {
 		var binding NodeInboundTLSBinding
 		var managedDomainID, certificateID sql.NullString

@@ -59,15 +59,6 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 		opts = append(opts, grpc.WithContextDialer(cfg.Dialer))
 	}
 
-	// Optional dial deadline for the NewClient call context (non-blocking connect).
-	dialCtx := ctx
-	if cfg.Timeout > 0 {
-		var cancel context.CancelFunc
-		dialCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
-		defer cancel()
-	}
-	_ = dialCtx // reserved for future blocking dial helpers
-
 	conn, err := grpc.NewClient(cfg.Address, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("连接 gRPC 地址 %s 失败：%w", cfg.Address, err)
@@ -225,6 +216,7 @@ func (c *Client) ListInterfaces(ctx context.Context) (*agentv1.ListInterfacesRes
 	return c.api.ListInterfaces(c.withAuth(ctx), &agentv1.ListInterfacesRequest{})
 }
 
+// GetPublicAddresses fetches the node's public IP addresses.
 func (c *Client) GetPublicAddresses(ctx context.Context, ipv4, ipv6 bool) (*agentv1.GetPublicAddressesResponse, error) {
 	return c.api.GetPublicAddresses(c.withAuth(ctx), &agentv1.GetPublicAddressesRequest{
 		Ipv4: ipv4, Ipv6: ipv6,
@@ -281,6 +273,25 @@ func (c *Client) UpgradeAgent(ctx context.Context, version, repo, downloadURL, s
 		DownloadUrl: downloadURL,
 		Sha256:      sha256,
 	})
+}
+
+// GetNodeMetrics fetches system-level node metrics (CPU/memory/disk/network
+// rates). Requires agent capability "node-metrics-v1"; callers must tolerate
+// codes.Unimplemented from older agents.
+func (c *Client) GetNodeMetrics(ctx context.Context) (*agentv1.GetNodeMetricsResponse, error) {
+	return c.api.GetNodeMetrics(c.withAuth(ctx), &agentv1.GetNodeMetricsRequest{})
+}
+
+// GetBBRStatus reports kernel TCP congestion-control state.
+// Requires agent capability "bbr-v1"; callers must tolerate codes.Unimplemented.
+func (c *Client) GetBBRStatus(ctx context.Context) (*agentv1.GetBBRStatusResponse, error) {
+	return c.api.GetBBRStatus(c.withAuth(ctx), &agentv1.GetBBRStatusRequest{})
+}
+
+// SetBBR enables or disables BBR congestion control on the node.
+// Requires agent capability "bbr-v1"; callers must tolerate codes.Unimplemented.
+func (c *Client) SetBBR(ctx context.Context, enabled bool) (*agentv1.SetBBRResponse, error) {
+	return c.api.SetBBR(c.withAuth(ctx), &agentv1.SetBBRRequest{Enabled: enabled})
 }
 
 // StreamLogs opens a server-streaming log subscription.

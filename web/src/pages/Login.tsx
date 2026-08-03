@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ApiError, listNodes, login } from '../api/client'
 import { toast } from '../lib/toast'
-import { LOGO_DARK_BASE64, LOGO_LIGHT_BASE64 } from '../lib/logos'
+import { LOGO_DARK_URL, LOGO_LIGHT_URL } from '../lib/logos'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -17,13 +17,13 @@ export default function Login() {
   const [busy, setBusy] = useState(false)
   const nextPath = safeNextPath(searchParams.get('next'))
 
-  const [logo, setLogo] = useState(LOGO_LIGHT_BASE64)
+  const [logo, setLogo] = useState(LOGO_LIGHT_URL)
 
   useEffect(() => {
     document.title = '登录 · Ladder Airport'
     const isDark = document.documentElement.classList.contains('dark') || 
                    localStorage.getItem('la-theme') === 'dark'
-    setLogo(isDark ? LOGO_DARK_BASE64 : LOGO_LIGHT_BASE64)
+    setLogo(isDark ? LOGO_DARK_URL : LOGO_LIGHT_URL)
   }, [])
 
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function Login() {
             className="space-y-4"
           >
             <div className="space-y-1.5">
-              <Label htmlFor="login-password font-medium">
+              <Label htmlFor="login-password" className="font-medium">
                 密码
               </Label>
               <Input

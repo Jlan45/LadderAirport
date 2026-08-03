@@ -9,19 +9,14 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
   | sudo bash
 ```
 
-指定 HTTP 监听与固定 session secret（**生产强烈建议**）：
+指定 HTTP 监听与版本（可选）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
-  | sudo LADDER_LISTEN=':8080' LADDER_SESSION_SECRET='你的长随机串' bash
+  | sudo LADDER_LISTEN=':8080' LADDER_VERSION=v0.3.1 bash
 ```
 
-指定版本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
-  | sudo LADDER_VERSION=v0.3.1 bash
-```
+预置初始管理员密码（可选）：安装时透传即可，如 `curl -fsSL .../install-panel.sh | sudo LADDER_ADMIN_PASSWORD='...' bash`，脚本会在 install 时把它写入 panel.env（已存在的 panel.env 不覆盖，仅补缺失键）；也可在**首次启动前**手动写入 `/etc/ladder-panel/panel.env`。不预置则随机生成并打印一次到日志。
 
 ### 行为说明
 
@@ -30,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 | 下载 | `panel-linux-amd64` 或 `arm64`（按 `uname -m`） |
 | 校验 | 若 Release 含 `SHA256SUMS.txt` 则自动校验 |
 | 安装 | `/usr/local/bin/ladder-panel` |
-| 配置 | `/etc/ladder-panel/panel.env`（已存在则不覆盖 secret） |
+| 配置 | `/etc/ladder-panel/panel.env`（已存在则不覆盖，仅补缺失键） |
 | 数据 | `/var/lib/ladder-panel/panel.db`（SQLite，`modernc` 纯 Go，无 CGO） |
 | 服务 | `ladder-panel.service` enable + restart |
 | 前端 | 二进制内嵌 SPA，无需单独部署 Nginx 静态文件 |
@@ -40,20 +35,23 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 使用本地已有二进制：
 
 ```bash
-sudo LADDER_SESSION_SECRET='你的长随机串' ./scripts/install-panel.sh /path/to/panel
+sudo ./scripts/install-panel.sh /path/to/panel
 ```
 
 在源码仓库内本地编译再装（使用已提交的 `panel/web/dist`，无需 npm）：
 
 ```bash
 cd LadderAirport
-sudo LADDER_SESSION_SECRET='你的长随机串' LADDER_FROM=local ./scripts/install-panel.sh
+sudo LADDER_FROM=local ./scripts/install-panel.sh
 ```
 
 ## 装完后
 
 1. 浏览器打开 `http://<panel-host>:8080`
-2. 默认管理员密码 **`admin`** → 立刻在「设置」修改
+2. 管理员密码**没有默认值**：首次启动自动生成随机初始密码并打印一次到日志
+   - 查看：`journalctl -u ladder-panel | grep 初始密码`
+   - 预置：安装时透传 `sudo LADDER_ADMIN_PASSWORD=... bash install-panel.sh`（脚本写入 panel.env），或首次启动前手动写入 `/etc/ladder-panel/panel.env`（仅数据库尚无密码哈希的首次初始化生效）
+   - 登录后立刻在「设置」修改
 3. 「设置」填写 **Public Base URL**（如 `https://panel.example.com`）
    - 用于生成完整订阅 URL
    - 用于「添加节点并生成安装命令」完成 PKI 注册
@@ -73,7 +71,8 @@ sudo cat /etc/ladder-panel/panel.env   # 含 session secret，权限 640
 | `LADDER_PURGE` | `0` | 仅卸载：`1` 时删除 conf/data/SQLite/用户 |
 | `LADDER_LISTEN` | `:8080` | HTTP 监听地址 |
 | `LADDER_DB` | `/var/lib/ladder-panel/panel.db` | SQLite 路径 |
-| `LADDER_SESSION_SECRET` | 随机生成 | JWT 会话 HMAC；固定后重启不掉登录（**upgrade 不会改**） |
+| `LADDER_ADMIN_PASSWORD` | 空 | 初始管理员密码，仅首次初始化生效：install 时透传（`sudo LADDER_ADMIN_PASSWORD=... bash install-panel.sh`）则写入 panel.env，也可手动写入 panel.env；为空则随机生成并打印一次到日志 |
+| `LADDER_SESSION_SECRET` | 自动生成 | JWT 会话 HMAC；install/upgrade 时缺失则生成随机值补写入 panel.env（已有值不改），Panel 进程兜底持久化到 `session.secret` |
 | `LADDER_BOOTSTRAP` | `true` | 启动时全量下发 + Start |
 | `LADDER_BOOTSTRAP_TIMEOUT` | `3m` | 首次 bootstrap 超时 |
 | `LADDER_BOOTSTRAP_RETRY` | `true` | 定时重试未就绪节点 |
@@ -135,6 +134,7 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 sudo cp -a /var/lib/ladder-panel/panel.db /root/panel.db.bak
 sudo cp -a /etc/ladder-panel/panel.env /root/panel.env.bak
 ```
+
 ## 防火墙 / 反代
 
 ```bash
@@ -174,8 +174,7 @@ server {
 
 ## 安全建议
 
-- 立刻改掉默认管理员密码 `admin`
-- 固定并备份 `LADDER_SESSION_SECRET`（丢失会导致所有会话失效）
-- 公网务必 HTTPS；不要把 `:8080` 裸奔暴露在 0.0.0.0
-- 定期备份 SQLite：`/var/lib/ladder-panel/panel.db`
+- 登录后立刻在「设置」修改初始管理员密码
+- 备份 panel.env（含 `LADDER_SESSION_SECRET`，丢失会导致所有会话失效）与 `/var/lib/ladder-panel/panel.db`
+- 公网务必经反代 HTTPS；不要把 `:8080` 直接暴露在 `0.0.0.0`
 - Panel 需要能访问各 Agent 的 gRPC 端口（默认 50051）

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"strings"
 
@@ -18,6 +19,9 @@ func AppendBearerToken(ctx context.Context, token string) context.Context {
 }
 
 func ValidateIncomingBearer(ctx context.Context, expected string) error {
+	if expected == "" {
+		return status.Error(codes.Unauthenticated, "服务端未配置访问令牌")
+	}
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return status.Error(codes.Unauthenticated, "缺少请求元数据")
@@ -32,7 +36,10 @@ func ValidateIncomingBearer(ctx context.Context, expected string) error {
 		return status.Error(codes.Unauthenticated, "身份认证方案无效")
 	}
 	got := strings.TrimPrefix(raw, prefix)
-	if subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
+	// 比较双方 SHA-256 摘要，使比较耗时与令牌长度无关，消除长度时序侧信道。
+	gotSum := sha256.Sum256([]byte(got))
+	expectedSum := sha256.Sum256([]byte(expected))
+	if subtle.ConstantTimeCompare(gotSum[:], expectedSum[:]) != 1 {
 		return status.Error(codes.Unauthenticated, "令牌无效")
 	}
 	return nil

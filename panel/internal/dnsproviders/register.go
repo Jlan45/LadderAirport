@@ -2,6 +2,7 @@ package dnsproviders
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/ladderairport/panel/internal/dnsprovider"
@@ -39,8 +40,11 @@ func newAliDNS(config dnsprovider.Config) (dnsprovider.Provider, error) {
 		RegionID:        strings.TrimSpace(config.Credentials["region_id"]),
 		SecurityToken:   strings.TrimSpace(config.Credentials["security_token"]),
 	}}
+	// alidns calls http.DefaultClient internally; the timeout is enforced via
+	// per-call context deadlines in libdnsProvider.
 	return &libdnsProvider{
 		name: "alidns", defaultZone: config.Zone, backend: backend,
+		httpTimeout: config.HTTPTimeout,
 	}, nil
 }
 
@@ -56,8 +60,11 @@ func newDNSPod(config dnsprovider.Config) (dnsprovider.Provider, error) {
 		SessionToken: strings.TrimSpace(config.Credentials["session_token"]),
 		Region:       strings.TrimSpace(config.Credentials["region"]),
 	}
+	// tencentcloud calls http.DefaultClient internally; the timeout is enforced
+	// via per-call context deadlines in libdnsProvider.
 	return &libdnsProvider{
 		name: "dnspod", defaultZone: config.Zone, backend: backend,
+		httpTimeout: config.HTTPTimeout,
 	}, nil
 }
 
@@ -69,8 +76,12 @@ func newCloudflare(config dnsprovider.Config) (dnsprovider.Provider, error) {
 	backend := &cloudflare.Provider{
 		APIToken: apiToken,
 	}
+	if config.HTTPTimeout > 0 {
+		backend.HTTPClient = &http.Client{Timeout: config.HTTPTimeout}
+	}
 	return &libdnsProvider{
 		name: "cloudflare", defaultZone: config.Zone, backend: backend,
+		httpTimeout: config.HTTPTimeout,
 	}, nil
 }
 

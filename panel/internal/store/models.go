@@ -32,6 +32,10 @@ type Node struct {
 	// EgressInterface is the host NIC name for sing-box direct bind_interface.
 	// Empty means OS default routing.
 	EgressInterface string `json:"egress_interface"`
+	// DDNSEnabled lets the DNS reconcile worker probe this node's public
+	// address (managed domains with address_source=agent_public). New nodes
+	// default to true; false pauses probing while keeping the schedule.
+	DDNSEnabled bool `json:"ddns_enabled"`
 	Status          string `json:"status"` // online | unreachable | unauthorized | unknown
 	LastSeenUnix    int64  `json:"last_seen_unix"`
 	ConfigHash      string `json:"config_hash"`
@@ -72,6 +76,9 @@ type FRPServerConfig struct {
 	HasAuthToken        bool                 `json:"has_auth_token"`
 	TLSForce            bool                 `json:"tls_force"`
 	MaxPortsPerClient   int64                `json:"max_ports_per_client"`
+	// ManagedDomainID optionally binds a managed domain as the frpc-facing
+	// server address. Display only — the agent-side FRPS bind config is unchanged.
+	ManagedDomainID     string               `json:"managed_domain_id,omitempty"`
 	DesiredHash         string               `json:"desired_hash"`
 	AppliedHash         string               `json:"applied_hash"`
 	RuntimeState        string               `json:"runtime_state"`
@@ -93,6 +100,7 @@ type NodeOperatorUpdate struct {
 	PublicAddress   *string        `json:"public_address"`
 	PortMappings    *[]PortMapping `json:"port_mappings"`
 	EgressInterface *string        `json:"egress_interface"`
+	DDNSEnabled     *bool          `json:"ddns_enabled"`
 }
 
 // NormalizePortMappings drops invalid/identity rows and keeps the last mapping per listen_port.
@@ -204,6 +212,12 @@ type Settings struct {
 	ChainProbeIntervalSec     int    `json:"chain_probe_interval_sec"`
 	ChainProbeTimeoutSec      int    `json:"chain_probe_timeout_sec"`
 	ChainSubscriptionMigrated bool   `json:"-"`
+	// SessionVersion revokes issued session tokens when bumped (logout /
+	// password change). Never serialized to API clients.
+	SessionVersion int64 `json:"-"`
+	// TrustedProxyCIDRs is a comma-separated list of proxy CIDRs whose
+	// X-Forwarded-Proto header is honored. Empty trusts no proxy.
+	TrustedProxyCIDRs string `json:"trusted_proxy_cidrs"`
 }
 
 // Subscription is a client-facing share link.
@@ -217,9 +231,43 @@ type Subscription struct {
 	IncludeStandalone  bool     `json:"include_standalone"`
 	ChainIDs           []string `json:"chain_ids"`
 	IncludeAllChains   bool     `json:"include_all_chains"`
-	Enabled            bool     `json:"enabled"`
-	CreatedAtUnix      int64    `json:"created_at_unix"`
-	UpdatedAtUnix      int64    `json:"updated_at_unix"`
+	// RoutePlanID binds a subscription-scope route plan whose rules are
+	// injected into rendered client configs. Empty means no plan.
+	RoutePlanID string `json:"route_plan_id"`
+	Enabled     bool   `json:"enabled"`
+	// Disabled is the kill switch for the public link: /sub/{token} answers
+	// 404 while disabled, as if the subscription did not exist.
+	Disabled      bool  `json:"disabled"`
+	CreatedAtUnix int64 `json:"created_at_unix"`
+	UpdatedAtUnix int64 `json:"updated_at_unix"`
+}
+
+// RoutePlan scopes an ordered rule set: "global" plans are pushed into every
+// node's sing-box route rules; "subscription" plans are injected into the
+// rendered client config of the bound subscription.
+type RoutePlan struct {
+	ID             string          `json:"id"`
+	Name           string          `json:"name"`
+	Scope          string          `json:"scope"` // global | subscription
+	SubscriptionID string          `json:"subscription_id"`
+	Enabled        bool            `json:"enabled"`
+	SortOrder      int             `json:"sort_order"`
+	Rules          []RoutePlanRule `json:"rules"`
+	CreatedAtUnix  int64           `json:"created_at_unix"`
+	UpdatedAtUnix  int64           `json:"updated_at_unix"`
+}
+
+// RoutePlanRule is one ordered match rule of a route plan. Position is
+// rewritten sequentially (0..n-1) on every replace.
+type RoutePlanRule struct {
+	PlanID     string `json:"-"`
+	Position   int    `json:"position"`
+	MatchType  string `json:"match_type"` // domain|domain_suffix|domain_keyword|ip_cidr|process_name
+	MatchValue string `json:"match_value"`
+	Action     string `json:"action"` // proxy|direct|block
+	// TargetChainID is the proxy chain for action=proxy; empty otherwise.
+	TargetChainID string `json:"target_chain_id"`
+	Enabled       bool   `json:"enabled"`
 }
 
 // ProxyChain is an ordered server-side proxy path. Hops are chain-owned and

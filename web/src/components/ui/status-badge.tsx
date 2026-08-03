@@ -57,6 +57,11 @@ export function StatusBadge({ value, label, showDot = true, className }: StatusB
       defaultLabel = label || (normalized === 'disabled' ? '已停用' : normalized === 'replaced' ? '已替换' : '已关闭')
       break
 
+    case 'paused':
+      variant = 'secondary'
+      defaultLabel = label || '已暂停'
+      break
+
     default:
       variant = 'outline'
       defaultLabel = label || value

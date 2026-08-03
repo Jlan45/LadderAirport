@@ -13,16 +13,18 @@ import (
 )
 
 func (s *Server) chainService() *proxychain.Service {
-	if s.Chains != nil {
-		return s.Chains
-	}
-	var builder = (*nodeconfig.Builder)(nil)
-	var coordinator = (*sync.Mutex)(nil)
-	if s.Runner != nil {
-		builder = s.Runner.ConfigBuilder
-		coordinator = s.Runner.Coordinator
-	}
-	s.Chains = proxychain.NewService(s.Store, builder, coordinator)
+	s.chainsOnce.Do(func() {
+		if s.Chains != nil {
+			return
+		}
+		var builder = (*nodeconfig.Builder)(nil)
+		var coordinator = (*sync.Mutex)(nil)
+		if s.Runner != nil {
+			builder = s.Runner.ConfigBuilder
+			coordinator = s.Runner.Coordinator
+		}
+		s.Chains = proxychain.NewService(s.Store, builder, coordinator)
+	})
 	return s.Chains
 }
 
@@ -46,8 +48,8 @@ func (s *Server) handleGetProxyChain(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateProxyChain(w http.ResponseWriter, r *http.Request) {
 	var chain store.ProxyChain
-	if err := decodeJSON(r, &chain); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &chain); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if err := s.Store.CreateProxyChain(&chain); err != nil {
@@ -66,8 +68,8 @@ func (s *Server) handleUpdateProxyChain(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var candidate store.ProxyChain
-	if err := decodeJSON(r, &candidate); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &candidate); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	candidate.ID = id
@@ -144,8 +146,8 @@ func (s *Server) handleProbeProxyChain(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handlePreviewProxyChain(w http.ResponseWriter, r *http.Request) {
 	var candidate store.ProxyChain
-	if err := decodeJSON(r, &candidate); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &candidate); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	configs, err := s.chainService().Preview(candidate)

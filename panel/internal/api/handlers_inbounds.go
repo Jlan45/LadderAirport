@@ -30,8 +30,8 @@ type createInboundBody struct {
 
 func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 	var body createInboundBody
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if body.Name == "" || body.Protocol == "" {
@@ -82,8 +82,8 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		Params   map[string]any `json:"params"`
 		Enabled  *bool          `json:"enabled"`
 	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if body.Protocol != nil || body.Params != nil || body.Enabled != nil {

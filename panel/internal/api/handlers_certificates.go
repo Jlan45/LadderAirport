@@ -31,8 +31,8 @@ func (s *Server) handleListProtocolCertificates(w http.ResponseWriter, _ *http.R
 
 func (s *Server) handleCreateProtocolCertificate(w http.ResponseWriter, r *http.Request) {
 	var request protocolCertificateRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	domain, err := s.Store.GetManagedDomain(strings.TrimSpace(request.ManagedDomainID))
@@ -147,8 +147,8 @@ func (s *Server) handlePutNodeInboundTLS(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var request tlsBindingRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	mode := strings.ToLower(strings.TrimSpace(request.Mode))

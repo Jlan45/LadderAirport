@@ -63,7 +63,7 @@ func (c Config) Validate() error {
 	if net.ParseIP(c.ProxyBindAddr) == nil {
 		return fmt.Errorf("FRPS proxy_bind_addr 必须是有效 IP 地址")
 	}
-	if err := validateUnprivilegedPort(c.BindPort, "bind_port"); err != nil {
+	if err := validatePort(c.BindPort, "bind_port"); err != nil {
 		return err
 	}
 	if c.AuthToken == "" {
@@ -91,13 +91,13 @@ func (c Config) Validate() error {
 }
 
 func (r PortRange) Validate() error {
-	if err := validateUnprivilegedPort(r.Start, "start"); err != nil {
+	if err := validatePort(r.Start, "start"); err != nil {
 		return err
 	}
 	if r.End == 0 {
 		r.End = r.Start
 	}
-	if err := validateUnprivilegedPort(r.End, "end"); err != nil {
+	if err := validatePort(r.End, "end"); err != nil {
 		return err
 	}
 	if r.End < r.Start {
@@ -114,9 +114,9 @@ func (r PortRange) Contains(port int) bool {
 	return port >= r.Start && port <= end
 }
 
-func validateUnprivilegedPort(port int, name string) error {
-	if port < 1024 || port > 65535 {
-		return fmt.Errorf("%s 必须在 1024 到 65535 之间", name)
+func validatePort(port int, name string) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("%s 必须在 1 到 65535 之间", name)
 	}
 	return nil
 }

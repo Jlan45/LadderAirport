@@ -334,7 +334,7 @@ func TestRunTaskDialError(t *testing.T) {
 	}
 
 	r := batch.NewRunner(s, func() string { return "t" })
-	r.Timeout = time.Second
+	r.Timeout.Store(int64(time.Second))
 	r.Dial = func(_ context.Context, _ store.Node, _ string) (batch.NodeRPC, error) {
 		return nil, fmt.Errorf("connection refused")
 	}

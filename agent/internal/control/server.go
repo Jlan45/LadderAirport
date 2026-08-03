@@ -23,6 +23,7 @@ type Server struct {
 	publicAddresses *PublicAddressResolver
 	protocolCerts   *protocolcert.Manager
 	frps            *frpsruntime.Runtime
+	dataDir         string
 }
 
 func (s *Server) SetPublicAddressResolver(resolver *PublicAddressResolver) {
@@ -35,6 +36,10 @@ func (s *Server) SetProtocolCertificateManager(manager *protocolcert.Manager) {
 
 func (s *Server) SetFRPServerRuntime(runtime *frpsruntime.Runtime) {
 	s.frps = runtime
+}
+
+func (s *Server) SetDataDir(dir string) {
+	s.dataDir = dir
 }
 
 // NewServer constructs an AgentControl server.
@@ -53,6 +58,7 @@ func NewServer(rt Runtime, agentVersion, singboxVersion string, logs *LogBuf) *S
 
 func (s *Server) Ping(context.Context, *agentv1.PingRequest) (*agentv1.PingResponse, error) {
 	capabilities := []string{"proxy_chain_v1"}
+	capabilities = append(capabilities, nodeSysCapabilities()...)
 	if s.publicAddresses != nil {
 		capabilities = append(capabilities, "public-address-v1")
 	}
@@ -417,7 +423,12 @@ func (s *Server) StreamLogs(req *agentv1.StreamLogsRequest, stream agentv1.Agent
 		tailN = int(req.GetTail())
 	}
 
-	// Drain historical tail, then stream live lines until context is done.
+	// Subscribe before tailing so lines appended in between are not lost; the
+	// tail snapshot overlaps the live buffer, so dedupe by sequence number.
+	live, cancel := s.logs.Subscribe()
+	defer cancel()
+
+	var lastSeq uint64
 	for _, line := range s.logs.Tail(tailN) {
 		if !levelMatch(levelFilter, line.Level) {
 			continue
@@ -425,10 +436,10 @@ func (s *Server) StreamLogs(req *agentv1.StreamLogsRequest, stream agentv1.Agent
 		if err := stream.Send(toProtoLogLine(line)); err != nil {
 			return err
 		}
+		if line.Seq > lastSeq {
+			lastSeq = line.Seq
+		}
 	}
-
-	live, cancel := s.logs.Subscribe()
-	defer cancel()
 
 	ctx := stream.Context()
 	for {
@@ -438,6 +449,10 @@ func (s *Server) StreamLogs(req *agentv1.StreamLogsRequest, stream agentv1.Agent
 		case line, ok := <-live:
 			if !ok {
 				return nil
+			}
+			if line.Seq <= lastSeq {
+				// Already sent as part of the historical tail.
+				continue
 			}
 			if !levelMatch(levelFilter, line.Level) {
 				continue

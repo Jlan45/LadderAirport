@@ -17,6 +17,21 @@ Agent 管理面只支持 Panel CA 签发的双向 TLS，不支持明文、节点
 
 指定版本时，可在 Panel 生成命令时填写版本，或在命令的 `sudo env` 后增加 `LADDER_VERSION=v0.9.0`。
 
+## 控制令牌
+
+Agent 控制令牌由 Panel 在注册时签发随机值，安装脚本写入 `/etc/ladder-agent/agent.env` 的 `LADDER_TOKEN`，经 unit 的 `EnvironmentFile` 注入环境变量，不出现在命令行（避免 `ps` 泄露）。Agent 拒绝空值与弱默认值 `changeme`。
+
+## 系统指标与 BBR
+
+节点详情「系统状态」页签可查看 CPU / 内存 / 磁盘 / 网卡实时速率，并开关 BBR 拥塞控制（需 Agent 上报 `node-metrics-v1` / `bbr-v1` 能力，旧版本 Agent 会提示先升级）。
+
+Web 端开关即可，无需登录节点操作。原理：Agent 以非特权用户运行，不直接改内核参数；点击开关后 Agent 在数据目录落盘 `bbr.request`（内容为 `enable` / `disable`），由安装脚本一并安装的 root helper 执行——`ladder-agent-bbr.path` 监视该文件，`ladder-agent-bbr.service`（oneshot，root）随即应用：
+
+- **启用**：`sysctl -w net.core.default_qdisc=fq net.ipv4.tcp_congestion_control=bbr`，并写入 `/etc/sysctl.d/99-ladder-bbr.conf` 持久化（重启后保持）；
+- **关闭**：`sysctl -w net.ipv4.tcp_congestion_control=cubic` 恢复默认，并删除该 conf。
+
+运维排障：`systemctl status ladder-agent-bbr.path`、`journalctl -u ladder-agent-bbr.service`。卸载默认保留该 conf，`LADDER_PURGE=1` 全清时一并删除。
+
 ## NAT / 端口转发
 
 Panel 主动拨号 Agent gRPC。Agent 位于 NAT 后时，应通过 VPN、DNAT 或端口映射让 Panel 可达：
@@ -30,7 +45,8 @@ Panel 主动拨号 Agent gRPC。Agent 位于 NAT 后时，应通过 VPN、DNAT �
 - `public_address`：订阅客户端使用的默认公网地址；
 - 入站关联的 `public_address` / `public_port`：单个入站的 NAT 覆盖；
 - `LADDER_REPORT_ADDRESS`：首次注册时上报的控制面地址；
-- `LADDER_TLS_EXTRA_SANS`：额外证书 SAN，例如 `DNS:node.example.com,IP:203.0.113.10`。
+- `LADDER_TLS_EXTRA_SANS`：额外证书 SAN，例如 `DNS:node.example.com,IP:203.0.113.10`；
+- `LADDER_IP_ECHO_URLS`：Agent 进程的公网 IP 探测源，逗号分隔、每项为返回纯文本 IP 的 URL；非空时覆盖默认源（`api4/api6.ipify.org`、`ipv4/ipv6.icanhazip.com`、`v4/v6.ident.me`）。自定义列表同时用于 IPv4/IPv6 探测（响应族别不符的源自动跳过），仍要求至少 2 个源结果一致。注意与安装脚本的 `LADDER_IP_ECHO_URL` 无关——后者只影响脚本安装时的自身探测（可设空关闭），不写入 Agent 运行环境。
 
 ## 升级
 
@@ -62,4 +78,4 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 
 ## 防火墙与权限
 
-只允许 Panel 来源访问 Agent gRPC 端口；代理入站端口按业务放行。默认 unit 使用 `ladder` 用户。监听 1024 以下端口时，可授予二进制 `cap_net_bind_service`，不建议改为 root 常驻。
+只允许 Panel 来源访问 Agent gRPC 端口；代理入站端口按业务放行。默认 unit 使用 `ladder` 用户。安装脚本默认即授予二进制 `cap_net_bind_service`（`setcap cap_net_bind_service+ep`，并在 unit 中配置 `AmbientCapabilities=CAP_NET_BIND_SERVICE`，远程升级后也会重新授予），1024 以下端口可直接监听，无需 root 常驻。

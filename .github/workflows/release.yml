@@ -9,11 +9,18 @@ on:
 permissions:
   contents: write
 
+# 同一 ref 只允许一个发布在跑，防止重复触发导致重复发版
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   GOTOOLCHAIN: auto
   CGO_ENABLED: "0"
   AGENT_TAGS: with_quic,with_utls
-  SINGBOX_VERSION: "1.12.22"
+  # 注意：SINGBOX_VERSION 不在此处硬编码。其唯一来源是 agent/sing-box 子模块的
+  # git tag，由 Resolve version 步骤用 `git -C agent/sing-box describe --tags`
+  # 派生（与根 Makefile 保持一致）。
 
 jobs:
   release:
@@ -56,16 +63,21 @@ jobs:
           fi
           COMMIT="$(git rev-parse --short HEAD)"
           BUILT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          # sing-box 版本唯一来源：agent/sing-box 子模块 tag（v1.12.22 → 1.12.22），同 Makefile
+          SINGBOX="$(git -C agent/sing-box describe --tags 2>/dev/null || echo unknown)"
+          SINGBOX="${SINGBOX#v}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
           echo "built_at=${BUILT}" >> "$GITHUB_OUTPUT"
-          echo "Building VERSION=${VERSION} COMMIT=${COMMIT}"
+          echo "singbox_version=${SINGBOX}" >> "$GITHUB_OUTPUT"
+          echo "Building VERSION=${VERSION} COMMIT=${COMMIT} SINGBOX=${SINGBOX}"
 
       - name: Build all targets
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           GIT_COMMIT: ${{ steps.ver.outputs.commit }}
           BUILD_TIME: ${{ steps.ver.outputs.built_at }}
+          SINGBOX_VERSION: ${{ steps.ver.outputs.singbox_version }}
         run: |
           mkdir -p dist
           VERSION_LDFLAGS="-X github.com/ladderairport/agent/internal/version.Version=${VERSION}"
@@ -98,7 +110,10 @@ jobs:
             strings ladder-agent-linux-amd64 | grep -F "${VERSION}" | head -3 || true
           fi
 
+      # 仅在 tag 推送时发布；workflow_dispatch 手动触发只构建验证，不创建 Release
+      # （dispatch 无 tag，action-gh-release 会失败）
       - name: Create GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true

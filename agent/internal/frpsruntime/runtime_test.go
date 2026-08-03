@@ -99,19 +99,52 @@ func TestRuntimeFailedApplyRestoresPreviousConfig(t *testing.T) {
 	}
 }
 
-func TestConfigRejectsPrivilegedAndUnboundedPorts(t *testing.T) {
+func TestConfigAcceptsPrivilegedPorts(t *testing.T) {
 	config := Config{
 		Enabled:       true,
 		BindAddr:      "127.0.0.1",
 		BindPort:      80,
 		ProxyBindAddr: "127.0.0.1",
+		AllowPorts:    []PortRange{{Start: 443, End: 443}},
 		AuthToken:     "secret",
 		TLSForce:      true,
 	}
-	if err := config.Validate(); err == nil {
-		t.Fatal("privileged bind port should fail validation")
+	if err := config.Validate(); err != nil {
+		t.Fatalf("privileged ports 80/443 should pass validation: %v", err)
 	}
-	config.BindPort = 7000
+	config.BindPort = 1
+	config.AllowPorts = []PortRange{{Start: 1023, End: 1023}}
+	if err := config.Validate(); err != nil {
+		t.Fatalf("boundary ports 1/1023 should pass validation: %v", err)
+	}
+}
+
+func TestConfigRejectsOutOfRangeAndUnboundedPorts(t *testing.T) {
+	base := Config{
+		Enabled:       true,
+		BindAddr:      "127.0.0.1",
+		BindPort:      7000,
+		ProxyBindAddr: "127.0.0.1",
+		AllowPorts:    []PortRange{{Start: 20000, End: 20100}},
+		AuthToken:     "secret",
+		TLSForce:      true,
+	}
+	for _, bindPort := range []int{-1, 65536} {
+		config := base
+		config.BindPort = bindPort
+		if err := config.Validate(); err == nil {
+			t.Fatalf("bind port %d should fail validation", bindPort)
+		}
+	}
+	for _, portRange := range []PortRange{{Start: 0, End: 100}, {Start: 20000, End: 65536}} {
+		config := base
+		config.AllowPorts = []PortRange{portRange}
+		if err := config.Validate(); err == nil {
+			t.Fatalf("allow_ports %+v should fail validation", portRange)
+		}
+	}
+	config := base
+	config.AllowPorts = nil
 	if err := config.Validate(); err == nil {
 		t.Fatal("empty allow_ports should fail validation")
 	}

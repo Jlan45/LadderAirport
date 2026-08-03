@@ -59,8 +59,8 @@ func (s *Server) handleCreateDNSAccount(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var request dnsAccountRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	account, err := s.buildDNSAccount(nil, request)
@@ -85,8 +85,8 @@ func (s *Server) handleUpdateDNSAccount(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var request dnsAccountRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	account, err := s.buildDNSAccount(current, request)
@@ -269,8 +269,15 @@ func (s *Server) dnsReady(w http.ResponseWriter) bool {
 	return true
 }
 
-func (s *Server) handleListManagedDomains(w http.ResponseWriter, _ *http.Request) {
-	domains, err := s.Store.ListManagedDomains()
+func (s *Server) handleListManagedDomains(w http.ResponseWriter, r *http.Request) {
+	nodeID := strings.TrimSpace(r.URL.Query().Get("node_id"))
+	var domains []store.ManagedDomain
+	var err error
+	if nodeID != "" {
+		domains, err = s.Store.ListManagedDomainsByNode(nodeID)
+	} else {
+		domains, err = s.Store.ListManagedDomains()
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -280,8 +287,8 @@ func (s *Server) handleListManagedDomains(w http.ResponseWriter, _ *http.Request
 
 func (s *Server) handleCreateManagedDomain(w http.ResponseWriter, r *http.Request) {
 	var request managedDomainRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	domain, err := s.buildManagedDomain(nil, request)
@@ -307,8 +314,8 @@ func (s *Server) handleUpdateManagedDomain(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var request managedDomainRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	domain, err := s.buildManagedDomain(current, request)

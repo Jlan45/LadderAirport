@@ -225,11 +225,12 @@ func parseVLESSURI(raw string) (ProxyEndpoint, error) {
 		name = fmt.Sprintf("vless-%s-%d", host, port)
 	}
 	return ProxyEndpoint{
-		Name:     sanitizeName(name),
-		Server:   host,
-		Port:     port,
-		Protocol: "vless",
-		Params:   params,
+		Name:          sanitizeName(name),
+		Server:        host,
+		Port:          port,
+		Protocol:      "vless",
+		Params:        params,
+		TLSSkipVerify: allowInsecureFromQuery(q),
 	}, nil
 }
 
@@ -259,11 +260,12 @@ func parseTrojanURI(raw string) (ProxyEndpoint, error) {
 		name = fmt.Sprintf("trojan-%s-%d", host, port)
 	}
 	return ProxyEndpoint{
-		Name:     sanitizeName(name),
-		Server:   host,
-		Port:     port,
-		Protocol: "trojan",
-		Params:   params,
+		Name:          sanitizeName(name),
+		Server:        host,
+		Port:          port,
+		Protocol:      "trojan",
+		Params:        params,
+		TLSSkipVerify: allowInsecureFromQuery(u.Query()),
 	}, nil
 }
 
@@ -291,11 +293,12 @@ func parseHysteria2URI(raw string) (ProxyEndpoint, error) {
 		name = fmt.Sprintf("hy2-%s-%d", host, port)
 	}
 	return ProxyEndpoint{
-		Name:     sanitizeName(name),
-		Server:   host,
-		Port:     port,
-		Protocol: "hysteria2",
-		Params:   params,
+		Name:          sanitizeName(name),
+		Server:        host,
+		Port:          port,
+		Protocol:      "hysteria2",
+		Params:        params,
+		TLSSkipVerify: allowInsecureFromQuery(u.Query()),
 	}, nil
 }
 
@@ -328,11 +331,12 @@ func parseTUICURI(raw string) (ProxyEndpoint, error) {
 		name = fmt.Sprintf("tuic-%s-%d", host, port)
 	}
 	return ProxyEndpoint{
-		Name:     sanitizeName(name),
-		Server:   host,
-		Port:     port,
-		Protocol: "tuic",
-		Params:   params,
+		Name:          sanitizeName(name),
+		Server:        host,
+		Port:          port,
+		Protocol:      "tuic",
+		Params:        params,
+		TLSSkipVerify: allowInsecureFromQuery(q),
 	}, nil
 }
 
@@ -359,11 +363,12 @@ func parseAnyTLSURI(raw string) (ProxyEndpoint, error) {
 		name = fmt.Sprintf("anytls-%s-%d", host, port)
 	}
 	return ProxyEndpoint{
-		Name:     sanitizeName(name),
-		Server:   host,
-		Port:     port,
-		Protocol: "anytls",
-		Params:   params,
+		Name:          sanitizeName(name),
+		Server:        host,
+		Port:          port,
+		Protocol:      "anytls",
+		Params:        params,
+		TLSSkipVerify: allowInsecureFromQuery(u.Query()),
 	}, nil
 }
 
@@ -376,6 +381,18 @@ func fragmentName(u *url.URL) string {
 		return u.Fragment
 	}
 	return name
+}
+
+// allowInsecureFromQuery maps the allowInsecure / allow_insecure share-link
+// flag onto TLSSkipVerify. Nil when the source link does not specify it.
+func allowInsecureFromQuery(q url.Values) *bool {
+	for _, key := range []string{"allowInsecure", "allow_insecure"} {
+		if raw, ok := q[key]; ok && len(raw) > 0 {
+			skip := anyToBool(raw[0])
+			return &skip
+		}
+	}
+	return nil
 }
 
 // decodeBase64Loose tries std/raw/url encodings without the printable heuristics of tryBase64Decode.

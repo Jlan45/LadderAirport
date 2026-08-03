@@ -26,8 +26,9 @@ type ProxyEndpoint struct {
 	Params     map[string]any
 	SourceID   string // "" = local inventory; external source id when merged
 	SourceName string // display group name; empty = local ("本地")
-	// TLSSkipVerify overrides TLS certificate verification. Nil preserves the
-	// legacy subscription behavior (skip verification).
+	// TLSSkipVerify overrides TLS certificate verification. Nil means verify
+	// (secure default); parsers set it explicitly from the source's
+	// allowInsecure / skip-cert-verify flag.
 	TLSSkipVerify *bool
 }
 
@@ -131,6 +132,13 @@ const (
 // Template follows a standard CN split config, but expands external sources as
 // inlined proxies + per-source url-test groups on the panel (no proxy-providers).
 func RenderClash(endpoints []ProxyEndpoint) ([]byte, error) {
+	return RenderClashWithRules(endpoints, nil)
+}
+
+// RenderClashWithRules is RenderClash with subscription route-plan rules
+// injected ahead of the default CN split rules (user rules must precede the
+// MATCH fallthrough to ever match).
+func RenderClashWithRules(endpoints []ProxyEndpoint, planRules []store.RoutePlanRule) ([]byte, error) {
 	proxies := make([]map[string]any, 0, len(endpoints))
 	for _, ep := range endpoints {
 		p, err := clashProxy(ep)
@@ -148,6 +156,13 @@ func RenderClash(endpoints []ProxyEndpoint) ([]byte, error) {
 		proxies = append(proxies, p)
 	}
 
+	rules := clashPlanRules(planRules)
+	rules = append(rules,
+		"RULE-SET,privateip,"+clashGroupDirect+",no-resolve",
+		"RULE-SET,cn,"+clashGroupDirect,
+		"RULE-SET,cnip,"+clashGroupDirect+",no-resolve",
+		"MATCH,"+clashGroupSelect,
+	)
 	doc := map[string]any{
 		"port":                      7890,
 		"socks-port":                7891,
@@ -163,15 +178,55 @@ func RenderClash(endpoints []ProxyEndpoint) ([]byte, error) {
 		"dns":                       clashDNS(),
 		"proxies":                   proxies,
 		"proxy-groups":              clashProxyGroups(endpoints),
-		"rules": []string{
-			"RULE-SET,privateip," + clashGroupDirect + ",no-resolve",
-			"RULE-SET,cn," + clashGroupDirect,
-			"RULE-SET,cnip," + clashGroupDirect + ",no-resolve",
-			"MATCH," + clashGroupSelect,
-		},
-		"rule-providers": clashRuleProviders(),
+		"rules":                     rules,
+		"rule-providers":            clashRuleProviders(),
 	}
 	return yaml.Marshal(doc)
+}
+
+// clashPlanRules maps route-plan rules to Clash rule lines. proxy actions
+// target the main select group; invalid entries are skipped.
+func clashPlanRules(planRules []store.RoutePlanRule) []string {
+	out := []string{}
+	for _, rule := range planRules {
+		if !rule.Enabled {
+			continue
+		}
+		target := clashRuleTarget(rule.Action)
+		if target == "" {
+			continue
+		}
+		value := strings.TrimSpace(rule.MatchValue)
+		if value == "" {
+			continue
+		}
+		switch rule.MatchType {
+		case "domain":
+			out = append(out, "DOMAIN,"+value+","+target)
+		case "domain_suffix":
+			out = append(out, "DOMAIN-SUFFIX,"+value+","+target)
+		case "domain_keyword":
+			out = append(out, "DOMAIN-KEYWORD,"+value+","+target)
+		case "ip_cidr":
+			out = append(out, "IP-CIDR,"+value+","+target+",no-resolve")
+		case "process_name":
+			out = append(out, "PROCESS-NAME,"+value+","+target)
+		}
+	}
+	return out
+}
+
+func clashRuleTarget(action string) string {
+	switch action {
+	case "proxy":
+		return clashGroupSelect
+	case "direct":
+		return "DIRECT"
+	case "block":
+		return "REJECT"
+	default:
+		return ""
+	}
 }
 
 func clashDNS() map[string]any {
@@ -332,6 +387,12 @@ func clashProxyGroups(endpoints []ProxyEndpoint) []map[string]any {
 
 // RenderSingbox produces sing-box client JSON with remote CN rule sets.
 func RenderSingbox(endpoints []ProxyEndpoint) ([]byte, error) {
+	return RenderSingboxWithRules(endpoints, nil)
+}
+
+// RenderSingboxWithRules is RenderSingbox with subscription route-plan rules
+// injected after the DNS hijack rule and before the private/CN direct rules.
+func RenderSingboxWithRules(endpoints []ProxyEndpoint, planRules []store.RoutePlanRule) ([]byte, error) {
 	tags := make([]string, 0, len(endpoints))
 	outbounds := make([]map[string]any, 0, len(endpoints)+4)
 	for _, ep := range endpoints {
@@ -355,6 +416,16 @@ func RenderSingbox(endpoints []ProxyEndpoint) ([]byte, error) {
 		map[string]any{"type": "direct", "tag": "direct"},
 		map[string]any{"type": "block", "tag": "block"},
 		map[string]any{"type": "dns", "tag": "dns-out"},
+	)
+
+	routeRules := []map[string]any{
+		{"protocol": "dns", "outbound": "dns-out"},
+	}
+	routeRules = append(routeRules, singboxPlanRules(planRules)...)
+	routeRules = append(routeRules,
+		map[string]any{"ip_is_private": true, "outbound": "direct"},
+		map[string]any{"rule_set": "geoip-cn", "outbound": "direct"},
+		map[string]any{"rule_set": "geosite-cn", "outbound": "direct"},
 	)
 
 	cfg := map[string]any{
@@ -381,12 +452,7 @@ func RenderSingbox(endpoints []ProxyEndpoint) ([]byte, error) {
 		"route": map[string]any{
 			"auto_detect_interface": true,
 			"final":                 "proxy",
-			"rules": []map[string]any{
-				{"protocol": "dns", "outbound": "dns-out"},
-				{"ip_is_private": true, "outbound": "direct"},
-				{"rule_set": "geoip-cn", "outbound": "direct"},
-				{"rule_set": "geosite-cn", "outbound": "direct"},
-			},
+			"rules":                 routeRules,
 			"rule_set": []map[string]any{
 				{
 					"tag":             "geoip-cn",
@@ -406,6 +472,51 @@ func RenderSingbox(endpoints []ProxyEndpoint) ([]byte, error) {
 		},
 	}
 	return json.MarshalIndent(cfg, "", "  ")
+}
+
+// singboxPlanRules maps route-plan rules to sing-box 1.12 action-style rules.
+// proxy actions target the "proxy" selector; invalid entries are skipped.
+// Unlike agent-side configs, process_name is meaningful here (client process).
+func singboxPlanRules(planRules []store.RoutePlanRule) []map[string]any {
+	out := []map[string]any{}
+	for _, rule := range planRules {
+		if !rule.Enabled {
+			continue
+		}
+		value := strings.TrimSpace(rule.MatchValue)
+		if value == "" {
+			continue
+		}
+		var condition map[string]any
+		switch rule.MatchType {
+		case "domain":
+			condition = map[string]any{"domain": []string{value}}
+		case "domain_suffix":
+			condition = map[string]any{"domain_suffix": []string{value}}
+		case "domain_keyword":
+			condition = map[string]any{"domain_keyword": []string{value}}
+		case "ip_cidr":
+			condition = map[string]any{"ip_cidr": []string{value}}
+		case "process_name":
+			condition = map[string]any{"process_name": []string{value}}
+		default:
+			continue
+		}
+		switch rule.Action {
+		case "proxy":
+			condition["action"] = "route"
+			condition["outbound"] = "proxy"
+		case "direct":
+			condition["action"] = "route"
+			condition["outbound"] = "direct"
+		case "block":
+			condition["action"] = "reject"
+		default:
+			continue
+		}
+		out = append(out, condition)
+	}
+	return out
 }
 
 func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
@@ -743,7 +854,7 @@ func singboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 
 func endpointTLSSkipVerify(ep ProxyEndpoint) bool {
 	if ep.TLSSkipVerify == nil {
-		return true
+		return false
 	}
 	return *ep.TLSSkipVerify
 }

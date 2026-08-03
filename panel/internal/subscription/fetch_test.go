@@ -42,3 +42,29 @@ func TestValidatePublicURL(t *testing.T) {
 		}
 	}
 }
+
+func TestRedirectStripsCustomHeadersCrossHost(t *testing.T) {
+	first, _ := http.NewRequest(http.MethodGet, "https://a.example.com/sub", nil)
+	next, _ := http.NewRequest(http.MethodGet, "https://b.example.com/sub", nil)
+	next.Header.Set("X-Token", "secret")
+	check := redirectChecker(map[string]string{"X-Token": "secret"})
+	if err := check(next, []*http.Request{first}); err != nil {
+		t.Fatal(err)
+	}
+	if next.Header.Get("X-Token") != "" {
+		t.Fatal("custom header leaked across hosts")
+	}
+}
+
+func TestRedirectKeepsCustomHeadersSameHost(t *testing.T) {
+	first, _ := http.NewRequest(http.MethodGet, "https://a.example.com/sub", nil)
+	next, _ := http.NewRequest(http.MethodGet, "https://a.example.com/renamed", nil)
+	next.Header.Set("X-Token", "secret")
+	check := redirectChecker(map[string]string{"X-Token": "secret"})
+	if err := check(next, []*http.Request{first}); err != nil {
+		t.Fatal(err)
+	}
+	if next.Header.Get("X-Token") != "secret" {
+		t.Fatal("custom header dropped on same-host redirect")
+	}
+}

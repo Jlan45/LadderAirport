@@ -170,3 +170,65 @@ proxies:
 		t.Fatalf("%+v", eps)
 	}
 }
+
+func TestParseShareLinkAllowInsecure(t *testing.T) {
+	ep, err := parseOneShareURI("trojan://pw@edge.example.com:443?allowInsecure=1#x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.TLSSkipVerify == nil || !*ep.TLSSkipVerify {
+		t.Fatalf("TLSSkipVerify = %v", ep.TLSSkipVerify)
+	}
+
+	ep, err = parseOneShareURI("vless://uid@edge.example.com:443?security=tls&allowInsecure=0#x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.TLSSkipVerify == nil || *ep.TLSSkipVerify {
+		t.Fatalf("TLSSkipVerify = %v", ep.TLSSkipVerify)
+	}
+
+	// Absent flag stays nil; rendering defaults to verification on.
+	ep, err = parseOneShareURI("hysteria2://pw@edge.example.com:443#x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ep.TLSSkipVerify != nil {
+		t.Fatalf("TLSSkipVerify = %v", ep.TLSSkipVerify)
+	}
+	if endpointTLSSkipVerify(ep) {
+		t.Fatal("nil TLSSkipVerify must default to verify")
+	}
+}
+
+func TestParseClashSkipCertVerify(t *testing.T) {
+	raw := []byte(`
+proxies:
+  - name: skip
+    type: trojan
+    server: a.example.com
+    port: 443
+    password: secret
+    skip-cert-verify: true
+  - name: strict
+    type: vless
+    server: b.example.com
+    port: 443
+    uuid: 0196b4c8-2e2b-4c0a-9f4a-9d2c3f4a5b6c
+    tls: true
+`)
+	eps, err := parseClashYAML(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(eps) != 2 {
+		t.Fatalf("%+v", eps)
+	}
+	if eps[0].TLSSkipVerify == nil || !*eps[0].TLSSkipVerify {
+		t.Fatalf("skip TLSSkipVerify = %v", eps[0].TLSSkipVerify)
+	}
+	// No skip-cert-verify key → nil → verify.
+	if eps[1].TLSSkipVerify != nil || endpointTLSSkipVerify(eps[1]) {
+		t.Fatalf("strict TLSSkipVerify = %v", eps[1].TLSSkipVerify)
+	}
+}

@@ -69,8 +69,8 @@ func (s *Server) handleFleetRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxConc := 10
-	if s.Runner != nil && s.Runner.MaxConcurrency > 0 {
-		maxConc = s.Runner.MaxConcurrency
+	if s.Runner != nil {
+		maxConc = s.Runner.ConcurrencyLimit()
 	}
 	sem := make(chan struct{}, maxConc)
 	var wg sync.WaitGroup

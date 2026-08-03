@@ -37,8 +37,8 @@ func (s *Server) handleCreateACMEAccount(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var request acmeAccountRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	account, err := s.buildACMEAccount(nil, request)
@@ -63,8 +63,8 @@ func (s *Server) handleUpdateACMEAccount(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var request acmeAccountRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	account, err := s.buildACMEAccount(current, request)

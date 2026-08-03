@@ -5,6 +5,7 @@ package nodeconfig
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/ladderairport/panel/internal/converter"
@@ -95,10 +96,15 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 	if err != nil {
 		return Result{}, err
 	}
+	routeRules, err := b.globalRouteRules(nodeID, chains)
+	if err != nil {
+		return Result{}, err
+	}
 	raw, err := converter.Convert(inbounds, converter.ConvertOptions{
 		BindInterface: node.EgressInterface,
 		AllowEmpty:    true,
 		ChainRoutes:   routes,
+		RouteRules:    routeRules,
 	})
 	if err != nil {
 		return Result{}, err
@@ -106,11 +112,83 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 	return Result{JSON: string(raw), Hash: hashutil.SHA256Hex(raw)}, nil
 }
 
+// globalRouteRules resolves enabled global route plans into converter rules
+// for this node. proxy actions target the chain's next-hop outbound at this
+// node; the last hop (the chain exit) maps to direct. Rules targeting chains
+// this node is not part of are skipped with a debug log. process_name rules
+// never apply on the agent side (subscription rendering only).
+func (b *Builder) globalRouteRules(nodeID string, chains []store.ProxyChain) ([]converter.RouteRule, error) {
+	plans, err := b.Store.ListEnabledGlobalRoutePlans()
+	if err != nil {
+		return nil, err
+	}
+	out := []converter.RouteRule{}
+	for _, plan := range plans {
+		for _, rule := range plan.Rules {
+			if !rule.Enabled {
+				continue
+			}
+			if rule.MatchType == "process_name" {
+				continue
+			}
+			resolved := converter.RouteRule{
+				MatchType:  rule.MatchType,
+				MatchValue: rule.MatchValue,
+			}
+			switch rule.Action {
+			case "direct":
+				resolved.Outbound = "direct"
+			case "block":
+				resolved.Reject = true
+			case "proxy":
+				outbound, ok := chainOutboundForNode(chains, rule.TargetChainID, nodeID)
+				if !ok {
+					log.Printf("debug: 节点 %s 不在代理链 %s 上，跳过全局路由计划 %q 的规则（%s %s）",
+						nodeID, rule.TargetChainID, plan.Name, rule.MatchType, rule.MatchValue)
+					continue
+				}
+				resolved.Outbound = outbound
+			default:
+				continue
+			}
+			out = append(out, resolved)
+		}
+	}
+	return out, nil
+}
+
+// chainOutboundForNode returns the outbound tag entering the chain from this
+// node's position: the next-hop tag for intermediate hops, "direct" for the
+// final hop (traffic has reached the chain exit). ok=false when the node is
+// not on the chain or the chain is missing from the effective set.
+func chainOutboundForNode(chains []store.ProxyChain, chainID, nodeID string) (string, bool) {
+	for _, chain := range chains {
+		if chain.ID != chainID || !chain.Enabled {
+			continue
+		}
+		for i, hop := range chain.Hops {
+			if hop.NodeID != nodeID {
+				continue
+			}
+			if i == len(chain.Hops)-1 {
+				return "direct", true
+			}
+			return ChainOutboundTag(chain.ID, i), true
+		}
+		return "", false
+	}
+	return "", false
+}
+
 func (b *Builder) applyManagedTLS(nodeID string, inbounds []store.InboundConfig) ([]store.InboundConfig, error) {
 	out := make([]store.InboundConfig, len(inbounds))
 	copy(out, inbounds)
+	idx, err := b.LoadManagedTLSIndex()
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
-		resolved, _, _, err := b.ResolveManagedTLS(nodeID, out[i])
+		resolved, _, _, err := b.ResolveManagedTLSIndexed(idx, nodeID, out[i])
 		if err != nil {
 			return nil, err
 		}
@@ -129,13 +207,7 @@ func (b *Builder) ResolveManagedTLS(
 	if err != nil {
 		return inbound, "", false, err
 	}
-	var binding *store.NodeInboundTLSBinding
-	for i := range bindings {
-		if bindings[i].InboundID == inbound.ID && bindings[i].Mode == "managed" {
-			binding = &bindings[i]
-			break
-		}
-	}
+	binding := findManagedBinding(bindings, inbound.ID)
 	if binding == nil {
 		return inbound, "", false, nil
 	}
@@ -147,6 +219,87 @@ func (b *Builder) ResolveManagedTLS(
 	if err != nil {
 		return inbound, "", false, err
 	}
+	return applyManagedTLSBinding(inbound, nodeID, binding, domain, certificate)
+}
+
+// ManagedTLSIndex preloads managed-TLS bindings, domains and certificates so
+// bulk resolution (subscription rendering, config builds) avoids
+// per-endpoint database queries.
+type ManagedTLSIndex struct {
+	bindings map[string][]store.NodeInboundTLSBinding // node ID -> bindings
+	domains  map[string]*store.ManagedDomain
+	certs    map[string]*store.ProtocolCertificate
+}
+
+// LoadManagedTLSIndex fetches all bindings, managed domains and protocol
+// certificates in three queries.
+func (b *Builder) LoadManagedTLSIndex() (*ManagedTLSIndex, error) {
+	bindings, err := b.Store.ListAllNodeInboundTLSBindings()
+	if err != nil {
+		return nil, err
+	}
+	domainList, err := b.Store.ListManagedDomains()
+	if err != nil {
+		return nil, err
+	}
+	certList, err := b.Store.ListProtocolCertificates()
+	if err != nil {
+		return nil, err
+	}
+	idx := &ManagedTLSIndex{
+		bindings: bindings,
+		domains:  make(map[string]*store.ManagedDomain, len(domainList)),
+		certs:    make(map[string]*store.ProtocolCertificate, len(certList)),
+	}
+	for i := range domainList {
+		idx.domains[domainList[i].ID] = &domainList[i]
+	}
+	for i := range certList {
+		idx.certs[certList[i].ID] = &certList[i]
+	}
+	return idx, nil
+}
+
+// ResolveManagedTLSIndexed is ResolveManagedTLS served from a preloaded index.
+func (b *Builder) ResolveManagedTLSIndexed(
+	idx *ManagedTLSIndex,
+	nodeID string,
+	inbound store.InboundConfig,
+) (store.InboundConfig, string, bool, error) {
+	binding := findManagedBinding(idx.bindings[nodeID], inbound.ID)
+	if binding == nil {
+		return inbound, "", false, nil
+	}
+	domain, ok := idx.domains[binding.ManagedDomainID]
+	if !ok {
+		return inbound, "", false, fmt.Errorf("托管域名不存在：%s", binding.ManagedDomainID)
+	}
+	certificate, ok := idx.certs[binding.CertificateID]
+	if !ok {
+		return inbound, "", false, fmt.Errorf("协议证书不存在：%s", binding.CertificateID)
+	}
+	return applyManagedTLSBinding(inbound, nodeID, binding, domain, certificate)
+}
+
+// findManagedBinding picks the managed-mode binding for inboundID, if any.
+func findManagedBinding(bindings []store.NodeInboundTLSBinding, inboundID string) *store.NodeInboundTLSBinding {
+	for i := range bindings {
+		if bindings[i].InboundID == inboundID && bindings[i].Mode == "managed" {
+			return &bindings[i]
+		}
+	}
+	return nil
+}
+
+// applyManagedTLSBinding validates ownership/readiness and overlays the
+// managed certificate paths onto a copy of inbound.
+func applyManagedTLSBinding(
+	inbound store.InboundConfig,
+	nodeID string,
+	binding *store.NodeInboundTLSBinding,
+	domain *store.ManagedDomain,
+	certificate *store.ProtocolCertificate,
+) (store.InboundConfig, string, bool, error) {
 	if domain.NodeID != nodeID || certificate.NodeID != nodeID ||
 		certificate.ManagedDomainID != domain.ID {
 		return inbound, "", false, fmt.Errorf("入站 %s 的托管 TLS 绑定归属不一致", inbound.Name)

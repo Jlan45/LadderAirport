@@ -22,11 +22,26 @@ type ConvertOptions struct {
 	AllowEmpty bool
 	// ChainRoutes routes traffic arriving on InboundID to Outbound.
 	ChainRoutes []ChainRoute
+	// RouteRules are match-condition rules from enabled global route plans.
+	// They are emitted after chain rules and before the final outbound.
+	// Outbound must reference a known outbound tag ("direct" or a chain
+	// next-hop tag); rules with unknown or empty targets are skipped.
+	RouteRules []RouteRule
 }
 
 type ChainRoute struct {
 	InboundID string
 	Outbound  map[string]any
+}
+
+// RouteRule is one resolved global route-plan rule. MatchType is one of
+// domain|domain_suffix|domain_keyword|ip_cidr (process_name never reaches
+// agent configs). Reject emits action:"reject" and ignores Outbound.
+type RouteRule struct {
+	MatchType  string
+	MatchValue string
+	Outbound   string
+	Reject     bool
 }
 
 // Convert builds a full sing-box JSON config from inbound configs.
@@ -96,6 +111,26 @@ func Convert(inbounds []store.InboundConfig, opts ConvertOptions) ([]byte, error
 			"outbound": outboundTag,
 		})
 	}
+	for _, rule := range opts.RouteRules {
+		condition := routeRuleCondition(rule.MatchType, rule.MatchValue)
+		if condition == nil {
+			continue
+		}
+		if rule.Reject {
+			condition["action"] = "reject"
+			rules = append(rules, condition)
+			continue
+		}
+		outboundTag := strings.TrimSpace(rule.Outbound)
+		if outboundTag == "" || !outboundTags[outboundTag] {
+			// Never emit a dangling outbound reference: sing-box refuses to
+			// start when a route rule points at an unknown outbound.
+			continue
+		}
+		condition["action"] = "route"
+		condition["outbound"] = outboundTag
+		rules = append(rules, condition)
+	}
 	routeOptions := map[string]any{"final": "direct"}
 	if len(rules) > 0 {
 		routeOptions["rules"] = rules
@@ -116,6 +151,28 @@ func label(in store.InboundConfig) string {
 		return in.Name
 	}
 	return in.ID
+}
+
+// routeRuleCondition maps a match type/value to the sing-box 1.12 rule
+// condition fields. Returns nil for unsupported types (e.g. process_name,
+// which only applies to client-side subscription configs).
+func routeRuleCondition(matchType, matchValue string) map[string]any {
+	value := strings.TrimSpace(matchValue)
+	if value == "" {
+		return nil
+	}
+	switch matchType {
+	case "domain":
+		return map[string]any{"domain": []string{value}}
+	case "domain_suffix":
+		return map[string]any{"domain_suffix": []string{value}}
+	case "domain_keyword":
+		return map[string]any{"domain_keyword": []string{value}}
+	case "ip_cidr":
+		return map[string]any{"ip_cidr": []string{value}}
+	default:
+		return nil
+	}
 }
 
 func mapInbound(in store.InboundConfig) (map[string]any, error) {

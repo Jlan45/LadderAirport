@@ -8,24 +8,26 @@ import (
 const frpsConfigCols = `node_id, enabled, bind_addr, bind_port, proxy_bind_addr,
 	allow_ports_json, auth_token_ciphertext, tls_force, max_ports_per_client,
 	desired_hash, applied_hash, runtime_state, frps_version, last_error,
-	started_at_unix, created_at_unix, updated_at_unix`
+	started_at_unix, created_at_unix, updated_at_unix, managed_domain_id`
 
 func scanFRPServerConfig(row interface{ Scan(...any) error }) (*FRPServerConfig, error) {
 	var config FRPServerConfig
 	var enabled, tlsForce int
 	var allowPortsJSON string
+	var managedDomainID sql.NullString
 	if err := row.Scan(
 		&config.NodeID, &enabled, &config.BindAddr, &config.BindPort,
 		&config.ProxyBindAddr, &allowPortsJSON, &config.AuthTokenCiphertext,
 		&tlsForce, &config.MaxPortsPerClient, &config.DesiredHash,
 		&config.AppliedHash, &config.RuntimeState, &config.FRPSVersion,
 		&config.LastError, &config.StartedAtUnix, &config.CreatedAtUnix,
-		&config.UpdatedAtUnix,
+		&config.UpdatedAtUnix, &managedDomainID,
 	); err != nil {
 		return nil, err
 	}
 	config.Enabled = enabled != 0
 	config.TLSForce = tlsForce != 0
+	config.ManagedDomainID = managedDomainID.String
 	config.HasAuthToken = config.AuthTokenCiphertext != ""
 	config.AllowPorts = []FRPServerPortRange{}
 	if err := unmarshalJSON(allowPortsJSON, &config.AllowPorts); err != nil {
@@ -60,14 +62,15 @@ func (s *Store) UpsertFRPServerConfig(config *FRPServerConfig) error {
 		config.CreatedAtUnix = now
 	}
 	config.UpdatedAtUnix = now
+	managedDomainID := sql.NullString{String: config.ManagedDomainID, Valid: config.ManagedDomainID != ""}
 	_, err = s.db.Exec(`
 		INSERT INTO node_frps_configs (
 			node_id, enabled, bind_addr, bind_port, proxy_bind_addr,
 			allow_ports_json, auth_token_ciphertext, tls_force,
 			max_ports_per_client, desired_hash, applied_hash, runtime_state,
 			frps_version, last_error, started_at_unix, created_at_unix,
-			updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			updated_at_unix, managed_domain_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(node_id) DO UPDATE SET
 			enabled = excluded.enabled,
 			bind_addr = excluded.bind_addr,
@@ -83,13 +86,15 @@ func (s *Store) UpsertFRPServerConfig(config *FRPServerConfig) error {
 			frps_version = excluded.frps_version,
 			last_error = excluded.last_error,
 			started_at_unix = excluded.started_at_unix,
-			updated_at_unix = excluded.updated_at_unix`,
+			updated_at_unix = excluded.updated_at_unix,
+			managed_domain_id = excluded.managed_domain_id`,
 		config.NodeID, boolToInt(config.Enabled), config.BindAddr,
 		config.BindPort, config.ProxyBindAddr, allowPortsJSON,
 		config.AuthTokenCiphertext, boolToInt(config.TLSForce),
 		config.MaxPortsPerClient, config.DesiredHash, config.AppliedHash,
 		config.RuntimeState, config.FRPSVersion, config.LastError,
 		config.StartedAtUnix, config.CreatedAtUnix, config.UpdatedAtUnix,
+		managedDomainID,
 	)
 	if err != nil {
 		return fmt.Errorf("保存节点 FRPS 配置失败：%w", err)

@@ -62,8 +62,8 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	var req nodeCreateRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -80,6 +80,7 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		PublicAddress:   strings.TrimSpace(req.PublicAddress),
 		PortMappings:    req.PortMappings,
 		EgressInterface: strings.TrimSpace(req.EgressInterface),
+		DDNSEnabled:     true,
 	}
 	// Address may be empty when the operator will install first and fill IP later.
 	if n.GRPCPort == 0 {
@@ -103,8 +104,8 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 // POST /api/v1/nodes/bootstrap
 func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 	var req nodeBootstrapRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
@@ -150,6 +151,7 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		Token:         token,
 		Labels:        req.Labels,
 		Status:        status,
+		DDNSEnabled:   true,
 	}
 	if err := s.Store.CreateNode(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -196,7 +198,8 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNodeInstallCommand regenerates the one-click install command for an existing node.
-// GET /api/v1/nodes/{id}/install-command
+// POST /api/v1/nodes/{id}/install-command
+// It may create a PKI enrollment token, so it is not a safe/read-only GET.
 func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	n, err := s.Store.GetNode(id)
@@ -273,8 +276,8 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body store.NodeOperatorUpdate
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if body.Name != nil {
@@ -379,8 +382,8 @@ type setNodeInboundsResponse struct {
 func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	var body setNodeInboundsBody
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	bindings := body.Bindings
@@ -742,6 +745,12 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "日志行数参数 tail 无效")
 			return
 		}
+		// Clamp into a sane positive int32 range.
+		if n < 1 {
+			n = 1
+		} else if n > 10000 {
+			n = 10000
+		}
 		tail = int32(n)
 	}
 
@@ -819,8 +828,8 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 		SHA256      string `json:"sha256"`
 	}
 	if r.Body != nil && r.ContentLength != 0 {
-		if err := decodeJSON(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+		if err := decodeJSON(w, r, &body); err != nil {
+			writeDecodeError(w, err)
 			return
 		}
 	}

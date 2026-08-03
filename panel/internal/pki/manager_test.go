@@ -115,3 +115,37 @@ func makeCSR(t *testing.T, dns []string, ips []net.IP) (*ecdsa.PrivateKey, []byt
 	}
 	return key, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der})
 }
+
+func TestWarnIntermediateExpiry(t *testing.T) {
+	manager, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audits []string
+	manager.AuditLog = func(action, nodeID, serial, actor, detail string) error {
+		audits = append(audits, action)
+		return nil
+	}
+
+	// Fresh intermediate (2-year lifetime) → no warning.
+	manager.warnIntermediateExpiry(time.Now())
+	if len(audits) != 0 {
+		t.Fatalf("unexpected audits: %v", audits)
+	}
+
+	// Forcing expiry inside the 30-day window warns and audits exactly once.
+	manager.intermediate.NotAfter = time.Now().Add(10 * 24 * time.Hour)
+	manager.warnIntermediateExpiry(time.Now())
+	if len(audits) != 1 || audits[0] != "intermediate.expiry-warning" {
+		t.Fatalf("audits = %v", audits)
+	}
+	manager.warnIntermediateExpiry(time.Now().Add(time.Hour))
+	if len(audits) != 1 {
+		t.Fatalf("warning not rate-limited: %v", audits)
+	}
+	// After the 24h window it warns again.
+	manager.warnIntermediateExpiry(time.Now().Add(25 * time.Hour))
+	if len(audits) != 2 {
+		t.Fatalf("audits = %v", audits)
+	}
+}

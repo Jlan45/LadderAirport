@@ -25,11 +25,17 @@ type frpsConfigRequest struct {
 	RotateAuthToken   bool                       `json:"rotate_auth_token"`
 	TLSForce          bool                       `json:"tls_force"`
 	MaxPortsPerClient *int64                     `json:"max_ports_per_client"`
+	// ManagedDomainID binds a managed domain as the frpc-facing server address.
+	// Nil keeps the current binding; an empty string clears it.
+	ManagedDomainID *string `json:"managed_domain_id"`
 }
 
 type frpsConfigResponse struct {
 	*store.FRPServerConfig
 	GeneratedAuthToken string `json:"generated_auth_token,omitempty"`
+	// ServerAddr is the frpc-facing dial host: the bound managed domain FQDN,
+	// or the node public/control address when no domain is bound.
+	ServerAddr string `json:"server_addr"`
 }
 
 type frpsDesiredConfig struct {
@@ -60,7 +66,8 @@ func defaultFRPSConfig(nodeID string) *store.FRPServerConfig {
 
 func (s *Server) handleGetNodeFRPS(w http.ResponseWriter, r *http.Request) {
 	nodeID := pathID(r)
-	if _, err := s.Store.GetNode(nodeID); err != nil {
+	node, err := s.Store.GetNode(nodeID)
+	if err != nil {
 		status := http.StatusInternalServerError
 		if isNotFound(err) {
 			status = http.StatusNotFound
@@ -71,13 +78,13 @@ func (s *Server) handleGetNodeFRPS(w http.ResponseWriter, r *http.Request) {
 	config, err := s.Store.GetFRPServerConfig(nodeID)
 	if err != nil {
 		if isNotFound(err) {
-			writeFRPSConfig(w, defaultFRPSConfig(nodeID), "")
+			s.writeFRPSConfig(w, node, defaultFRPSConfig(nodeID), "")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeFRPSConfig(w, config, "")
+	s.writeFRPSConfig(w, node, config, "")
 }
 
 func (s *Server) handlePutNodeFRPS(w http.ResponseWriter, r *http.Request) {
@@ -97,14 +104,27 @@ func (s *Server) handlePutNodeFRPS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request frpsConfigRequest
-	if err := decodeJSON(r, &request); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &request); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	current, err := s.Store.GetFRPServerConfig(nodeID)
 	if err != nil && !isNotFound(err) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	managedDomainID := ""
+	if current != nil {
+		managedDomainID = current.ManagedDomainID
+	}
+	if request.ManagedDomainID != nil {
+		managedDomainID = strings.TrimSpace(*request.ManagedDomainID)
+	}
+	if managedDomainID != "" {
+		if err := s.validateFRPSManagedDomain(nodeID, managedDomainID); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	desired := normalizeFRPSRequest(request)
@@ -157,6 +177,7 @@ func (s *Server) handlePutNodeFRPS(w http.ResponseWriter, r *http.Request) {
 	config.HasAuthToken = ciphertext != ""
 	config.TLSForce = desired.TLSForce
 	config.MaxPortsPerClient = desired.MaxPortsPerClient
+	config.ManagedDomainID = managedDomainID
 	config.DesiredHash = hash
 	if current != nil {
 		config.AppliedHash = current.AppliedHash
@@ -215,7 +236,7 @@ func (s *Server) handlePutNodeFRPS(w http.ResponseWriter, r *http.Request) {
 		nodeID, config.AppliedHash, config.RuntimeState, config.FRPSVersion,
 		config.LastError, config.StartedAtUnix,
 	)
-	writeFRPSConfig(w, config, generatedToken)
+	s.writeFRPSConfig(w, node, config, generatedToken)
 }
 
 func (s *Server) handleGetNodeFRPSStatus(w http.ResponseWriter, r *http.Request) {
@@ -365,7 +386,7 @@ func (s *Server) handleNodeFRPSAction(w http.ResponseWriter, r *http.Request, ac
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeFRPSConfig(w, config, "")
+	s.writeFRPSConfig(w, node, config, "")
 }
 
 func (s *Server) dialNodeFRPS(
@@ -426,8 +447,8 @@ func validateFRPSDesired(config frpsDesiredConfig) error {
 	if net.ParseIP(config.ProxyBindAddr) == nil {
 		return fmt.Errorf("FRPS 代理绑定地址必须是 IP 地址")
 	}
-	if config.BindPort < 1024 || config.BindPort > 65535 {
-		return fmt.Errorf("FRPS 绑定端口必须在 1024 到 65535 之间")
+	if config.BindPort < 1 || config.BindPort > 65535 {
+		return fmt.Errorf("FRPS 绑定端口必须在 1 到 65535 之间")
 	}
 	if config.AuthToken == "" {
 		return fmt.Errorf("启用 FRPS 时必须提供认证令牌")
@@ -442,8 +463,8 @@ func validateFRPSDesired(config frpsDesiredConfig) error {
 		return fmt.Errorf("每客户端最大端口数不能为负数")
 	}
 	for _, portRange := range config.AllowPorts {
-		if portRange.Start < 1024 || portRange.End > 65535 || portRange.Start > portRange.End {
-			return fmt.Errorf("FRPS 允许端口范围必须在 1024 到 65535 之间")
+		if portRange.Start < 1 || portRange.End > 65535 || portRange.Start > portRange.End {
+			return fmt.Errorf("FRPS 允许端口范围必须在 1 到 65535 之间")
 		}
 		if config.BindPort >= portRange.Start && config.BindPort <= portRange.End {
 			return fmt.Errorf("FRPS 控制端口不能包含在允许端口范围内")
@@ -502,10 +523,46 @@ func frpsTokenAAD(nodeID string) string {
 	return "node-frps:" + nodeID
 }
 
-func writeFRPSConfig(w http.ResponseWriter, config *store.FRPServerConfig, generatedToken string) {
+// validateFRPSManagedDomain ensures the domain is usable as this node's FRPS
+// server address: it must exist, be enabled, and belong to the same node. Any
+// address source qualifies — agent_public/node_address track the node IP by
+// construction and manual addresses are operator-managed.
+func (s *Server) validateFRPSManagedDomain(nodeID, domainID string) error {
+	domain, err := s.Store.GetManagedDomain(domainID)
+	if err != nil {
+		return fmt.Errorf("绑定的托管域名不存在：%s", domainID)
+	}
+	if !domain.Enabled {
+		return fmt.Errorf("绑定的托管域名已禁用：%s", domain.FQDN)
+	}
+	if domain.NodeID != nodeID {
+		return fmt.Errorf("托管域名 %s 关联的是其他节点，无法绑定到本节点 FRPS", domain.FQDN)
+	}
+	return nil
+}
+
+// frpsServerAddr is the display-layer frpc dial host. The managed domain only
+// rewrites what clients connect to; the agent-side bind config is untouched.
+func (s *Server) frpsServerAddr(node *store.Node, config *store.FRPServerConfig) string {
+	if config != nil && config.ManagedDomainID != "" {
+		if domain, err := s.Store.GetManagedDomain(config.ManagedDomainID); err == nil {
+			return domain.FQDN
+		}
+	}
+	if node == nil {
+		return ""
+	}
+	if public := strings.TrimSpace(node.PublicAddress); public != "" {
+		return public
+	}
+	return strings.TrimSpace(node.Address)
+}
+
+func (s *Server) writeFRPSConfig(w http.ResponseWriter, node *store.Node, config *store.FRPServerConfig, generatedToken string) {
 	writeJSON(w, http.StatusOK, frpsConfigResponse{
 		FRPServerConfig:    config,
 		GeneratedAuthToken: generatedToken,
+		ServerAddr:         s.frpsServerAddr(node, config),
 	})
 }
 

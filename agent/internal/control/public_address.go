@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type PublicAddressResolver struct {
@@ -17,6 +19,20 @@ type PublicAddressResolver struct {
 	IPv4URLs  []string
 	IPv6URLs  []string
 	Consensus int
+}
+
+// ParseIPEchoURLs parses LADDER_IP_ECHO_URLS: a comma-separated list of
+// endpoints that each return a plain-text IP address. Blank entries are
+// dropped; an empty or unset value yields nil (keep the built-in defaults).
+func ParseIPEchoURLs(value string) []string {
+	var urls []string
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			urls = append(urls, item)
+		}
+	}
+	return urls
 }
 
 type PublicAddressResult struct {
@@ -42,6 +58,14 @@ func NewPublicAddressResolver() *PublicAddressResolver {
 		},
 		Consensus: 2,
 	}
+}
+
+// SetEchoURLs replaces the probe endpoints for both address families with the
+// same custom list. Each endpoint is tried for whichever family its response
+// matches; responses for the wrong family are rejected as usual.
+func (r *PublicAddressResolver) SetEchoURLs(urls []string) {
+	r.IPv4URLs = append([]string(nil), urls...)
+	r.IPv6URLs = append([]string(nil), urls...)
 }
 
 func (r *PublicAddressResolver) Resolve(ctx context.Context, ipv4, ipv6 bool) (PublicAddressResult, error) {
@@ -80,29 +104,43 @@ func (r *PublicAddressResolver) resolveFamily(
 	if client == nil {
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
+	// Probe all endpoints concurrently; failed or invalid responses are skipped.
+	type probeResult struct {
+		address string
+		source  string
+	}
+	results := make(chan probeResult, len(endpoints))
+	group, groupCtx := errgroup.WithContext(ctx)
+	for _, endpoint := range endpoints {
+		group.Go(func() error {
+			request, err := http.NewRequestWithContext(groupCtx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				return nil
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				return nil
+			}
+			raw, readErr := io.ReadAll(io.LimitReader(response.Body, 256))
+			_ = response.Body.Close()
+			if readErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
+				return nil
+			}
+			address, err := netip.ParseAddr(strings.TrimSpace(string(raw)))
+			if err != nil || address.Is4() != ipv4 || !publicAddress(address) {
+				return nil
+			}
+			results <- probeResult{address: address.String(), source: endpointSource(endpoint)}
+			return nil
+		})
+	}
+	_ = group.Wait()
+	close(results)
 	counts := map[string]int{}
 	sources := map[string][]string{}
-	for _, endpoint := range endpoints {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-		if err != nil {
-			continue
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			continue
-		}
-		raw, readErr := io.ReadAll(io.LimitReader(response.Body, 256))
-		_ = response.Body.Close()
-		if readErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
-			continue
-		}
-		address, err := netip.ParseAddr(strings.TrimSpace(string(raw)))
-		if err != nil || address.Is4() != ipv4 || !publicAddress(address) {
-			continue
-		}
-		value := address.String()
-		counts[value]++
-		sources[value] = append(sources[value], endpointSource(endpoint))
+	for result := range results {
+		counts[result.address]++
+		sources[result.address] = append(sources[result.address], result.source)
 	}
 	consensus := r.Consensus
 	if consensus <= 0 {

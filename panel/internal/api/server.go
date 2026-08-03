@@ -4,12 +4,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	acmeservice "github.com/ladderairport/panel/internal/acme"
@@ -79,6 +81,12 @@ type Server struct {
 	Secrets      *secretstore.Store
 	DNSProviders *dnsprovider.Registry
 	ACME         *acmeservice.Service
+
+	// loginAttempts tracks failed logins per client IP for brute-force backoff.
+	loginMu       sync.Mutex
+	loginAttempts map[string]*loginAttempt
+	// chainsOnce guards lazy initialization of Chains (see chainService).
+	chainsOnce sync.Once
 }
 
 // Handler returns an http.Handler with all routes, auth middleware, and embedded SPA.
@@ -192,7 +200,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/nodes/bootstrap", s.handleBootstrapNode)
 	mux.HandleFunc("PUT /api/v1/nodes/{id}", s.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/v1/nodes/{id}", s.handleDeleteNode)
-	mux.HandleFunc("GET /api/v1/nodes/{id}/install-command", s.handleNodeInstallCommand)
+	mux.HandleFunc("POST /api/v1/nodes/{id}/install-command", s.handleNodeInstallCommand)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/probe", s.handleProbeNode)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/inbounds", s.handleListNodeInbounds)
 	mux.HandleFunc("PUT /api/v1/nodes/{id}/inbounds", s.handleSetNodeInbounds)
@@ -201,6 +209,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/nodes/{id}/start", s.handleNodeStart)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/stop", s.handleNodeStop)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/metrics", s.handleNodeMetrics)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/sysmetrics", s.handleNodeSysMetrics)
+	mux.HandleFunc("GET /api/v1/nodes/{id}/bbr", s.handleGetNodeBBR)
+	mux.HandleFunc("POST /api/v1/nodes/{id}/bbr", s.handleSetNodeBBR)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/interfaces", s.handleNodeInterfaces)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/upgrade", s.handleNodeUpgrade)
 	mux.HandleFunc("GET /api/v1/nodes/{id}/logs", s.handleNodeLogs)
@@ -257,6 +268,15 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/subscriptions/{id}", s.handleUpdateSubscription)
 	mux.HandleFunc("DELETE /api/v1/subscriptions/{id}", s.handleDeleteSubscription)
 	mux.HandleFunc("GET /api/v1/subscriptions/{id}/preview", s.handlePreviewSubscription)
+	mux.HandleFunc("POST /api/v1/subscriptions/{id}/token/rotate", s.handleRotateSubscriptionToken)
+	mux.HandleFunc("POST /api/v1/subscriptions/{id}/disable", s.handleDisableSubscription)
+	mux.HandleFunc("POST /api/v1/subscriptions/{id}/enable", s.handleEnableSubscription)
+
+	mux.HandleFunc("GET /api/v1/route-plans", s.handleListRoutePlans)
+	mux.HandleFunc("POST /api/v1/route-plans", s.handleCreateRoutePlan)
+	mux.HandleFunc("GET /api/v1/route-plans/{id}", s.handleGetRoutePlan)
+	mux.HandleFunc("PUT /api/v1/route-plans/{id}", s.handleUpdateRoutePlan)
+	mux.HandleFunc("DELETE /api/v1/route-plans/{id}", s.handleDeleteRoutePlan)
 
 	mux.HandleFunc("GET /api/v1/proxy-chains", s.handleListProxyChains)
 	mux.HandleFunc("POST /api/v1/proxy-chains", s.handleCreateProxyChain)
@@ -291,8 +311,8 @@ func (s *Server) defaultLiveDial(ctx context.Context, n store.Node, token string
 		return nil, fmt.Errorf("节点 %s 尚未完成 Panel PKI 注册", n.ID)
 	}
 	timeout := s.Timeout
-	if timeout <= 0 && s.Runner != nil && s.Runner.Timeout > 0 {
-		timeout = s.Runner.Timeout
+	if timeout <= 0 && s.Runner != nil {
+		timeout = s.Runner.OperationTimeout()
 	}
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -324,8 +344,8 @@ func (s *Server) opTimeout() time.Duration {
 	if s.Timeout > 0 {
 		return s.Timeout
 	}
-	if s.Runner != nil && s.Runner.Timeout > 0 {
-		return s.Runner.Timeout
+	if s.Runner != nil {
+		return s.Runner.OperationTimeout()
 	}
 	return 10 * time.Second
 }
@@ -375,10 +395,24 @@ func errorPrefix(msg string) string {
 	return prefix + "："
 }
 
-func decodeJSON(r *http.Request, dest any) error {
-	dec := json.NewDecoder(r.Body)
+// maxJSONBodyBytes caps admin API request bodies at 1 MiB.
+const maxJSONBodyBytes = 1 << 20
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dest any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBodyBytes))
 	dec.UseNumber()
 	return dec.Decode(dest)
+}
+
+// writeDecodeError reports a decodeJSON failure: 413 when the body exceeds
+// maxJSONBodyBytes, otherwise 400.
+func writeDecodeError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "请求体超过大小限制")
+		return
+	}
+	writeError(w, http.StatusBadRequest, "JSON 请求体无效")
 }
 
 func pathID(r *http.Request) string {

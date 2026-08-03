@@ -71,6 +71,9 @@ NODE_ID="${LADDER_NODE_ID:-}"
 REPORT_ADDR="${LADDER_REPORT_ADDRESS:-}" # force reported address; else auto-detect
 GRPC_PORT_HINT="${LADDER_GRPC_PORT:-}"
 ALLOW_HTTP="${LADDER_ALLOW_HTTP:-0}"
+# 公网 IP 探测端点（用于证书 SAN 与上报地址兜底）。默认 api.ipify.org；
+# 显式设为空（LADDER_IP_ECHO_URL=）可关闭公网探测（例如离线/内网环境）。
+IP_ECHO_URL="${LADDER_IP_ECHO_URL-https://api.ipify.org}"
 TMPDIR_DL=""
 ENV_FILE="${CONF_DIR}/agent.env"
 
@@ -154,6 +157,12 @@ download_release_binary() {
       if command -v sha256sum >/dev/null 2>&1; then
         (cd "${TMPDIR_DL}" && grep " ${asset}\$" SHA256SUMS.txt | sha256sum -c -) >&2 \
           || die "SHA256 校验失败"
+      else
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
+        echo "WARNING: 未找到 sha256sum，无法校验 ${asset} 的完整性！" >&2
+        echo "         二进制将被跳过校验直接安装，存在被篡改风险。" >&2
+        echo "         请安装 coreutils 后重试。" >&2
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
       fi
     else
       echo "    (无 SHA256SUMS.txt，跳过校验)" >&2
@@ -229,9 +238,9 @@ build_san_list() {
     done
   fi
 
-  # Optional public IP (best-effort; skip if offline)
-  if command -v curl >/dev/null 2>&1; then
-    primary="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+  # Optional public IP (best-effort; skip if offline or LADDER_IP_ECHO_URL= 为空)
+  if [[ -n "${IP_ECHO_URL}" ]] && command -v curl >/dev/null 2>&1; then
+    primary="$(curl -fsS --max-time 3 "${IP_ECHO_URL}" 2>/dev/null || true)"
     if [[ "${primary}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
       sans+=("IP:${primary}")
     fi
@@ -297,7 +306,12 @@ ensure_tls_material() {
   need_cmd openssl
   need_cmd curl
   need_cmd python3
+  # 私钥/令牌/签发响应等敏感落盘文件全程 600：进入函数即收紧 umask，结束恢复
+  local _saved_umask
+  _saved_umask="$(umask)"
+  umask 077
   mkdir -p "${TLS_DIR}"
+  chmod 700 "${TLS_DIR}"
   local srv_key="${TLS_DIR}/server.key"
   local srv_crt="${TLS_DIR}/server.crt"
   local ca_crt="${TLS_DIR}/ca.crt"
@@ -341,7 +355,7 @@ print(json.dumps({
 PY
 
   local code
-  code="$(curl -sS -o "${response_file}" -w '%{http_code}' \
+  code="$(curl -sS --max-time 30 --retry 3 -o "${response_file}" -w '%{http_code}' \
     -X POST "${PANEL_URL%/}/api/v1/pki/agent-certificates" \
     -H "Authorization: Bearer ${ENROLL_TOKEN:-${ACTIVE_TOKEN:-${TOKEN}}}" \
     -H "Content-Type: application/json" \
@@ -384,6 +398,7 @@ PY
   chmod 644 "${srv_crt}" "${ca_crt}"
   chown -R "${USER_NAME}:${GROUP_NAME}" "${TLS_DIR}"
   chmod 700 "${TLS_DIR}"
+  umask "${_saved_umask}"
 }
 
 # Pick an address Panel should dial (override with LADDER_REPORT_ADDRESS).
@@ -403,8 +418,8 @@ detect_report_address() {
         ;;
     esac
   done
-  if command -v curl >/dev/null 2>&1; then
-    pub="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+  if [[ -n "${IP_ECHO_URL}" ]] && command -v curl >/dev/null 2>&1; then
+    pub="$(curl -fsS --max-time 3 "${IP_ECHO_URL}" 2>/dev/null || true)"
     if [[ "${pub}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
       echo "${pub}"
       return
@@ -444,6 +459,14 @@ install_binary() {
   fi
   echo "==> 安装二进制 → ${INSTALL_BIN}"
   install -m 0755 "${src}" "${INSTALL_BIN}"
+  # 授予非 root 监听 1024 以下端口能力（与 unit 的 AmbientCapabilities 配合；
+  # install 会重置 file capabilities，故每次安装/升级后都要重新 setcap）
+  if command -v setcap >/dev/null 2>&1; then
+    setcap cap_net_bind_service+ep "${INSTALL_BIN}" 2>/dev/null \
+      || echo "WARNING: setcap cap_net_bind_service 失败，1024 以下端口将无法监听" >&2
+  else
+    echo "WARNING: 未找到 setcap，跳过 capability 授予（1024 以下端口将无法监听）" >&2
+  fi
 }
 
 write_unit() {
@@ -460,11 +483,15 @@ User=${USER_NAME}
 Group=${GROUP_NAME}
 WorkingDirectory=${DATA_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${INSTALL_BIN} -listen=\${LADDER_LISTEN} -token=\${LADDER_TOKEN} -data-dir=\${LADDER_DATA_DIR} -tls-cert=\${LADDER_TLS_CERT} -tls-key=\${LADDER_TLS_KEY} -tls-client-ca=\${LADDER_TLS_CLIENT_CA} -panel-url=\${LADDER_PANEL_URL} -node-id=\${LADDER_NODE_ID} -report-address=\${LADDER_REPORT_ADDRESS} -tls-sans=\${LADDER_TLS_EXTRA_SANS}
+# LADDER_TOKEN 由 EnvironmentFile 注入环境（agent 从环境变量回退读取），不放命令行
+ExecStart=${INSTALL_BIN} -listen=\${LADDER_LISTEN} -data-dir=\${LADDER_DATA_DIR} -tls-cert=\${LADDER_TLS_CERT} -tls-key=\${LADDER_TLS_KEY} -tls-client-ca=\${LADDER_TLS_CLIENT_CA} -panel-url=\${LADDER_PANEL_URL} -node-id=\${LADDER_NODE_ID} -report-address=\${LADDER_REPORT_ADDRESS} -tls-sans=\${LADDER_TLS_EXTRA_SANS}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
 NoNewPrivileges=true
+# NoNewPrivileges=true 下 file capabilities 不生效；用 AmbientCapabilities 授予
+# 非 root 监听 1024 以下端口能力（与二进制上的 setcap cap_net_bind_service+ep 并存）
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=${DATA_DIR} ${TLS_DIR}
@@ -515,11 +542,33 @@ if [[ ! -s "${STAGED}" ]]; then
   exit 1
 fi
 
+# 若 agent 落盘了 <二进制名>.sha256（sha256sum -c 兼容格式），先校验再应用；
+# 校验失败拒绝安装并保留现场（STAGED/READY 均不删，便于排查后人工处理）。
+SUMS="${STAGED}.sha256"
+if [[ -f "${SUMS}" ]]; then
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    logger -t "${LOG_TAG}" "存在 ${SUMS} 但缺少 sha256sum，拒绝应用升级（保留现场）"
+    exit 1
+  fi
+  if ! (cd "${UPGRADE_DIR}" && sha256sum -c "${ASSET}.sha256" >/dev/null 2>&1); then
+    logger -t "${LOG_TAG}" "SHA256 校验失败，拒绝应用升级：${STAGED}（保留现场）"
+    exit 1
+  fi
+  logger -t "${LOG_TAG}" "SHA256 校验通过：${STAGED}"
+fi
+
 logger -t "${LOG_TAG}" "正在替换升级二进制 ${STAGED} -> ${INSTALL_BIN}"
 if [[ -x "${INSTALL_BIN}" ]]; then
   cp -a "${INSTALL_BIN}" "${INSTALL_BIN}.bak" || true
 fi
 install -m 0755 "${STAGED}" "${INSTALL_BIN}"
+# install 会重置 file capabilities；重新授予，保证升级后仍可监听 1024 以下端口
+if command -v setcap >/dev/null 2>&1; then
+  setcap cap_net_bind_service+ep "${INSTALL_BIN}" 2>/dev/null \
+    || logger -t "${LOG_TAG}" "WARNING: setcap cap_net_bind_service 失败，1024 以下端口将无法监听"
+else
+  logger -t "${LOG_TAG}" "WARNING: 未找到 setcap，跳过 capability 授予"
+fi
 rm -f "${READY}"
 # Keep staged copy briefly for debug; remove partials
 rm -f "${STAGED}.partial" || true
@@ -556,12 +605,83 @@ Nice=0
 EOF
 }
 
+# Root-owned helper: applies BBR enable/disable requests staged by the agent.
+# The agent runs unprivileged and cannot change sysctl; it writes
+# DATA_DIR/bbr.request (enable|disable) and ladder-agent-bbr.path triggers the
+# oneshot service below as root whenever the file appears or changes.
+write_bbr_units() {
+  local helper="/usr/local/lib/ladder-agent/apply-bbr.sh"
+  local helper_dir
+  helper_dir="$(dirname "${helper}")"
+  mkdir -p "${helper_dir}"
+
+  echo "==> 写入 BBR 助手: ${helper}"
+  # DATA_DIR 在写入时按实际值展开；运行时可用 BBR_REQUEST/BBR_CONF 覆盖（便于测试）
+  cat >"${helper}" <<EOF
+#!/bin/bash
+set -euo pipefail
+REQUEST="\${BBR_REQUEST:-${DATA_DIR}/bbr.request}"
+CONF="\${BBR_CONF:-/etc/sysctl.d/99-ladder-bbr.conf}"
+LOG_TAG="ladder-agent-bbr"
+
+if [[ ! -f "\${REQUEST}" ]]; then
+  exit 0
+fi
+# 请求内容为 enable 或 disable（忽略首尾空白）；其它内容记录警告并丢弃
+content="\$(tr -d '[:space:]' < "\${REQUEST}")"
+case "\${content}" in
+  enable)
+    sysctl -w net.core.default_qdisc=fq net.ipv4.tcp_congestion_control=bbr
+    printf '%s\n' 'net.core.default_qdisc=fq' 'net.ipv4.tcp_congestion_control=bbr' >"\${CONF}"
+    logger -t "\${LOG_TAG}" "已启用 BBR（fq + bbr），持久化到 \${CONF}"
+    ;;
+  disable)
+    sysctl -w net.ipv4.tcp_congestion_control=cubic
+    rm -f "\${CONF}"
+    logger -t "\${LOG_TAG}" "已恢复 cubic 拥塞控制，删除 \${CONF}"
+    ;;
+  *)
+    logger -t "\${LOG_TAG}" "WARNING: 非法 BBR 请求内容 \"\${content}\"，已丢弃"
+    ;;
+esac
+rm -f "\${REQUEST}"
+EOF
+  chmod 0755 "${helper}"
+
+  local unit_dir="/etc/systemd/system"
+  echo "==> 写入 systemd path/service: ladder-agent-bbr.*"
+  cat >"${unit_dir}/ladder-agent-bbr.path" <<EOF
+[Unit]
+Description=Watch LadderAirport agent BBR request file
+
+[Path]
+PathExistsModified=${DATA_DIR}/bbr.request
+Unit=ladder-agent-bbr.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat >"${unit_dir}/ladder-agent-bbr.service" <<EOF
+[Unit]
+Description=Apply LadderAirport agent BBR request (sysctl)
+
+[Service]
+Type=oneshot
+ExecStart=${helper}
+EOF
+}
+
 enable_and_restart() {
   write_upgrade_units
+  write_bbr_units
   systemctl daemon-reload
   systemctl enable "${SERVICE_NAME}"
   systemctl enable ladder-agent-upgrade.path
   systemctl restart ladder-agent-upgrade.path || systemctl start ladder-agent-upgrade.path || true
+  # 注意：enable + start 的是 .path 监视单元，不是 oneshot .service
+  systemctl enable ladder-agent-bbr.path
+  systemctl restart ladder-agent-bbr.path || systemctl start ladder-agent-bbr.path || true
   systemctl restart "${SERVICE_NAME}"
   sleep 0.8
   systemctl --no-pager --full status "${SERVICE_NAME}" || true
@@ -696,6 +816,7 @@ PY
   echo "  配置:    ${ENV_FILE}"
   echo "  数据:    ${DATA_DIR}"
   echo "  服务:    ${SERVICE_NAME} (已 enable + start)"
+  echo "  BBR:     ladder-agent-bbr.path (已 enable + start；Panel 节点详情「系统状态」页签开关)"
   echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
   echo "  TLS:     Panel CA + strict mTLS"
   echo "  Panel:   ${PANEL_URL%/}"
@@ -730,8 +851,6 @@ do_upgrade() {
   write_unit
   enable_and_restart
 
-  ACTIVE_TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | cut -d= -f2- || true)"
-
   echo
   echo "======== 升级完成 ========"
   echo "  动作:    upgrade"
@@ -747,6 +866,7 @@ do_upgrade() {
   echo "运维: systemctl status ladder-agent ; journalctl -u ladder-agent -f"
   echo "在 Panel 刷新/探测节点以确认 agent_version"
   echo "远程升级: Panel 节点详情点「远程升级」（需 ladder-agent-upgrade.path 已 enable）"
+  echo "BBR 开关: Panel 节点详情「系统状态」页签（需 ladder-agent-bbr.path 已 enable）"
 }
 
 # ---------- uninstall ----------
@@ -761,6 +881,10 @@ do_uninstall() {
   systemctl disable ladder-agent-upgrade.path 2>/dev/null || true
   rm -f /etc/systemd/system/ladder-agent-upgrade.path /etc/systemd/system/ladder-agent-upgrade.service
   rm -f /usr/local/lib/ladder-agent/apply-upgrade.sh
+  systemctl stop ladder-agent-bbr.path 2>/dev/null || true
+  systemctl disable ladder-agent-bbr.path 2>/dev/null || true
+  rm -f /etc/systemd/system/ladder-agent-bbr.path /etc/systemd/system/ladder-agent-bbr.service
+  rm -f /usr/local/lib/ladder-agent/apply-bbr.sh
   if [[ -f "${SERVICE_DST}" ]]; then
     rm -f "${SERVICE_DST}"
     echo "  已删除 unit: ${SERVICE_DST}"
@@ -796,11 +920,16 @@ do_uninstall() {
         groupdel "${GROUP_NAME}" 2>/dev/null || true
         echo "  已尝试删除组: ${GROUP_NAME}"
       fi
+      if [[ -f /etc/sysctl.d/99-ladder-bbr.conf ]]; then
+        rm -f /etc/sysctl.d/99-ladder-bbr.conf
+        echo "  已删除: /etc/sysctl.d/99-ladder-bbr.conf（当前内核拥塞控制重启后恢复默认）"
+      fi
       ;;
     *)
       echo "==> 已保留配置与数据（需要全清请加 LADDER_PURGE=1）:"
       [[ -d "${CONF_DIR}" ]] && echo "  conf: ${CONF_DIR}"
       [[ -d "${DATA_DIR}" ]] && echo "  data: ${DATA_DIR}"
+      [[ -f /etc/sysctl.d/99-ladder-bbr.conf ]] && echo "  sysctl: /etc/sysctl.d/99-ladder-bbr.conf"
       ;;
   esac
 

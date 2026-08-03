@@ -62,6 +62,7 @@ USER_NAME="${LADDER_USER:-ladder-panel}"
 GROUP_NAME="${LADDER_GROUP:-ladder-panel}"
 LISTEN="${LADDER_LISTEN:-:8080}"
 SESSION_SECRET="${LADDER_SESSION_SECRET:-}"
+ADMIN_PASSWORD="${LADDER_ADMIN_PASSWORD:-}"
 DB_PATH="${LADDER_DB:-${DATA_DIR}/panel.db}"
 BOOTSTRAP="${LADDER_BOOTSTRAP:-true}"
 BOOTSTRAP_TIMEOUT="${LADDER_BOOTSTRAP_TIMEOUT:-3m}"
@@ -114,6 +115,15 @@ ensure_session_secret() {
   if [[ -z "${SESSION_SECRET}" ]]; then
     SESSION_SECRET="$(gen_secret)"
     echo "==> 已生成 LADDER_SESSION_SECRET（将写入 panel.env，请妥善备份）"
+  fi
+}
+
+# Append key=value to panel.env only when missing (never overwrite existing).
+ensure_env_key() {
+  local key="$1" val="$2"
+  if ! grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
+    echo "${key}=${val}" >>"${ENV_FILE}"
+    echo "    已追加 ${key}"
   fi
 }
 
@@ -171,6 +181,12 @@ download_release_binary() {
       if command -v sha256sum >/dev/null 2>&1; then
         (cd "${TMPDIR_DL}" && grep " ${asset}\$" SHA256SUMS.txt | sha256sum -c -) >&2 \
           || die "SHA256 校验失败"
+      else
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
+        echo "WARNING: 未找到 sha256sum，无法校验 ${asset} 的完整性！" >&2
+        echo "         二进制将被跳过校验直接安装，存在被篡改风险。" >&2
+        echo "         请安装 coreutils 后重试。" >&2
+        echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" >&2
       fi
     else
       echo "    (无 SHA256SUMS.txt，跳过校验)" >&2
@@ -252,6 +268,8 @@ install_binary() {
 write_unit() {
   echo "==> 写入 systemd: ${SERVICE_DST}"
   # Single-line ExecStart; systemd expands ${LADDER_*} from EnvironmentFile.
+  # LADDER_SESSION_SECRET 只经 EnvironmentFile 注入环境（panel 从环境变量回退读取），
+  # 不出现在命令行，避免 ps/proc 泄露。
   cat >"${SERVICE_DST}" <<EOF
 [Unit]
 Description=LadderAirport Panel (control plane)
@@ -264,7 +282,7 @@ User=${USER_NAME}
 Group=${GROUP_NAME}
 WorkingDirectory=${DATA_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${INSTALL_BIN} -listen \${LADDER_LISTEN} -db \${LADDER_DB} -session-secret \${LADDER_SESSION_SECRET} -bootstrap=\${LADDER_BOOTSTRAP} -bootstrap-timeout \${LADDER_BOOTSTRAP_TIMEOUT} -bootstrap-retry=\${LADDER_BOOTSTRAP_RETRY} -bootstrap-retry-interval \${LADDER_BOOTSTRAP_RETRY_INTERVAL}
+ExecStart=${INSTALL_BIN} -listen \${LADDER_LISTEN} -db \${LADDER_DB} -bootstrap=\${LADDER_BOOTSTRAP} -bootstrap-timeout \${LADDER_BOOTSTRAP_TIMEOUT} -bootstrap-retry=\${LADDER_BOOTSTRAP_RETRY} -bootstrap-retry-interval \${LADDER_BOOTSTRAP_RETRY_INTERVAL}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536
@@ -333,13 +351,6 @@ do_install() {
   if [[ -f "${ENV_FILE}" ]]; then
     echo "    已存在，不覆盖（改 listen/secret/db 请手动编辑后 restart）"
     # Backfill missing keys only (never overwrite existing secret)
-    ensure_env_key() {
-      local key="$1" val="$2"
-      if ! grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
-        echo "${key}=${val}" >>"${ENV_FILE}"
-        echo "    已追加 ${key}"
-      fi
-    }
     ensure_env_key "LADDER_LISTEN" "${LISTEN}"
     ensure_env_key "LADDER_DB" "${DB_PATH}"
     if ! grep -q '^LADDER_SESSION_SECRET=' "${ENV_FILE}" 2>/dev/null; then
@@ -350,6 +361,10 @@ do_install() {
     ensure_env_key "LADDER_BOOTSTRAP_TIMEOUT" "${BOOTSTRAP_TIMEOUT}"
     ensure_env_key "LADDER_BOOTSTRAP_RETRY" "${BOOTSTRAP_RETRY}"
     ensure_env_key "LADDER_BOOTSTRAP_RETRY_INTERVAL" "${BOOTSTRAP_RETRY_INTERVAL}"
+    # 透传初始管理员密码（仅首次初始化生效；已有键不覆盖）
+    if [[ -n "${ADMIN_PASSWORD}" ]]; then
+      ensure_env_key "LADDER_ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+    fi
     # Show non-secret keys for operator feedback
     grep -E '^LADDER_LISTEN=|^LADDER_DB=|^LADDER_BOOTSTRAP' "${ENV_FILE}" || true
     if grep -q '^LADDER_SESSION_SECRET=' "${ENV_FILE}" 2>/dev/null; then
@@ -366,6 +381,9 @@ do_install() {
       echo "LADDER_BOOTSTRAP_TIMEOUT=${BOOTSTRAP_TIMEOUT}"
       echo "LADDER_BOOTSTRAP_RETRY=${BOOTSTRAP_RETRY}"
       echo "LADDER_BOOTSTRAP_RETRY_INTERVAL=${BOOTSTRAP_RETRY_INTERVAL}"
+      if [[ -n "${ADMIN_PASSWORD}" ]]; then
+        echo "LADDER_ADMIN_PASSWORD=${ADMIN_PASSWORD}"
+      fi
     } >"${ENV_FILE}"
     chmod 640 "${ENV_FILE}"
     chown root:"${GROUP_NAME}" "${ENV_FILE}"
@@ -390,11 +408,11 @@ do_install() {
   echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
   echo
   echo "  浏览器:  ${http_hint}"
-  echo "  默认管理员密码: admin  （登录后立刻在「设置」中修改）"
+  echo "  初始管理员密码: 随机生成，见 journalctl -u ladder-panel（仅打印一次；可用 LADDER_ADMIN_PASSWORD 预置）"
   echo
   echo "建议下一步:"
   echo "  1. 在「设置」填写 Public Base URL（用于订阅链接与节点一键安装命令）"
-  echo "  2. 修改管理员密码，并备份 session secret、SQLite 与 ${DATA_DIR}/pki"
+  echo "  2. 登录后修改管理员密码，并备份 session secret、SQLite 与 ${DATA_DIR}/pki"
   echo "  3. 安全备份后将 ${DATA_DIR}/pki/offline/root-ca.key 转移到离线介质"
   echo "  4. 按需用 Nginx/Caddy 反代 HTTPS 到 ${ACTIVE_LISTEN}"
   echo "  5. 安装节点: 见 deploy/README-agent.md 或 Panel「添加节点并生成安装命令」"
@@ -421,13 +439,6 @@ do_upgrade() {
   fi
 
   # Backfill missing keys only — never overwrite secret
-  ensure_env_key() {
-    local key="$1" val="$2"
-    if ! grep -q "^${key}=" "${ENV_FILE}" 2>/dev/null; then
-      echo "${key}=${val}" >>"${ENV_FILE}"
-      echo "    已追加 ${key}"
-    fi
-  }
   ensure_env_key "LADDER_LISTEN" "${LISTEN}"
   ensure_env_key "LADDER_DB" "${DB_PATH}"
   ensure_env_key "LADDER_BOOTSTRAP" "${BOOTSTRAP}"
@@ -500,10 +511,15 @@ do_uninstall() {
         rm -rf "${DATA_DIR}"
         echo "  已删除: ${DATA_DIR}"
       fi
-      # Also remove DB if it lived outside DATA_DIR
-      if [[ -n "${ACTIVE_DB}" && -f "${ACTIVE_DB}" ]]; then
-        rm -f "${ACTIVE_DB}"
-        echo "  已删除数据库: ${ACTIVE_DB}"
+      # Also remove DB (and SQLite WAL/SHM sidecars) if it lived outside DATA_DIR
+      if [[ -n "${ACTIVE_DB}" ]]; then
+        local _dbf
+        for _dbf in "${ACTIVE_DB}" "${ACTIVE_DB}-wal" "${ACTIVE_DB}-shm"; do
+          if [[ -f "${_dbf}" ]]; then
+            rm -f "${_dbf}"
+            echo "  已删除: ${_dbf}"
+          fi
+        done
       fi
       if id -u "${USER_NAME}" >/dev/null 2>&1; then
         userdel "${USER_NAME}" 2>/dev/null || true

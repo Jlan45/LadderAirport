@@ -25,8 +25,8 @@ func (s *Server) handleBatchStop(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) runBatchTask(w http.ResponseWriter, r *http.Request, taskType string) {
 	var req batchRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	nodeIDs, err := s.resolveBatchTargets(req)

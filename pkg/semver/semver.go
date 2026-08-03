@@ -200,7 +200,8 @@ func atoiOK(s string) (int, bool) {
 //   - empty / unknown / bare "dev" current → true
 //   - both parseable → current < recommended
 //   - current unparseable but recommended parseable → true
-//   - recommended unparseable → fall back to normalized string inequality
+//   - current parseable but recommended unparseable → false (no trusted target)
+//   - neither parseable → fall back to normalized string inequality
 func IsOutdated(current, recommended string) bool {
 	recRaw := strings.TrimSpace(recommended)
 	if recRaw == "" {
@@ -224,6 +225,10 @@ func IsOutdated(current, recommended string) bool {
 	if rec.Valid && !cur.Valid {
 		// e.g. current="0.1.0-dev" still parses; truly free-form → treat outdated
 		return true
+	}
+	if cur.Valid && !rec.Valid {
+		// 目标版本不可信，不提示过期。
+		return false
 	}
 	// Neither parseable as semver: normalize and compare equality only.
 	return normalizeLoose(curRaw) != normalizeLoose(recRaw)

@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
@@ -54,6 +53,10 @@ type BoxRuntime struct {
 
 	// applyMu serializes all lifecycle transitions (Apply/Start/Stop).
 	applyMu sync.Mutex
+
+	// Traffic persist loop lifecycle (guarded by applyMu; nil when not running).
+	stopTrafficPersist chan struct{}
+	trafficPersistDone chan struct{}
 }
 
 // NewBoxRuntime creates a BoxRuntime. dataDir, if non-empty, receives current.json
@@ -64,9 +67,7 @@ func NewBoxRuntime(dataDir string) *BoxRuntime {
 		state:   StateStopped,
 	}
 	r.loadTraffic()
-	if dataDir != "" {
-		go r.startTrafficPersistLoop()
-	}
+	r.startTrafficPersistLoopLocked()
 	return r
 }
 
@@ -78,6 +79,9 @@ func (r *BoxRuntime) Apply(ctx context.Context, configJSON string, hash string) 
 
 // applyLocked requires applyMu held.
 func (r *BoxRuntime) applyLocked(ctx context.Context, configJSON string, hash string) error {
+	// Restart the traffic persist loop if a previous Stop shut it down.
+	r.startTrafficPersistLoopLocked()
+
 	// Idempotent: already running this exact config — do not restart.
 	r.mu.Lock()
 	same := r.state == StateRunning && r.instance != nil && hash != "" && hash == r.configHash && configJSON == r.configJSON
@@ -238,14 +242,8 @@ func (r *BoxRuntime) Start(ctx context.Context) error {
 func (r *BoxRuntime) Stop(_ context.Context) error {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
-
-	r.mu.Lock()
-	had := r.instance != nil
-	r.mu.Unlock()
+	r.stopTrafficPersistLoopLocked()
 	r.stopInstanceLocked()
-	if !had {
-		return nil
-	}
 	return nil
 }
 
@@ -261,7 +259,8 @@ func (r *BoxRuntime) Status(_ context.Context) Status {
 }
 
 // Metrics returns live connection count, cumulative traffic (survives hot-reload),
-// and approximate process memory. CPU percent is sampled coarsely (0 if unavailable).
+// and process RSS (Linux /proc; MemStats.Sys fallback elsewhere).
+// CPU percent is sampled coarsely (0 if unavailable).
 func (r *BoxRuntime) Metrics(_ context.Context) Metrics {
 	r.mu.Lock()
 	var conns, up, down int64
@@ -273,30 +272,32 @@ func (r *BoxRuntime) Metrics(_ context.Context) Metrics {
 	down += r.prevDownlink
 	r.mu.Unlock()
 
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
 	return Metrics{
 		Connections:    conns,
 		UplinkBytes:    up,
 		DownlinkBytes:  down,
 		CPUPercent:     sampleCPUPercent(),
-		MemoryRSSBytes: int64(ms.Sys),
+		MemoryRSSBytes: processRSSBytes(),
 	}
 }
 
 // ProbeOutbound performs a real HTTP URL test through a running outbound. The
-// lifecycle lock prevents Apply from closing the box while the dial is active.
+// instance reference is taken under the lifecycle lock, which is released
+// before the network dial so a slow URL test does not block Apply/Start/Stop.
+// The whole probe is bounded by a 10s timeout.
 func (r *BoxRuntime) ProbeOutbound(ctx context.Context, outboundTag, targetURL string) (uint32, error) {
 	parsed, err := url.Parse(targetURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return 0, fmt.Errorf("探测 URL 必须是完整的 HTTP/HTTPS 地址")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	r.applyMu.Lock()
-	defer r.applyMu.Unlock()
 	r.mu.Lock()
 	instance := r.instance
 	state := r.state
 	r.mu.Unlock()
+	r.applyMu.Unlock()
 	if instance == nil || state != StateRunning {
 		return 0, fmt.Errorf("sing-box 尚未运行")
 	}
@@ -392,9 +393,39 @@ func (r *BoxRuntime) saveTraffic() {
 	_ = os.Rename(tmp, path)
 }
 
-func (r *BoxRuntime) startTrafficPersistLoop() {
+// startTrafficPersistLoopLocked launches the periodic traffic saver if needed.
+// Caller must hold applyMu (or be the constructor).
+func (r *BoxRuntime) startTrafficPersistLoopLocked() {
+	if r.dataDir == "" || r.stopTrafficPersist != nil {
+		return
+	}
+	r.stopTrafficPersist = make(chan struct{})
+	r.trafficPersistDone = make(chan struct{})
+	go r.trafficPersistLoop(r.stopTrafficPersist, r.trafficPersistDone)
+}
+
+// stopTrafficPersistLoopLocked stops the periodic saver and waits for it to
+// exit. Caller must hold applyMu.
+func (r *BoxRuntime) stopTrafficPersistLoopLocked() {
+	if r.stopTrafficPersist == nil {
+		return
+	}
+	close(r.stopTrafficPersist)
+	<-r.trafficPersistDone
+	r.stopTrafficPersist = nil
+	r.trafficPersistDone = nil
+}
+
+func (r *BoxRuntime) trafficPersistLoop(stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
 	ticker := time.NewTicker(10 * time.Second)
-	for range ticker.C {
-		r.saveTraffic()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			r.saveTraffic()
+		}
 	}
 }

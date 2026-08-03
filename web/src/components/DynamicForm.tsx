@@ -12,6 +12,9 @@ import type { Field } from '../api/client'
 import { cn } from '@/lib/utils'
 import { Dices } from 'lucide-react'
 
+/** Radix Select rejects empty-string item values; use a sentinel for the "(默认)" option. */
+const SELECT_EMPTY_VALUE = '__default__'
+
 export interface DynamicFormProps {
   fields: Field[]
   value: Record<string, unknown>
@@ -142,19 +145,19 @@ function renderInput(
         </div>
       )
     case 'select':
-      const selectVal = current == null ? '' : String(current)
+      const selectVal = current == null || current === '' ? SELECT_EMPTY_VALUE : String(current)
       return (
         <Select
           disabled={disabled}
           value={selectVal}
-          onValueChange={(val) => setField(f.name, val)}
+          onValueChange={(val) => setField(f.name, val === SELECT_EMPTY_VALUE ? '' : val)}
         >
           <SelectTrigger className={error ? 'border-red-500 focus-visible:ring-red-500' : ''} id={inputId}>
             <SelectValue placeholder="请选择" />
           </SelectTrigger>
           <SelectContent>
             {(f.options ?? []).map((opt) => (
-              <SelectItem key={opt} value={opt}>
+              <SelectItem key={opt || SELECT_EMPTY_VALUE} value={opt === '' ? SELECT_EMPTY_VALUE : opt}>
                 {opt === '' ? '(默认 / 不限制)' : opt}
               </SelectItem>
             ))}

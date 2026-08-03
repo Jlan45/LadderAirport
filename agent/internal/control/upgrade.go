@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -23,7 +27,14 @@ const (
 	defaultUpgradeRepo = "Jlan45/LadderAirport"
 	githubAPIBase      = "https://api.github.com"
 	githubReleaseBase  = "https://github.com"
+
+	// maxUpgradeDownloadBytes caps the staged binary size.
+	maxUpgradeDownloadBytes = 256 << 20
 )
+
+// ErrReleaseSumsNotFound marks the "release has no SHA256SUMS.txt" case so the
+// caller can soft-fail on it with errors.Is instead of matching message text.
+var ErrReleaseSumsNotFound = errors.New("未找到校验文件")
 
 // UpgradeRequest is the agent-side upgrade plan.
 type UpgradeRequest struct {
@@ -49,6 +60,11 @@ type UpgradeResult struct {
 // writes a .ready marker so the root helper applies it. This process never
 // replaces its own executable (no root / NoNewPrivileges).
 func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult, error) {
+	// A custom download URL bypasses release-sum verification, so it must
+	// carry an explicit checksum; never install unverified binaries.
+	if strings.TrimSpace(req.DownloadURL) != "" && strings.TrimSpace(req.SHA256) == "" {
+		return nil, status.Error(codes.FailedPrecondition, "自定义下载地址必须同时提供 SHA256 校验值，拒绝无校验安装")
+	}
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("远程升级仅支持 Linux，当前系统为 %s", runtime.GOOS)
 	}
@@ -93,10 +109,12 @@ func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult,
 	finalPath := filepath.Join(dir, asset)
 	readyPath := finalPath + ".ready"
 	metaPath := finalPath + ".json"
+	sumsPath := finalPath + ".sha256"
 
 	// Clean previous staging artifacts for this asset.
 	_ = os.Remove(tmpPath)
 	_ = os.Remove(readyPath)
+	_ = os.Remove(sumsPath)
 
 	if err := downloadFile(ctx, client, url, tmpPath); err != nil {
 		_ = os.Remove(tmpPath)
@@ -117,7 +135,7 @@ func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult,
 		// Best-effort: verify against SHA256SUMS.txt when present.
 		if err := verifyAgainstReleaseSums(ctx, client, repo, resolvedVersion, asset, sum); err != nil {
 			// Soft-fail only when sums file missing; hard-fail on mismatch.
-			if !strings.Contains(err.Error(), "未找到校验文件") {
+			if !errors.Is(err, ErrReleaseSumsNotFound) {
 				_ = os.Remove(tmpPath)
 				return nil, err
 			}
@@ -132,6 +150,12 @@ func StageAgentUpgrade(ctx context.Context, req UpgradeRequest) (*UpgradeResult,
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return nil, fmt.Errorf("暂存升级二进制失败：%w", err)
+	}
+
+	// sha256sum -c compatible checksum file for the root upgrade helper.
+	sumsLine := fmt.Sprintf("%s  %s\n", sum, asset)
+	if err := os.WriteFile(sumsPath, []byte(sumsLine), 0o644); err != nil {
+		return nil, fmt.Errorf("写入升级校验文件失败：%w", err)
 	}
 
 	meta := map[string]any{
@@ -227,9 +251,14 @@ func downloadFile(ctx context.Context, client *http.Client, url, dest string) er
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := io.Copy(f, io.LimitReader(resp.Body, 256<<20)); err != nil {
+	written, err := io.Copy(f, io.LimitReader(resp.Body, maxUpgradeDownloadBytes))
+	if err != nil {
+		_ = f.Close()
 		return fmt.Errorf("写入下载文件失败：%w", err)
+	}
+	if written == maxUpgradeDownloadBytes {
+		_ = f.Close()
+		return fmt.Errorf("下载文件达到 %d 字节上限，疑似被截断", maxUpgradeDownloadBytes)
 	}
 	return f.Close()
 }
@@ -256,11 +285,11 @@ func verifyAgainstReleaseSums(ctx context.Context, client *http.Client, repo, ta
 	req.Header.Set("User-Agent", "LadderAirport-Agent")
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("未找到校验文件：%w", err)
+		return fmt.Errorf("%w：%v", ErrReleaseSumsNotFound, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("未找到校验文件")
+		return ErrReleaseSumsNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("获取校验文件失败：HTTP %d", resp.StatusCode)

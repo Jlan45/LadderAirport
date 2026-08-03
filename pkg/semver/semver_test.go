@@ -70,6 +70,12 @@ func TestIsOutdated(t *testing.T) {
 		{"v0.3.1-rc.1", "v0.3.1", true},
 		{"v0.3.1", "v0.3.1-rc.1", false},
 		{"dev", "v0.1.0", true},
+		// current 可解析、recommended 不可解析 → 无可信目标，不提示过期
+		{"v0.3.1", "not-a-version", false},
+		{"v0.1.0", "latest-stable-xx", false},
+		// 双方都不可解析 → 仍退化为规范化字符串不等比较
+		{"build-abc", "build-def", true},
+		{"build-abc", "build-abc", false},
 	}
 	for _, c := range cases {
 		got := IsOutdated(c.cur, c.rec)

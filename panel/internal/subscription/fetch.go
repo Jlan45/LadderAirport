@@ -25,16 +25,8 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 		return nil, err
 	}
 	client := &http.Client{
-		Timeout: FetchTimeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= MaxRedirects {
-				return fmt.Errorf("重定向次数过多")
-			}
-			if err := validatePublicURL(req.URL); err != nil {
-				return err
-			}
-			return nil
-		},
+		Timeout:       FetchTimeout,
+		CheckRedirect: redirectChecker(headers),
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -55,11 +47,8 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 						continue
 					}
 					addr := ipa.IP.String()
-					if ipa.IP.To4() == nil {
-						addr = "[" + addr + "]"
-					}
 					if port != "" {
-						addr = net.JoinHostPort(ipa.IP.String(), port)
+						addr = net.JoinHostPort(addr, port)
 					}
 					conn, err := d.DialContext(ctx, network, addr)
 					if err != nil {
@@ -109,6 +98,25 @@ func FetchURL(ctx context.Context, rawURL string, headers map[string]string) ([]
 		return nil, fmt.Errorf("外部内容超过 %d 字节限制", MaxBodyBytes)
 	}
 	return body, nil
+}
+
+// redirectChecker validates redirect targets and strips custom headers (they
+// often carry subscription tokens) when a redirect crosses hosts.
+func redirectChecker(headers map[string]string) func(req *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= MaxRedirects {
+			return fmt.Errorf("重定向次数过多")
+		}
+		if err := validatePublicURL(req.URL); err != nil {
+			return err
+		}
+		if !strings.EqualFold(req.URL.Hostname(), via[0].URL.Hostname()) {
+			for k := range headers {
+				req.Header.Del(k)
+			}
+		}
+		return nil
+	}
 }
 
 func parsePublicHTTPURL(raw string) (*url.URL, error) {

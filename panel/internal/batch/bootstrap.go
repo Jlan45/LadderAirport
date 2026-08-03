@@ -85,12 +85,9 @@ func (r *Runner) RunBootstrapRetryLoop(ctx context.Context, interval time.Durati
 
 func (r *Runner) runRetryOnce(parent context.Context) {
 	// Cap each round so a hung dial cannot block the loop forever.
-	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
+	timeout := r.OperationTimeout()
 	// Allow all pending nodes: concurrency * per-node timeout + slack.
-	round := timeout*time.Duration(max(1, r.MaxConcurrency)*3) + 30*time.Second
+	round := timeout*time.Duration(max(1, r.ConcurrencyLimit())*3) + 30*time.Second
 	if round < 2*time.Minute {
 		round = 2 * time.Minute
 	}
@@ -112,16 +109,53 @@ func (r *Runner) nodesNeedingBootstrap() ([]store.Node, error) {
 		if builder == nil {
 			return nil, fmt.Errorf("配置构建器尚未配置")
 		}
-		cfg, err := builder.Build(n.ID)
+		// Compare a cheap DB fingerprint first; only rebuild the full config
+		// when relevant rows changed since the last build.
+		fingerprint, err := r.Store.NodeConfigFingerprint(n.ID)
 		if err != nil {
 			return nil, err
 		}
-		if nodeLooksSynced(n) && (n.ConfigHash == "" || n.ConfigHash == cfg.Hash) {
+		hash, cached := r.cachedBootstrapHash(n.ID, fingerprint)
+		if !cached {
+			cfg, err := builder.Build(n.ID)
+			if err != nil {
+				return nil, err
+			}
+			hash = cfg.Hash
+			r.cacheBootstrapHash(n.ID, fingerprint, hash)
+		}
+		if nodeLooksSynced(n) && (n.ConfigHash == "" || n.ConfigHash == hash) {
 			continue
 		}
 		need = append(need, n)
 	}
 	return need, nil
+}
+
+// bootstrapHashCache memoizes nodeID -> (fingerprint, config hash) so the
+// 30s retry loop skips full config builds when nothing relevant changed.
+type bootstrapHashCache struct {
+	fingerprint string
+	hash        string
+}
+
+func (r *Runner) cachedBootstrapHash(nodeID, fingerprint string) (string, bool) {
+	r.bootstrapCacheMu.Lock()
+	defer r.bootstrapCacheMu.Unlock()
+	entry, ok := r.bootstrapCache[nodeID]
+	if !ok || entry.fingerprint != fingerprint {
+		return "", false
+	}
+	return entry.hash, true
+}
+
+func (r *Runner) cacheBootstrapHash(nodeID, fingerprint, hash string) {
+	r.bootstrapCacheMu.Lock()
+	defer r.bootstrapCacheMu.Unlock()
+	if r.bootstrapCache == nil {
+		r.bootstrapCache = map[string]bootstrapHashCache{}
+	}
+	r.bootstrapCache[nodeID] = bootstrapHashCache{fingerprint: fingerprint, hash: hash}
 }
 
 func nodeLooksSynced(n store.Node) bool {

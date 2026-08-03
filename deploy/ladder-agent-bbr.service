@@ -1,0 +1,8 @@
+# 由 scripts/install-agent.sh 写入 /etc/systemd/system/ladder-agent-bbr.service。
+# root oneshot（无 User= 指令）：读取 agent 落盘的 bbr.request 并应用 sysctl。
+[Unit]
+Description=Apply LadderAirport agent BBR request (sysctl)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/ladder-agent/apply-bbr.sh

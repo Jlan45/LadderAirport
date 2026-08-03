@@ -105,3 +105,61 @@ func TestValidateAgentCertificateChainAndIdentity(t *testing.T) {
 		t.Fatal("expected wrong node identity to be rejected")
 	}
 }
+
+func writeTestCAPEM(t *testing.T, path string, commonName string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientCAPoolCacheReloadsOnMtimeChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	writeTestCAPEM(t, path, "ca-one")
+	cache := NewClientCAPoolCache(path)
+
+	first, err := cache.Pool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := cache.Pool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != again {
+		t.Fatal("unchanged CA file should return the cached pool")
+	}
+
+	// Rewrite the CA bundle and bump mtime so the change is detected even on
+	// filesystems with coarse mtime granularity.
+	writeTestCAPEM(t, path, "ca-two")
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := cache.Pool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded == first {
+		t.Fatal("changed CA file should rebuild the pool")
+	}
+}

@@ -2,6 +2,9 @@
 
 const API = '/api/v1'
 
+/** Default timeout for non-streaming API requests. */
+const REQUEST_TIMEOUT_MS = 30_000
+
 export const AUTH_EXPIRED_EVENT = 'ladder-airport:auth-expired'
 
 export class ApiError extends Error {
@@ -21,6 +24,7 @@ async function request<T>(
   const opts: RequestInit = {
     method,
     credentials: 'include',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: { Accept: 'application/json' },
   }
   if (body !== undefined) {
@@ -59,6 +63,7 @@ function notifyAuthExpired(status: number, path: string) {
 async function requestText(path: string): Promise<string> {
   const res = await fetch(`${API}${path}`, {
     credentials: 'include',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     headers: { Accept: 'text/plain, application/json' },
   })
   notifyAuthExpired(res.status, path)
@@ -102,6 +107,8 @@ export interface Node {
   pki_not_after_unix?: number
   /** Host NIC for sing-box direct bind_interface; empty = OS default route. */
   egress_interface?: string
+  /** When false, managed domains with address_source=agent_public pause probing. */
+  ddns_enabled?: boolean
   status: string
   last_seen_unix: number
   config_hash: string
@@ -138,6 +145,10 @@ export interface FRPServerConfig {
   generated_auth_token?: string
   tls_force: boolean
   max_ports_per_client: number
+  /** Bound managed domain used as the frpc-facing server address; empty = node address. */
+  managed_domain_id?: string
+  /** frpc dial host: bound domain FQDN, otherwise node public/control address. */
+  server_addr?: string
   desired_hash: string
   applied_hash: string
   runtime_state: string
@@ -160,6 +171,8 @@ export interface PutFRPServerConfigInput {
   rotate_auth_token?: boolean
   tls_force: boolean
   max_ports_per_client: number
+  /** Managed domain id to bind as frpc server address; empty string clears the binding. */
+  managed_domain_id?: string
 }
 
 export interface FRPServerClient {
@@ -431,6 +444,10 @@ export interface Subscription {
   include_all_chains: boolean
   external_source_ids?: string[]
   enabled: boolean
+  /** Bound route plan (scope=subscription); empty means none. */
+  route_plan_id?: string
+  /** Admin kill-switch: disabled subscriptions return 404 on the public link. */
+  disabled: boolean
   url?: string
   created_at_unix: number
   updated_at_unix: number
@@ -474,6 +491,37 @@ export interface ChainProbeResult {
   failed_hop_index: number
 }
 
+export type RoutePlanMatchType =
+  | 'domain'
+  | 'domain_suffix'
+  | 'domain_keyword'
+  | 'ip_cidr'
+  | 'process_name'
+
+export type RoutePlanAction = 'proxy' | 'direct' | 'block'
+
+export interface RoutePlanRule {
+  position: number
+  match_type: RoutePlanMatchType
+  match_value: string
+  action: RoutePlanAction
+  /** Required when action === 'proxy'; must reference an existing chain. */
+  target_chain_id?: string
+  enabled: boolean
+}
+
+export interface RoutePlan {
+  id: string
+  name: string
+  scope: 'global' | 'subscription' | string
+  subscription_id?: string
+  enabled: boolean
+  sort_order: number
+  rules: RoutePlanRule[]
+  created_at_unix: number
+  updated_at_unix: number
+}
+
 export interface ExternalSource {
   id: string
   name: string
@@ -504,6 +552,28 @@ export interface Metrics {
   memory_rss_bytes: number
 }
 
+/** Host-level system metrics collected by the agent (CPU/memory/disk/NIC rates). */
+export interface NodeSysmetrics {
+  cpu_percent: number
+  memory_total_bytes: number
+  memory_used_bytes: number
+  disk_total_bytes: number
+  disk_used_bytes: number
+  /** Bytes per second. */
+  uplink_bps: number
+  /** Bytes per second. */
+  downlink_bps: number
+  collected_at_unix: number
+}
+
+export interface NodeBBRStatus {
+  bbr_available: boolean
+  bbr_enabled: boolean
+  current_congestion_control: string
+  current_qdisc: string
+  supported_controls: string[]
+}
+
 export interface CreateNodeInput {
   name: string
   address?: string
@@ -522,6 +592,7 @@ export interface UpdateNodeInput {
   labels?: string[]
   egress_interface?: string
   port_mappings?: PortMapping[]
+  ddns_enabled?: boolean
 }
 
 export interface BootstrapNodeInput {
@@ -630,7 +701,7 @@ export function getNodeInstallCommand(
   if (opts?.tls === true) q.set('tls', '1')
   if (opts?.version) q.set('version', opts.version)
   const qs = q.toString()
-  return request('GET', `/nodes/${id}/install-command${qs ? `?${qs}` : ''}`)
+  return request('POST', `/nodes/${id}/install-command${qs ? `?${qs}` : ''}`)
 }
 
 export function updateNode(id: string, body: UpdateNodeInput): Promise<Node> {
@@ -718,6 +789,20 @@ export function stopNode(id: string): Promise<Task> {
 
 export function getNodeMetrics(id: string): Promise<Metrics> {
   return request('GET', `/nodes/${id}/metrics`)
+}
+
+/** Host system metrics (CPU/memory/disk/NIC rates); 400 when the agent is too old. */
+export function getNodeSysmetrics(id: string): Promise<NodeSysmetrics> {
+  return request('GET', `/nodes/${id}/sysmetrics`)
+}
+
+/** BBR congestion-control status; 400 when the agent is too old. */
+export function getNodeBBR(id: string): Promise<NodeBBRStatus> {
+  return request('GET', `/nodes/${id}/bbr`)
+}
+
+export function setNodeBBR(id: string, enabled: boolean): Promise<{ ok: boolean; message: string }> {
+  return request('POST', `/nodes/${id}/bbr`, { enabled })
 }
 
 export function listNodeInterfaces(id: string): Promise<{ interfaces: NetworkInterface[] }> {
@@ -925,8 +1010,9 @@ export function testDNSAccount(id: string): Promise<{ ok: boolean }> {
   return request('POST', `/dns/accounts/${id}/test`)
 }
 
-export function listManagedDomains(): Promise<ManagedDomain[]> {
-  return request('GET', '/managed-domains')
+export function listManagedDomains(nodeId?: string): Promise<ManagedDomain[]> {
+  const qs = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : ''
+  return request('GET', `/managed-domains${qs}`)
 }
 
 export function createManagedDomain(body: {
@@ -1012,6 +1098,7 @@ export function createSubscription(body: {
   chain_ids?: string[]
   include_all_chains?: boolean
   external_source_ids?: string[]
+  route_plan_id?: string
   enabled?: boolean
 }): Promise<Subscription> {
   return request('POST', '/subscriptions', body)
@@ -1028,6 +1115,7 @@ export function updateSubscription(
     chain_ids?: string[]
     include_all_chains?: boolean
     external_source_ids?: string[]
+    route_plan_id?: string
     enabled?: boolean
     rotate_token?: boolean
   },
@@ -1037,6 +1125,20 @@ export function updateSubscription(
 
 export function deleteSubscription(id: string): Promise<void> {
   return request('DELETE', `/subscriptions/${id}`)
+}
+
+/** Rotate the public subscription token; the old link is invalidated immediately. */
+export function rotateSubscriptionToken(id: string): Promise<{ token: string }> {
+  return request('POST', `/subscriptions/${id}/token/rotate`)
+}
+
+/** Disable the public subscription link (returns 404) without deleting config. */
+export function disableSubscription(id: string): Promise<{ ok: boolean }> {
+  return request('POST', `/subscriptions/${id}/disable`)
+}
+
+export function enableSubscription(id: string): Promise<{ ok: boolean }> {
+  return request('POST', `/subscriptions/${id}/enable`)
 }
 
 export async function previewSubscription(id: string, format?: string): Promise<string> {
@@ -1076,6 +1178,43 @@ export function probeProxyChain(id: string): Promise<ChainProbeResult> {
 
 export function previewProxyChain(body: ProxyChainInput): Promise<{ configs: Record<string, unknown> }> {
   return request('POST', '/proxy-chains/preview', body)
+}
+
+// --- Route plans (subscription routing rules) ---
+
+export function listRoutePlans(): Promise<RoutePlan[]> {
+  return request('GET', '/route-plans')
+}
+
+export function createRoutePlan(body: {
+  name: string
+  scope: 'global' | 'subscription'
+  subscription_id?: string
+  enabled?: boolean
+  rules?: RoutePlanRule[]
+}): Promise<RoutePlan> {
+  return request('POST', '/route-plans', body)
+}
+
+export function getRoutePlan(id: string): Promise<RoutePlan> {
+  return request('GET', `/route-plans/${id}`)
+}
+
+/** When rules are provided they fully replace the existing set in array order. */
+export function updateRoutePlan(
+  id: string,
+  body: {
+    name?: string
+    enabled?: boolean
+    sort_order?: number
+    rules?: RoutePlanRule[]
+  },
+): Promise<RoutePlan> {
+  return request('PUT', `/route-plans/${id}`, body)
+}
+
+export function deleteRoutePlan(id: string): Promise<void> {
+  return request('DELETE', `/route-plans/${id}`)
 }
 
 // --- External subscription sources ---

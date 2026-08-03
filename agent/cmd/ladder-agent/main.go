@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -27,7 +28,7 @@ import (
 
 func main() {
 	listen := flag.String("listen", ":50051", "gRPC 监听地址")
-	token := flag.String("token", "changeme", "AgentControl 共享 Bearer 令牌")
+	token := flag.String("token", "", "AgentControl 共享 Bearer 令牌（也可用环境变量 LADDER_TOKEN）")
 	tlsCert := flag.String("tls-cert", "", "Panel 签发的 TLS 证书文件（必填）")
 	tlsKey := flag.String("tls-key", "", "Agent TLS 私钥文件（必填）")
 	tlsClientCA := flag.String("tls-client-ca", "", "Panel 管理 CA 证书包（必填）")
@@ -35,7 +36,7 @@ func main() {
 	nodeID := flag.String("node-id", "", "证书身份对应的 Panel 节点 ID（必填）")
 	reportAddress := flag.String("report-address", "", "证书续签时上报给 Panel 的地址")
 	tlsSANs := flag.String("tls-sans", "", "续签时保留的逗号分隔 DNS/IP SAN")
-	dataDir := flag.String("data-dir", "", "配置和状态缓存目录（可选）")
+	dataDir := flag.String("data-dir", "", "配置和状态缓存目录（默认 ./data）")
 	showVersion := flag.Bool("version", false, "显示版本后退出")
 	flag.Parse()
 
@@ -49,7 +50,10 @@ func main() {
 	}
 
 	if *token == "" {
-		log.Fatal("必须提供 -token")
+		*token = os.Getenv("LADDER_TOKEN")
+	}
+	if *token == "" || *token == "changeme" {
+		log.Fatal("必须提供 -token 或环境变量 LADDER_TOKEN（且不允许使用弱默认值 changeme）")
 	}
 	if *tlsCert == "" || *tlsKey == "" || *tlsClientCA == "" || *panelURL == "" || *nodeID == "" {
 		log.Fatal("必须同时提供 -tls-cert、-tls-key、-tls-client-ca、-panel-url 和 -node-id")
@@ -57,14 +61,17 @@ func main() {
 	if err := managementpki.ParsePanelURL(*panelURL); err != nil {
 		log.Fatal(err)
 	}
-	if *dataDir != "" {
-		if err := os.MkdirAll(*dataDir, 0o755); err != nil {
-			log.Fatalf("创建数据目录失败：%v", err)
-		}
+	if *dataDir == "" {
+		*dataDir = "./data"
+	}
+	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
+		log.Fatalf("创建数据目录失败：%v", err)
 	}
 
 	rt := control.NewBoxRuntime(*dataDir)
 	logs := control.NewLogBuf(0)
+	// Mirror process logs into the ring buffer so StreamLogs can serve them.
+	log.SetOutput(io.MultiWriter(os.Stderr, logs.Writer("info")))
 	singboxVer := control.SingboxVersion()
 	frpsVer := frpsruntime.Version()
 	agentVersion := version.Version
@@ -74,12 +81,14 @@ func main() {
 	)
 
 	srv := control.NewServer(rt, agentVersion, singboxVer, logs)
-	srv.SetPublicAddressResolver(control.NewPublicAddressResolver())
-	certDataDir := *dataDir
-	if certDataDir == "" {
-		certDataDir = "./data"
+	srv.SetDataDir(*dataDir)
+	resolver := control.NewPublicAddressResolver()
+	if echoURLs := control.ParseIPEchoURLs(os.Getenv("LADDER_IP_ECHO_URLS")); len(echoURLs) > 0 {
+		resolver.SetEchoURLs(echoURLs)
+		log.Printf("公网探测源=LADDER_IP_ECHO_URLS 自定义 %d 个（覆盖默认源列表）", len(echoURLs))
 	}
-	protocolCerts, err := protocolcert.New(filepath.Join(certDataDir, "protocol-certs"))
+	srv.SetPublicAddressResolver(resolver)
+	protocolCerts, err := protocolcert.New(filepath.Join(*dataDir, "protocol-certs"))
 	if err != nil {
 		log.Fatalf("初始化协议证书存储失败：%v", err)
 	}
@@ -97,8 +106,14 @@ func main() {
 
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
-	host, portText, _ := net.SplitHostPort(*listen)
-	port, _ := strconv.Atoi(portText)
+	host, portText, err := net.SplitHostPort(*listen)
+	if err != nil {
+		log.Fatalf("解析监听地址 %q 失败：%v", *listen, err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		log.Fatalf("解析监听端口 %q 失败：%v", portText, err)
+	}
 	if *reportAddress != "" {
 		host = *reportAddress
 	}
@@ -120,7 +135,10 @@ func main() {
 		MinVersion:     tls.VersionTLS12,
 		GetCertificate: certManager.GetCertificate,
 	}
-	pool, err := managementpki.ClientCAPool(*tlsClientCA)
+	// Cache the parsed client CA pool; rebuilt only when the CA file's mtime
+	// changes (renewal rewrites it) instead of on every handshake.
+	caPoolCache := managementpki.NewClientCAPoolCache(*tlsClientCA)
+	pool, err := caPoolCache.Pool()
 	if err != nil {
 		log.Fatalf("加载 Panel 客户端 CA 失败：%v", err)
 	}
@@ -128,7 +146,7 @@ func main() {
 	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
 	tlsConfig.VerifyPeerCertificate = managementpki.VerifyPanelIdentity
 	tlsConfig.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
-		currentPool, err := managementpki.ClientCAPool(*tlsClientCA)
+		currentPool, err := caPoolCache.Pool()
 		if err != nil {
 			return nil, err
 		}

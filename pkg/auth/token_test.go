@@ -34,6 +34,25 @@ func TestValidateBearer(t *testing.T) {
 	}
 }
 
+func TestValidateBearerEmptyExpected(t *testing.T) {
+	// 空 expected 永不放行，即使请求方也带空令牌。
+	md := metadata.Pairs("authorization", "Bearer secret")
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+	if err := auth.ValidateIncomingBearer(ctx, ""); err == nil {
+		t.Fatal("expected error for empty expected token")
+	} else if st, ok := status.FromError(err); !ok || st.Code() != codes.Unauthenticated {
+		t.Fatalf("expected Unauthenticated, got %v", err)
+	}
+
+	emptyMD := metadata.Pairs("authorization", "Bearer ")
+	emptyCtx := metadata.NewIncomingContext(context.Background(), emptyMD)
+	if err := auth.ValidateIncomingBearer(emptyCtx, ""); err == nil {
+		t.Fatal("expected error for empty expected token with empty bearer")
+	} else if st, ok := status.FromError(err); !ok || st.Code() != codes.Unauthenticated {
+		t.Fatalf("expected Unauthenticated, got %v", err)
+	}
+}
+
 type fakeServerStream struct {
 	grpc.ServerStream
 	ctx context.Context

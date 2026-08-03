@@ -1,11 +1,15 @@
 import { type ConnectionErrors } from '@/components/NodeDetailDrawer'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Eye, EyeOff, X, Copy, Check } from 'lucide-react'
 import type { NetworkInterface, NodeInstallInfo } from '@/api/client'
+
+/** Radix Select rejects empty-string item values; use a sentinel for "系统默认". */
+const EGRESS_DEFAULT_VALUE = '__default__'
 
 export interface NodeOverviewTabProps {
   busy: boolean
@@ -28,6 +32,8 @@ export interface NodeOverviewTabProps {
   setEditPublic: (v: string) => void
   editEgress: string
   setEditEgress: (v: string) => void
+  editDDNS: boolean
+  setEditDDNS: (v: boolean) => void
   connectionErrors: ConnectionErrors
   clearConnectionError: (f: keyof ConnectionErrors) => void
   onSaveConnection: () => void
@@ -60,6 +66,8 @@ export function NodeOverviewTab({
   setEditPublic,
   editEgress,
   setEditEgress,
+  editDDNS,
+  setEditDDNS,
   connectionErrors,
   clearConnectionError,
   onSaveConnection,
@@ -71,7 +79,7 @@ export function NodeOverviewTab({
   copyUpgradeCommand,
 }: NodeOverviewTabProps) {
   function egressOptions() {
-    const opts = [{ value: '', label: '系统默认' }]
+    const opts = [{ value: EGRESS_DEFAULT_VALUE, label: '系统默认' }]
     for (const iface of ifaces) {
       const ips = iface.addresses && iface.addresses.length > 0 ? ` (${iface.addresses.join(', ')})` : ''
       opts.push({ value: iface.name, label: `${iface.name}${ips}` })
@@ -222,6 +230,24 @@ export function NodeOverviewTab({
         </div>
       </div>
 
+      {/* DDNS Auto-resolve */}
+      <div className="space-y-4 rounded-lg border border-border bg-card/40 p-5">
+        <div className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-3">
+          <Checkbox
+            id="node-ddns-enabled"
+            checked={editDDNS}
+            disabled={busy}
+            onCheckedChange={(checked) => setEditDDNS(Boolean(checked))}
+          />
+          <div>
+            <Label htmlFor="node-ddns-enabled" className="cursor-pointer text-foreground">DDNS 自动解析</Label>
+            <p className="text-xs text-muted-foreground">
+              开启时系统定期探测节点公网 IP 并更新关联的托管域名 A 记录；关闭后不再探测，重新开启自动恢复。
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Public Sub Entry */}
       <div className="space-y-4 rounded-lg border border-border bg-card/40 p-5">
         <div className="space-y-1">
@@ -262,13 +288,17 @@ export function NodeOverviewTab({
           <Label htmlFor="node-edit-egress" className="text-muted-foreground">
             出口接口
           </Label>
-          <Select value={editEgress} onValueChange={setEditEgress} disabled={busy}>
+          <Select
+            value={editEgress || EGRESS_DEFAULT_VALUE}
+            onValueChange={(v) => setEditEgress(v === EGRESS_DEFAULT_VALUE ? '' : v)}
+            disabled={busy}
+          >
             <SelectTrigger id="node-edit-egress">
               <SelectValue placeholder="系统默认" />
             </SelectTrigger>
             <SelectContent className="bg-popover border-border">
               {egressOptions().map((opt) => (
-                <SelectItem key={opt.value || 'default'} value={opt.value}>
+                <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
                 </SelectItem>
               ))}

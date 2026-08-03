@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // lookupHostIPs resolves a host to IP addresses.
@@ -67,13 +70,14 @@ func prefixExternalName(sourceName, proxyName string) string {
 // Domains are resolved; if any resolved IP:port was already seen, the endpoint is dropped.
 // Literal IPs compare as themselves. Lookup failures fall back to hostname:port.
 // Same IP with different ports are treated as distinct.
+// Unique hosts are resolved concurrently (bounded by hostLookupConcurrency).
 func dedupeByHost(ctx context.Context, eps []ProxyEndpoint) []ProxyEndpoint {
 	if len(eps) <= 1 {
 		return eps
 	}
-	resolveCache := map[string][]string{} // host -> ip strings or ["name:"+host]
-	seenIPPort := map[string]bool{}       // "ip:port"
-	seenNamePort := map[string]bool{}     // "name:host:port" when DNS fails
+	resolveCache := prefetchHostIdentities(ctx, eps)
+	seenIPPort := map[string]bool{}   // "ip:port"
+	seenNamePort := map[string]bool{} // "name:host:port" when DNS fails
 	out := make([]ProxyEndpoint, 0, len(eps))
 	for _, ep := range eps {
 		ids := hostIdentity(ctx, ep.Server, resolveCache)
@@ -109,6 +113,58 @@ func dedupeByHost(ctx context.Context, eps []ProxyEndpoint) []ProxyEndpoint {
 		out = append(out, ep)
 	}
 	return out
+}
+
+// hostLookupConcurrency bounds parallel DNS lookups during endpoint merge.
+const hostLookupConcurrency = 8
+
+// prefetchHostIdentities resolves every unique non-IP host in eps concurrently
+// and returns a cache of host -> ip strings (or ["name:"+host] on failure).
+func prefetchHostIdentities(ctx context.Context, eps []ProxyEndpoint) map[string][]string {
+	unique := map[string]struct{}{}
+	for _, ep := range eps {
+		host := normalizeHost(ep.Server)
+		if host == "" || net.ParseIP(host) != nil {
+			continue
+		}
+		unique[host] = struct{}{}
+	}
+	cache := make(map[string][]string, len(unique))
+	if len(unique) == 0 {
+		return cache
+	}
+	var mu sync.Mutex
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(hostLookupConcurrency)
+	for host := range unique {
+		group.Go(func() error {
+			resolved := resolveHostIdentity(groupCtx, host)
+			mu.Lock()
+			cache[host] = resolved
+			mu.Unlock()
+			return nil
+		})
+	}
+	// Lookups always soft-fail into the cache, so Wait never errors.
+	_ = group.Wait()
+	return cache
+}
+
+// resolveHostIdentity performs one DNS lookup, falling back to "name:host".
+func resolveHostIdentity(ctx context.Context, host string) []string {
+	ips, err := lookupHostIPs(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return []string{"name:" + host}
+	}
+	set := map[string]struct{}{}
+	for _, ip := range ips {
+		set[ip.String()] = struct{}{}
+	}
+	ids := make([]string, 0, len(set))
+	for s := range set {
+		ids = append(ids, s)
+	}
+	return ids
 }
 
 // hostIdentity returns either a list of IP strings, or a single "name:host" fallback.

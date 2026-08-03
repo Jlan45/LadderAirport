@@ -38,7 +38,7 @@ func sampleCPUPercent() float64 {
 	if wallDelta <= 0 {
 		return 0
 	}
-	// Normalize by GOMAXPROCS so 100% ≈ one full core busy on all procs.
+	// Normalize by GOMAXPROCS so 100% ≈ all available cores fully busy.
 	pct := (procDelta / wallDelta) * 100 / float64(runtime.GOMAXPROCS(0))
 	if pct < 0 {
 		return 0

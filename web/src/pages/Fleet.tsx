@@ -113,6 +113,7 @@ export default function Fleet() {
   const liveGenerationRef = useRef(0)
   const refreshRunningRef = useRef<Promise<void> | null>(null)
   const probeTimersRef = useRef<number[]>([])
+  const pendingTimersRef = useRef<number[]>([])
   const activeActionsRef = useRef<Record<string, NodeAction>>({})
   const installBannerRequestRef = useRef(0)
   const upgradeBannerRequestRef = useRef(0)
@@ -232,6 +233,7 @@ export default function Fleet() {
   useEffect(() => {
     return () => {
       for (const timer of probeTimersRef.current) window.clearTimeout(timer)
+      for (const timer of pendingTimersRef.current) window.clearTimeout(timer)
     }
   }, [])
 
@@ -313,8 +315,8 @@ export default function Fleet() {
       else toast.error(message)
       await refreshLive({ silent: true })
       if (kind === 'apply' || kind === 'start') {
-        setTimeout(() => void refreshLive({ silent: true }), 1500)
-        setTimeout(() => void refreshLive({ silent: true }), 3500)
+        pendingTimersRef.current.push(window.setTimeout(() => void refreshLive({ silent: true }), 1500))
+        pendingTimersRef.current.push(window.setTimeout(() => void refreshLive({ silent: true }), 3500))
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '批量操作失败')
@@ -487,9 +489,9 @@ export default function Fleet() {
       if (version !== installCopyVersionRef.current) return
       setInstallCopied(true)
       toast.success('已复制安装命令')
-      setTimeout(() => {
+      pendingTimersRef.current.push(window.setTimeout(() => {
         if (version === installCopyVersionRef.current) setInstallCopied(false)
-      }, 2000)
+      }, 2000))
     } catch {
       toast.error('复制失败')
     }
@@ -503,9 +505,9 @@ export default function Fleet() {
       if (version !== upgradeCopyVersionRef.current) return
       setUpgradeCopied(true)
       toast.success('已复制升级命令')
-      setTimeout(() => {
+      pendingTimersRef.current.push(window.setTimeout(() => {
         if (version === upgradeCopyVersionRef.current) setUpgradeCopied(false)
-      }, 2000)
+      }, 2000))
     } catch {
       toast.error('复制失败')
     }
@@ -908,10 +910,10 @@ export default function Fleet() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Badge variant={statusTheme(n.status) as any}>{statusLabel(n.status)}</Badge>
+                          <Badge variant={statusTheme(n.status)}>{statusLabel(n.status)}</Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={runtimeTheme(n.runtime_state) as any}>{runtimeLabel(n.runtime_state)}</Badge>
+                          <Badge variant={runtimeTheme(n.runtime_state)}>{runtimeLabel(n.runtime_state)}</Badge>
                         </TableCell>
                         <TableCell className="text-center text-zinc-300 font-medium">
                           {n.inbound_count ?? 0}
@@ -1158,8 +1160,8 @@ function NodeCard({
             </button>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            <Badge variant={statusTheme(n.status) as any}>{statusLabel(n.status)}</Badge>
-            <Badge variant={runtimeTheme(n.runtime_state) as any}>{runtimeLabel(n.runtime_state)}</Badge>
+            <Badge variant={statusTheme(n.status)}>{statusLabel(n.status)}</Badge>
+            <Badge variant={runtimeTheme(n.runtime_state)}>{runtimeLabel(n.runtime_state)}</Badge>
           </div>
         </div>
 

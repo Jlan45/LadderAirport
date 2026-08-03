@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
+  DialogTitle,
 } from './ui/dialog'
 import { Button } from './ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
@@ -62,6 +63,7 @@ import { toast } from '../lib/toast'
 import { NodeOverviewTab } from './node-detail/NodeOverviewTab'
 import { NodeInboundsTab, type InboundNATEdit } from './node-detail/NodeInboundsTab'
 import { NodeFRPSTab } from './node-detail/NodeFRPSTab'
+import { NodeSystemTab } from './node-detail/NodeSystemTab'
 import { NodeOpsTab, type LogEntry } from './node-detail/NodeOpsTab'
 
 type Props = {
@@ -155,6 +157,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [loadError, setLoadError] = useState('')
   const [activeTab, setActiveTab] = useState<string>('connection')
   const abortRef = useRef<AbortController | null>(null)
+  const copyTimersRef = useRef<number[]>([])
   const nodeIdRef = useRef<string | null>(nodeId)
   const generationRef = useRef(0)
   const loadRequestRef = useRef(0)
@@ -175,6 +178,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [editPort, setEditPort] = useState<number | string>(50051)
   const [editPublic, setEditPublic] = useState('')
   const [editEgress, setEditEgress] = useState('')
+  const [editDDNS, setEditDDNS] = useState(true)
   const [connectionErrors, setConnectionErrors] = useState<ConnectionErrors>({})
   const [ifaces, setIfaces] = useState<NetworkInterface[]>([])
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
@@ -246,6 +250,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         allow_ports: config.allow_ports || [],
         tls_force: config.tls_force ?? true,
         max_ports_per_client: config.max_ports_per_client || 0,
+        managed_domain_id: config.managed_domain_id || '',
       })
       if (config.runtime_state === 'running') {
         void loadFRPSMappings(targetId, generation)
@@ -273,6 +278,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setEditPort(targetNode.grpc_port || 50051)
     setEditPublic(targetNode.public_address || '')
     setEditEgress(targetNode.egress_interface || '')
+    setEditDDNS(targetNode.ddns_enabled ?? true)
     setConnectionErrors({})
   }, [])
 
@@ -301,13 +307,17 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
           public_address: item.public_address || '',
           public_port: item.public_port || 0,
         }
-        try {
-          const binding = await getNodeInboundTLS(targetId, item.id)
-          if (binding) tlsMap[item.id] = binding
-        } catch {
-          // ignore tls fetch error if none exists yet
-        }
       }
+      const tlsResults = await Promise.all(
+        attachedList.map((item) =>
+          getNodeInboundTLS(targetId, item.id).catch(() => null),
+        ),
+      )
+      if (!isCurrentNode(targetId, generation) || request !== inboundsRequestRef.current) return
+      attachedList.forEach((item, index) => {
+        const binding = tlsResults[index]
+        if (binding) tlsMap[item.id] = binding
+      })
       setInboundNAT(natMap)
       setSavedInboundNAT(JSON.parse(JSON.stringify(natMap)) as Record<string, InboundNATEdit>)
       setTLSBindings(tlsMap)
@@ -396,6 +406,13 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     }
   }, [nodeId, load, isCurrentNode])
 
+  useEffect(() => {
+    const timers = copyTimersRef.current
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer)
+    }
+  }, [])
+
   const clearConnectionError = (field: keyof ConnectionErrors) => {
     setConnectionErrors((current) => {
       if (!current[field]) return current
@@ -441,6 +458,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         grpc_port: port,
         public_address: publicAddress || undefined,
         egress_interface: editEgress || undefined,
+        ddns_enabled: editDDNS,
       }
       if (editTokenChanged) input.token = editToken
       const updated = await updateNode(id, input)
@@ -561,6 +579,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         frpsDraft.proxy_bind_addr !== (frps.proxy_bind_addr || '0.0.0.0') ||
         frpsDraft.tls_force !== (frps.tls_force ?? true) ||
         frpsDraft.max_ports_per_client !== (frps.max_ports_per_client || 0) ||
+        (frpsDraft.managed_domain_id || '') !== (frps.managed_domain_id || '') ||
         JSON.stringify(frpsDraft.allow_ports) !== JSON.stringify(frps.allow_ports || [])),
   )
 
@@ -580,6 +599,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
           allow_ports: updated.allow_ports || [],
           tls_force: updated.tls_force ?? true,
           max_ports_per_client: updated.max_ports_per_client || 0,
+          managed_domain_id: updated.managed_domain_id || '',
         })
       }
       toast.success('FRPS Server 配置保存并下发成功')
@@ -730,7 +750,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       await copyText(installInfo.install_command)
       setCopied(true)
       toast.success('安装命令已复制')
-      setTimeout(() => setCopied(false), 2000)
+      copyTimersRef.current.push(window.setTimeout(() => setCopied(false), 2000))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '复制失败')
     }
@@ -742,7 +762,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       await copyText(installInfo.upgrade_command)
       setCopiedUpgrade(true)
       toast.success('升级命令已复制')
-      setTimeout(() => setCopiedUpgrade(false), 2000)
+      copyTimersRef.current.push(window.setTimeout(() => setCopiedUpgrade(false), 2000))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '复制失败')
     }
@@ -784,11 +804,11 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
             <header className="p-6 border-b border-border bg-card/40">
               <div className="flex items-start justify-between pr-8">
                 <div className="space-y-1">
-                  <h2 className="text-xl font-bold tracking-tight text-foreground">{node.name}</h2>
+                  <DialogTitle className="text-xl font-bold tracking-tight text-foreground">{node.name}</DialogTitle>
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    <Badge variant={statusTheme(node.status) as any}>{statusLabel(node.status)}</Badge>
+                    <Badge variant={statusTheme(node.status)}>{statusLabel(node.status)}</Badge>
                     {node.runtime_state ? (
-                      <Badge variant={runtimeTheme(node.runtime_state) as any}>{runtimeLabel(node.runtime_state)}</Badge>
+                      <Badge variant={runtimeTheme(node.runtime_state)}>{runtimeLabel(node.runtime_state)}</Badge>
                     ) : null}
                     {installInfo ? (
                       isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
@@ -843,6 +863,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     入站{attachedCount ? ` (${attachedCount})` : ''}
                   </TabsTrigger>
                   <TabsTrigger value="frps">FRPS</TabsTrigger>
+                  <TabsTrigger value="system">系统状态</TabsTrigger>
                   <TabsTrigger value="ops">运维 & 日志</TabsTrigger>
                 </TabsList>
               </div>
@@ -870,6 +891,8 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     setEditPublic={setEditPublic}
                     editEgress={editEgress}
                     setEditEgress={setEditEgress}
+                    editDDNS={editDDNS}
+                    setEditDDNS={setEditDDNS}
                     connectionErrors={connectionErrors}
                     clearConnectionError={clearConnectionError}
                     onSaveConnection={onSaveConnection}
@@ -921,6 +944,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     frpsMappings={frpsMappings}
                     frpsMappingsLoading={frpsMappingsLoading}
                     frpsMappingsError={frpsMappingsError}
+                    managedDomains={managedDomains.filter((domain) => domain.node_id === id)}
                     updateFRPSDraft={updateFRPSDraft}
                     loadFRPS={() => void loadFRPS(id, generationRef.current)}
                     loadFRPSMappings={() => void loadFRPSMappings(id, generationRef.current)}
@@ -929,6 +953,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     revealFRPSToken={revealFRPSToken}
                     rotateFRPSToken={() => void rotateFRPSToken()}
                   />
+                </TabsContent>
+
+                <TabsContent value="system" className="mt-0">
+                  <NodeSystemTab key={id} nodeId={id} />
                 </TabsContent>
 
                 <TabsContent value="ops" className="mt-0">

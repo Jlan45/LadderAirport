@@ -1,10 +1,29 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 )
+
+// normalizeCIDRList validates and normalizes a comma-separated CIDR list.
+func normalizeCIDRList(raw string) (string, error) {
+	parts := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil {
+			return "", fmt.Errorf("trusted_proxy_cidrs 包含无效 CIDR：%s", part)
+		}
+		parts = append(parts, prefix.Masked().String())
+	}
+	return strings.Join(parts, ","), nil
+}
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	st, err := s.Store.GetSettings()
@@ -24,6 +43,7 @@ type putSettingsBody struct {
 	ChainProbeURL         *string `json:"chain_probe_url"`
 	ChainProbeIntervalSec *int    `json:"chain_probe_interval_sec"`
 	ChainProbeTimeoutSec  *int    `json:"chain_probe_timeout_sec"`
+	TrustedProxyCIDRs     *string `json:"trusted_proxy_cidrs"`
 	NewPassword           *string `json:"new_password"`
 }
 
@@ -34,8 +54,8 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body putSettingsBody
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON 请求体无效")
+	if err := decodeJSON(w, r, &body); err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if body.DefaultAgentToken != nil {
@@ -83,6 +103,14 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		st.ChainProbeTimeoutSec = *body.ChainProbeTimeoutSec
 	}
+	if body.TrustedProxyCIDRs != nil {
+		normalized, err := normalizeCIDRList(*body.TrustedProxyCIDRs)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		st.TrustedProxyCIDRs = normalized
+	}
 	if body.NewPassword != nil {
 		if *body.NewPassword == "" {
 			writeError(w, http.StatusBadRequest, "new_password 不能为空")
@@ -99,13 +127,20 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if body.NewPassword != nil {
+		// Revoke all existing sessions after a password change.
+		if _, err := s.Store.BumpSessionVersion(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
 	// Reflect timeout/concurrency on runner when present.
 	if s.Runner != nil {
 		if body.GRPCTimeoutSec != nil {
-			s.Runner.Timeout = time.Duration(*body.GRPCTimeoutSec) * time.Second
+			s.Runner.Timeout.Store(int64(time.Duration(*body.GRPCTimeoutSec) * time.Second))
 		}
 		if body.MaxConcurrency != nil {
-			s.Runner.MaxConcurrency = *body.MaxConcurrency
+			s.Runner.MaxConcurrency.Store(int64(*body.MaxConcurrency))
 		}
 	}
 	out, err := s.Store.GetSettings()

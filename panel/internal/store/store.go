@@ -144,7 +144,9 @@ func (s *Store) migrate() error {
 			started_at_unix INTEGER NOT NULL DEFAULT 0,
 			created_at_unix INTEGER NOT NULL,
 			updated_at_unix INTEGER NOT NULL,
-			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+			managed_domain_id TEXT,
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE,
+			FOREIGN KEY (managed_domain_id) REFERENCES managed_domains(id) ON DELETE SET NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS inbounds (
 			id TEXT PRIMARY KEY,
@@ -438,6 +440,29 @@ func (s *Store) migrate() error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_automation_audit_created
 			ON automation_audit_logs(created_at_unix DESC)`,
+		`CREATE TABLE IF NOT EXISTS route_plans (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			scope TEXT NOT NULL DEFAULT 'global' CHECK(scope IN ('global','subscription')),
+			subscription_id TEXT REFERENCES subscriptions(id) ON DELETE CASCADE,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			sort_order INTEGER NOT NULL DEFAULT 0,
+			created_at_unix INTEGER NOT NULL,
+			updated_at_unix INTEGER NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS route_plan_rules (
+			plan_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			match_type TEXT NOT NULL CHECK(match_type IN ('domain','domain_suffix','domain_keyword','ip_cidr','process_name')),
+			match_value TEXT NOT NULL,
+			action TEXT NOT NULL CHECK(action IN ('proxy','direct','block')),
+			target_chain_id TEXT REFERENCES proxy_chains(id) ON DELETE RESTRICT,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (plan_id, position),
+			FOREIGN KEY (plan_id) REFERENCES route_plans(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_route_plan_rules_chain
+			ON route_plan_rules(target_chain_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -463,6 +488,8 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN pki_ca_bundle_pem TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN pki_cert_serial TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN pki_not_after_unix INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN ddns_enabled INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE node_frps_configs ADD COLUMN managed_domain_id TEXT REFERENCES managed_domains(id) ON DELETE SET NULL`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
@@ -470,11 +497,15 @@ func (s *Store) migrate() error {
 		`ALTER TABLE settings ADD COLUMN chain_probe_interval_sec INTEGER NOT NULL DEFAULT 60`,
 		`ALTER TABLE settings ADD COLUMN chain_probe_timeout_sec INTEGER NOT NULL DEFAULT 10`,
 		`ALTER TABLE settings ADD COLUMN chain_subscription_migrated INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE settings ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE settings ADD COLUMN trusted_proxy_cidrs TEXT NOT NULL DEFAULT ''`,
 		// Nullable during migration so legacy rows can be backfilled from inbound_ids_json.
 		`ALTER TABLE subscriptions ADD COLUMN include_all_inbounds INTEGER`,
 		`ALTER TABLE subscriptions ADD COLUMN include_standalone INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE subscriptions ADD COLUMN chain_ids_json TEXT NOT NULL DEFAULT '[]'`,
 		`ALTER TABLE subscriptions ADD COLUMN include_all_chains INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE subscriptions ADD COLUMN route_plan_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE subscriptions ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE dns_accounts ADD COLUMN zone TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range alters {
@@ -639,15 +670,15 @@ func (s *Store) CreateNode(n *Node) error {
 			runtime_state, agent_version, singbox_version,
 			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
 			metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
-			created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ddns_enabled, created_at_unix, updated_at_unix
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, n.PKICABundlePEM,
 		n.PKICertSerial, n.PKINotAfter,
 		n.Status, n.LastSeenUnix, n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
 		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress, mappingsJSON, capabilitiesJSON,
-		n.CreatedAtUnix, n.UpdatedAtUnix,
+		boolToInt(n.DDNSEnabled), n.CreatedAtUnix, n.UpdatedAtUnix,
 	)
 	if err != nil {
 		return fmt.Errorf("创建节点失败：%w", err)
@@ -686,7 +717,7 @@ func (s *Store) UpdateNode(n *Node) error {
 			runtime_state = ?, agent_version = ?, singbox_version = ?,
 			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
 			metrics_at_unix = ?, last_error = ?, egress_interface = ?, public_address = ?,
-			port_mappings_json = ?, capabilities_json = ?,
+			port_mappings_json = ?, capabilities_json = ?, ddns_enabled = ?,
 			updated_at_unix = ?
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
@@ -696,7 +727,7 @@ func (s *Store) UpdateNode(n *Node) error {
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
 		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress,
-		mappingsJSON, capabilitiesJSON,
+		mappingsJSON, capabilitiesJSON, boolToInt(n.DDNSEnabled),
 		n.UpdatedAtUnix, n.ID,
 	)
 	if err != nil {
@@ -761,6 +792,9 @@ func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) e
 	}
 	if update.EgressInterface != nil {
 		add("egress_interface", *update.EgressInterface)
+	}
+	if update.DDNSEnabled != nil {
+		add("ddns_enabled", boolToInt(*update.DDNSEnabled))
 	}
 
 	add("updated_at_unix", nowUnix())
@@ -862,6 +896,7 @@ func scanNode(row interface {
 	var labelsJSON string
 	var mappingsJSON string
 	var capabilitiesJSON string
+	var ddnsEnabled int
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Address, &n.GRPCPort, &n.Token, &labelsJSON, &n.PKICABundlePEM,
 		&n.PKICertSerial, &n.PKINotAfter,
@@ -869,11 +904,12 @@ func scanNode(row interface {
 		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
 		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
 		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface, &n.PublicAddress, &mappingsJSON, &capabilitiesJSON,
-		&n.CreatedAtUnix, &n.UpdatedAtUnix,
+		&ddnsEnabled, &n.CreatedAtUnix, &n.UpdatedAtUnix,
 	)
 	if err != nil {
 		return nil, err
 	}
+	n.DDNSEnabled = ddnsEnabled != 0
 	n.Labels = []string{}
 	if err := unmarshalJSON(labelsJSON, &n.Labels); err != nil {
 		return nil, fmt.Errorf("解析标签失败：%w", err)
@@ -896,7 +932,7 @@ const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, pki_ca
 	runtime_state, agent_version, singbox_version,
 	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
 	metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
-	created_at_unix, updated_at_unix`
+	ddns_enabled, created_at_unix, updated_at_unix`
 
 func (s *Store) GetNode(id string) (*Node, error) {
 	row := s.db.QueryRow(`SELECT `+nodeSelectCols+` FROM nodes WHERE id = ?`, id)
@@ -1224,7 +1260,49 @@ func (s *Store) ListNodeInboundAttachments(nodeID string) ([]NodeInboundAttachme
 		return nil, fmt.Errorf("查询节点入站关联失败：%w", err)
 	}
 	defer rows.Close()
+	return scanNodeInboundAttachments(rows)
+}
 
+// ListAllNodeInboundAttachments returns attachments for every node in one
+// query, grouped by node ID. Bulk callers (subscription rendering) use it to
+// avoid per-node queries.
+func (s *Store) ListAllNodeInboundAttachments() (map[string][]NodeInboundAttachment, error) {
+	rows, err := s.db.Query(`
+		SELECT ni.node_id, i.id, i.name, i.protocol, i.params_json, i.enabled, i.created_at_unix, i.updated_at_unix,
+			COALESCE(ni.public_address, ''), COALESCE(ni.public_port, 0)
+		FROM inbounds i
+		INNER JOIN node_inbounds ni ON ni.inbound_id = i.id
+		ORDER BY ni.node_id, i.created_at_unix ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("查询全部节点入站关联失败：%w", err)
+	}
+	defer rows.Close()
+	out := map[string][]NodeInboundAttachment{}
+	for rows.Next() {
+		var nodeID string
+		var a NodeInboundAttachment
+		var paramsJSON string
+		var enabled int
+		if err := rows.Scan(
+			&nodeID, &a.ID, &a.Name, &a.Protocol, &paramsJSON, &enabled, &a.CreatedAtUnix, &a.UpdatedAtUnix,
+			&a.PublicAddress, &a.PublicPort,
+		); err != nil {
+			return nil, fmt.Errorf("读取节点入站关联失败：%w", err)
+		}
+		a.Enabled = enabled != 0
+		a.Params = map[string]any{}
+		if err := unmarshalJSON(paramsJSON, &a.Params); err != nil {
+			return nil, fmt.Errorf("解析入站参数失败：%w", err)
+		}
+		out[nodeID] = append(out[nodeID], a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func scanNodeInboundAttachments(rows *sql.Rows) ([]NodeInboundAttachment, error) {
 	var out []NodeInboundAttachment
 	for rows.Next() {
 		var a NodeInboundAttachment
@@ -1271,6 +1349,67 @@ func (s *Store) CountInboundsByNode() (map[string]int, error) {
 		out[id] = n
 	}
 	return out, rows.Err()
+}
+
+// NodeConfigFingerprint returns a cheap fingerprint of every table that feeds
+// into a node's rendered sing-box config: the node row, its inbound
+// attachments, proxy chains (global — hops on other nodes shape this node's
+// outbounds), inbounds (global — chain hops reference them), and its managed
+// TLS bindings/domains/certificates. Callers compare fingerprints to decide
+// whether an expensive full config rebuild is needed.
+func (s *Store) NodeConfigFingerprint(nodeID string) (string, error) {
+	var (
+		nodeUpdated                    int64
+		ownInbounds, ownInboundUpdated int64
+		chains, chainUpdated           int64
+		inbounds, inboundUpdated       int64
+		nodes, nodeUpdatedGlobal       int64
+		tlsBindings, tlsUpdated        int64
+		domains, domainUpdated         int64
+		certs, certUpdated             int64
+		attachmentKey                  string
+	)
+	err := s.db.QueryRow(`
+		SELECT
+			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM nodes WHERE id = ?),
+			(SELECT COUNT(*) FROM node_inbounds WHERE node_id = ?),
+			(SELECT COALESCE(MAX(i.updated_at_unix), 0) FROM node_inbounds ni
+				INNER JOIN inbounds i ON i.id = ni.inbound_id WHERE ni.node_id = ?),
+			(SELECT COUNT(*) FROM proxy_chains),
+			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM proxy_chains),
+			(SELECT COUNT(*) FROM inbounds),
+			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM inbounds),
+			(SELECT COUNT(*) FROM nodes),
+			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM nodes),
+			(SELECT COUNT(*) FROM node_inbound_tls_bindings WHERE node_id = ?),
+			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM node_inbound_tls_bindings WHERE node_id = ?),
+			(SELECT COUNT(*) FROM managed_domains WHERE node_id = ?),
+			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM managed_domains WHERE node_id = ?),
+			(SELECT COUNT(*) FROM protocol_certificates WHERE node_id = ?),
+			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM protocol_certificates WHERE node_id = ?),
+			(SELECT COALESCE(GROUP_CONCAT(member, ','), '') FROM (
+				SELECT ni.inbound_id || ':' || COALESCE(ni.public_address, '') || ':' ||
+					COALESCE(ni.public_port, 0) AS member
+				FROM node_inbounds ni WHERE ni.node_id = ? ORDER BY ni.inbound_id
+			))`,
+		nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID,
+	).Scan(
+		&nodeUpdated, &ownInbounds, &ownInboundUpdated,
+		&chains, &chainUpdated, &inbounds, &inboundUpdated,
+		&nodes, &nodeUpdatedGlobal,
+		&tlsBindings, &tlsUpdated, &domains, &domainUpdated, &certs, &certUpdated,
+		&attachmentKey,
+	)
+	if err != nil {
+		return "", fmt.Errorf("计算节点配置指纹失败：%w", err)
+	}
+	return fmt.Sprintf("%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d|%s",
+		nodeUpdated, ownInbounds, ownInboundUpdated,
+		chains, chainUpdated, inbounds, inboundUpdated,
+		nodes, nodeUpdatedGlobal,
+		tlsBindings, tlsUpdated, domains, domainUpdated, certs, certUpdated,
+		attachmentKey,
+	), nil
 }
 
 // --- Tasks ---
@@ -1414,11 +1553,12 @@ func (s *Store) GetSettings() (*Settings, error) {
 	err := s.db.QueryRow(`
 		SELECT admin_password_hash, default_agent_token, grpc_timeout_sec, max_concurrency,
 			listen_addr, public_base_url, chain_probe_url, chain_probe_interval_sec,
-			chain_probe_timeout_sec, chain_subscription_migrated
+			chain_probe_timeout_sec, chain_subscription_migrated, session_version,
+			trusted_proxy_cidrs
 		FROM settings WHERE id = 1`).Scan(
 		&st.AdminPasswordHash, &st.DefaultAgentToken, &st.GRPCTimeoutSec, &st.MaxConcurrency,
 		&st.ListenAddr, &st.PublicBaseURL, &st.ChainProbeURL, &st.ChainProbeIntervalSec,
-		&st.ChainProbeTimeoutSec, &migrated,
+		&st.ChainProbeTimeoutSec, &migrated, &st.SessionVersion, &st.TrustedProxyCIDRs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("读取系统设置失败：%w", err)
@@ -1442,16 +1582,30 @@ func (s *Store) SaveSettings(st *Settings) error {
 			chain_probe_url = ?,
 			chain_probe_interval_sec = ?,
 			chain_probe_timeout_sec = ?,
-			chain_subscription_migrated = ?
+			chain_subscription_migrated = ?,
+			trusted_proxy_cidrs = ?
 		WHERE id = 1`,
 		st.AdminPasswordHash, st.DefaultAgentToken, st.GRPCTimeoutSec, st.MaxConcurrency,
 		st.ListenAddr, st.PublicBaseURL, st.ChainProbeURL, st.ChainProbeIntervalSec,
-		st.ChainProbeTimeoutSec, boolToInt(st.ChainSubscriptionMigrated),
+		st.ChainProbeTimeoutSec, boolToInt(st.ChainSubscriptionMigrated), st.TrustedProxyCIDRs,
 	)
 	if err != nil {
 		return fmt.Errorf("保存系统设置失败：%w", err)
 	}
 	return nil
+}
+
+// BumpSessionVersion increments the session version, revoking all previously
+// issued session tokens. Returns the new version.
+func (s *Store) BumpSessionVersion() (int64, error) {
+	if _, err := s.db.Exec(`UPDATE settings SET session_version = session_version + 1 WHERE id = 1`); err != nil {
+		return 0, fmt.Errorf("递增会话版本失败：%w", err)
+	}
+	var version int64
+	if err := s.db.QueryRow(`SELECT session_version FROM settings WHERE id = 1`).Scan(&version); err != nil {
+		return 0, fmt.Errorf("读取会话版本失败：%w", err)
+	}
+	return version, nil
 }
 
 // MigrateSubscriptionsToChains switches subscriptions that currently expose
@@ -1525,11 +1679,11 @@ func (s *Store) CreateSubscription(sub *Subscription) error {
 		INSERT INTO subscriptions (
 			id, name, format, token, inbound_ids_json, include_all_inbounds,
 			include_standalone, chain_ids_json, include_all_chains,
-			enabled, created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			route_plan_id, enabled, disabled, created_at_unix, updated_at_unix
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sub.ID, sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.IncludeAllInbounds),
 		boolToInt(sub.IncludeStandalone), chainIDsJSON, boolToInt(sub.IncludeAllChains),
-		boolToInt(sub.Enabled), sub.CreatedAtUnix, sub.UpdatedAtUnix,
+		sub.RoutePlanID, boolToInt(sub.Enabled), boolToInt(sub.Disabled), sub.CreatedAtUnix, sub.UpdatedAtUnix,
 	)
 	if err != nil {
 		return fmt.Errorf("创建订阅失败：%w", err)
@@ -1566,11 +1720,11 @@ func (s *Store) UpdateSubscription(sub *Subscription) error {
 		UPDATE subscriptions SET
 			name=?, format=?, token=?, inbound_ids_json=?, include_all_inbounds=?,
 			include_standalone=?, chain_ids_json=?, include_all_chains=?,
-			enabled=?, updated_at_unix=?
+			route_plan_id=?, enabled=?, disabled=?, updated_at_unix=?
 		WHERE id=?`,
 		sub.Name, sub.Format, sub.Token, idsJSON, boolToInt(sub.IncludeAllInbounds),
 		boolToInt(sub.IncludeStandalone), chainIDsJSON, boolToInt(sub.IncludeAllChains),
-		boolToInt(sub.Enabled), sub.UpdatedAtUnix, sub.ID,
+		sub.RoutePlanID, boolToInt(sub.Enabled), boolToInt(sub.Disabled), sub.UpdatedAtUnix, sub.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("更新订阅失败：%w", err)
@@ -1594,20 +1748,18 @@ func (s *Store) DeleteSubscription(id string) error {
 	return nil
 }
 
+const subscriptionSelectCols = `id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
+	include_standalone, chain_ids_json, include_all_chains,
+	route_plan_id, enabled, disabled, created_at_unix, updated_at_unix`
+
 func (s *Store) GetSubscription(id string) (*Subscription, error) {
-	row := s.db.QueryRow(`
-		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
-			include_standalone, chain_ids_json, include_all_chains,
-			enabled, created_at_unix, updated_at_unix
+	row := s.db.QueryRow(`SELECT `+subscriptionSelectCols+`
 		FROM subscriptions WHERE id = ?`, id)
 	return scanSubscription(row)
 }
 
 func (s *Store) GetSubscriptionByToken(token string) (*Subscription, error) {
-	row := s.db.QueryRow(`
-		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
-			include_standalone, chain_ids_json, include_all_chains,
-			enabled, created_at_unix, updated_at_unix
+	row := s.db.QueryRow(`SELECT `+subscriptionSelectCols+`
 		FROM subscriptions WHERE token = ?`, token)
 	sub, err := scanSubscription(row)
 	if err != nil {
@@ -1617,10 +1769,7 @@ func (s *Store) GetSubscriptionByToken(token string) (*Subscription, error) {
 }
 
 func (s *Store) ListSubscriptions() ([]Subscription, error) {
-	rows, err := s.db.Query(`
-		SELECT id, name, format, token, inbound_ids_json, COALESCE(include_all_inbounds, 1),
-			include_standalone, chain_ids_json, include_all_chains,
-			enabled, created_at_unix, updated_at_unix
+	rows, err := s.db.Query(`SELECT ` + subscriptionSelectCols + `
 		FROM subscriptions ORDER BY created_at_unix ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("查询订阅列表失败：%w", err)
@@ -1645,11 +1794,11 @@ func scanSubscription(row interface {
 }) (*Subscription, error) {
 	var sub Subscription
 	var idsJSON, chainIDsJSON string
-	var enabled, includeAll, includeStandalone, includeAllChains int
+	var enabled, includeAll, includeStandalone, includeAllChains, disabled int
 	err := row.Scan(
 		&sub.ID, &sub.Name, &sub.Format, &sub.Token, &idsJSON, &includeAll,
 		&includeStandalone, &chainIDsJSON, &includeAllChains,
-		&enabled, &sub.CreatedAtUnix, &sub.UpdatedAtUnix,
+		&sub.RoutePlanID, &enabled, &disabled, &sub.CreatedAtUnix, &sub.UpdatedAtUnix,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("订阅不存在")
@@ -1658,6 +1807,7 @@ func scanSubscription(row interface {
 		return nil, err
 	}
 	sub.Enabled = enabled != 0
+	sub.Disabled = disabled != 0
 	sub.IncludeAllInbounds = includeAll != 0
 	sub.IncludeStandalone = includeStandalone != 0
 	sub.IncludeAllChains = includeAllChains != 0

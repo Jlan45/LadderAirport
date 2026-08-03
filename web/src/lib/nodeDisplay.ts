@@ -101,14 +101,6 @@ export function taskStatusLabel(status: string): string {
   }
 }
 
-// Keep legacy class helper for any residual callers.
-export function statusClass(s?: string): string {
-  if (s === 'online' || s === 'running') return 'status status-success'
-  if (s === 'unreachable' || s === 'unauthorized') return 'status status-failed'
-  if (s === 'pending') return 'status status-pending'
-  return 'status'
-}
-
 /** Parse a semver-ish string: "v0.3.1", "0.1.0-dev", "1.2". */
 export type SemVer = {
   major: number

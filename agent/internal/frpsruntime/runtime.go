@@ -172,12 +172,32 @@ func (r *Runtime) startServiceLocked(ctx context.Context, config Config, hash st
 		r.mu.Unlock()
 	}(service)
 
-	select {
-	case <-ctx.Done():
+	// server.Run binds sockets asynchronously in the goroutine above; poll the
+	// admin API until it answers so Apply only returns once FRPS is actually
+	// serving, and rolls back on failure instead of reporting a phantom start.
+	readyCtx, cancelReady := context.WithTimeout(ctx, 3*time.Second)
+	defer cancelReady()
+	if err := waitAdminReady(readyCtx, admin); err != nil {
 		r.stopServiceLocked()
-		return ctx.Err()
-	default:
-		return nil
+		return fmt.Errorf("FRPS 启动确认失败：%w", err)
+	}
+	return nil
+}
+
+// waitAdminReady polls the FRPS admin API until it answers or ctx expires.
+func waitAdminReady(ctx context.Context, admin adminEndpoint) error {
+	var info map[string]any
+	for {
+		if err := getAdminJSON(ctx, admin, "/api/serverinfo", &info); err == nil {
+			return nil
+		}
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 

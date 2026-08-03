@@ -41,7 +41,15 @@ func TestEnvelopeRejectsWrongKeyAndTamper(t *testing.T) {
 	if _, err := second.Decrypt(envelope, "target"); err == nil {
 		t.Fatal("decrypt with wrong key succeeded")
 	}
-	tampered := envelope[:len(envelope)-1] + "A"
+	// Flip a character in the middle of the payload: the last base64 char
+	// carries only two significant bits, so appending "A" there could
+	// reproduce the original envelope.
+	mid := len(envelope)/2 + 1
+	replacement := byte('A')
+	if envelope[mid] == 'A' {
+		replacement = 'B'
+	}
+	tampered := envelope[:mid] + string(replacement) + envelope[mid+1:]
 	if _, err := first.Decrypt(tampered, "target"); err == nil {
 		t.Fatal("tampered envelope succeeded")
 	}

@@ -20,6 +20,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ladderairport/agent/internal/fileutil"
 )
 
 var safeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
@@ -170,7 +172,7 @@ func (m *Manager) Install(
 	sum := sha256.Sum256(leaf.Raw)
 	fingerprint := hex.EncodeToString(sum[:])
 	certPath := filepath.Join(dir, "fullchain.pem")
-	if err := atomicWrite(certPath, []byte(certificatePEM), 0o640); err != nil {
+	if err := fileutil.AtomicWrite(certPath, []byte(certificatePEM), 0o640); err != nil {
 		return Installed{}, err
 	}
 	if err := writeMetadata(filepath.Join(dir, "metadata.json"), metadata{
@@ -336,36 +338,5 @@ func writeMetadata(path string, value metadata) error {
 	if err != nil {
 		return err
 	}
-	return atomicWrite(path, data, 0o600)
-}
-
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
-	}
-	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tempPath := temp.Name()
-	defer func() { _ = os.Remove(tempPath) }()
-	if err := temp.Chmod(mode); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if _, err := temp.Write(data); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Sync(); err != nil {
-		_ = temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return fmt.Errorf("原子替换协议证书文件失败：%w", err)
-	}
-	return nil
+	return fileutil.AtomicWrite(path, data, 0o600)
 }

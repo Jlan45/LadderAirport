@@ -1,4 +1,4 @@
-.PHONY: proto panel panel-bin agent web test install-panel install-agent
+.PHONY: proto panel panel-bin agent web test e2e install-panel install-agent
 
 # Default agent tags: QUIC (TUIC/Hy2) + uTLS (Reality/AnyTLS client fingerprints).
 AGENT_TAGS ?= with_quic,with_utls
@@ -8,7 +8,9 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.1.
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-SINGBOX_VERSION ?= 1.12.22
+# sing-box 版本唯一来源：agent/sing-box 子模块的 git tag（如 v1.12.22 → 1.12.22）。
+# CI（.github/workflows/ci.yml、release.yml）用同一命令派生；三处勿再硬编码。
+SINGBOX_VERSION ?= $(shell tag=$$(git -C agent/sing-box describe --tags 2>/dev/null) && echo "$${tag}" | sed 's/^v//' || echo unknown)
 
 VERSION_LDFLAGS = \
 	-X 'github.com/ladderairport/agent/internal/version.Version=$(VERSION)' \
@@ -36,19 +38,24 @@ web:
 	@test -f panel/web/dist/index.html || echo '<!doctype html><title>LadderAirport</title>' > panel/web/dist/index.html
 
 panel: web
-	cd panel && go build -ldflags "$(PANEL_LDFLAGS)" -o ../bin/panel ./cmd/panel
+	cd panel && go build -trimpath -ldflags "$(PANEL_LDFLAGS)" -o ../bin/panel ./cmd/panel
 
 # Build panel with committed embed dist only (no npm). Useful for offline / CI-like installs.
 panel-bin:
 	cd panel && go build -trimpath -ldflags="$(PANEL_LDFLAGS)" -o ../bin/panel ./cmd/panel
 
 agent:
-	cd agent && go build -tags "$(AGENT_TAGS)" -ldflags "$(AGENT_LDFLAGS)" -o ../bin/ladder-agent ./cmd/ladder-agent
+	cd agent && go build -trimpath -tags "$(AGENT_TAGS)" -ldflags "$(AGENT_LDFLAGS)" -o ../bin/ladder-agent ./cmd/ladder-agent
 
+# -race 需要 cgo：显式 CGO_ENABLED=1，避免外部环境 CGO_ENABLED=0 导致失败
 test:
-	cd pkg && go test ./...
-	cd panel && go test ./...
-	cd agent && go test -tags "$(AGENT_TAGS)" ./... -timeout 120s
+	cd pkg && go vet ./... && CGO_ENABLED=1 go test -race ./...
+	cd panel && go vet ./... && CGO_ENABLED=1 go test -race ./...
+	cd agent && go vet -tags "$(AGENT_TAGS)" ./... && CGO_ENABLED=1 go test -race -tags "$(AGENT_TAGS)" ./... -timeout 120s
+
+# 端到端冒烟：先确保产物存在（panel 用已提交的 embed dist，无需 npm），再跑 e2e 脚本
+e2e: panel-bin agent
+	bash scripts/e2e-smoke.sh
 
 # Local systemd install helpers (require root). Prefer curl|bash from Release on servers.
 install-panel:
