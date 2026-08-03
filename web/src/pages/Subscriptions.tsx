@@ -141,10 +141,11 @@ export default function Subscriptions() {
   const [editorError, setEditorError] = useState('')
   const [subEditor, setSubEditor] = useState<SubscriptionEditor>(EMPTY_SUB_EDITOR)
   const [sourceEditor, setSourceEditor] = useState<SourceEditor>(EMPTY_SOURCE_EDITOR)
-  const [textPreview, setTextPreview] = useState<{ subId: string; subName: string; format: string; text: string } | null>(null)
+  const [textPreview, setTextPreview] = useState<{ subId: string; subName: string; format: string; text: string; useDomain: boolean } | null>(null)
   const [sourcePreview, setSourcePreview] = useState<SourcePreview | null>(null)
   const [sourcePreviewTitle, setSourcePreviewTitle] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [domainHostPreference, setDomainHostPreference] = useState<Record<string, boolean>>({})
   
   // QR Code Modal state
   const [qrModal, setQrModal] = useState<{ open: boolean; title: string; url: string }>({
@@ -407,16 +408,17 @@ export default function Subscriptions() {
     }
   }
 
-  async function onPreviewSubscription(subscription: Subscription, targetFormat = 'v2ray') {
+  async function onPreviewSubscription(subscription: Subscription, targetFormat = 'v2ray', useDomain = true) {
     const key = `subscription-preview:${subscription.id}`
     if (!beginOperation(key)) return
     try {
-      const res = await previewSubscription(subscription.id, targetFormat)
+      const res = await previewSubscription(subscription.id, targetFormat, useDomain)
       setTextPreview({
         subId: subscription.id,
         subName: subscription.name,
         format: targetFormat,
         text: res,
+        useDomain,
       })
     } catch (err) {
       toast.error(errorText(err, '预览订阅失败'))
@@ -428,7 +430,7 @@ export default function Subscriptions() {
   async function switchPreviewFormat(format: string) {
     if (!textPreview) return
     try {
-      const res = await previewSubscription(textPreview.subId, format)
+      const res = await previewSubscription(textPreview.subId, format, textPreview.useDomain)
       setTextPreview({
         ...textPreview,
         format,
@@ -567,10 +569,29 @@ export default function Subscriptions() {
     return `${origin}${path.startsWith('/') ? '' : '/'}${path}`
   }
 
-  async function copySubscriptionUrl(path: string | undefined, id: string) {
+  function getSubscriptionUrl(path: string | undefined, useDomain: boolean, format?: string): string {
     const fullUrl = getFullSubscriptionUrl(path)
+    if (!fullUrl) return ''
     try {
-      await copyText(fullUrl)
+      const url = new URL(fullUrl)
+      url.searchParams.set('use_domain', String(useDomain))
+      if (format) url.searchParams.set('flag', format)
+      return url.toString()
+    } catch {
+      const separator = fullUrl.includes('?') ? '&' : '?'
+      const formatQuery = format ? `&flag=${encodeURIComponent(format)}` : ''
+      return `${fullUrl}${separator}use_domain=${useDomain}${formatQuery}`
+    }
+  }
+
+  function toggleDomainHostPreference(id: string) {
+    setDomainHostPreference((current) => ({ ...current, [id]: !(current[id] ?? true) }))
+  }
+
+  async function copySubscriptionUrl(path: string | undefined, id: string, useDomain: boolean) {
+    const subscriptionUrl = getSubscriptionUrl(path, useDomain)
+    try {
+      await copyText(subscriptionUrl)
       setCopiedId(id)
       toast.success('已复制完整订阅链接')
       setTimeout(() => setCopiedId(null), 2000)
@@ -671,9 +692,12 @@ export default function Subscriptions() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {subscriptions.map((sub) => {
                 const subPending = entityOperationPending('subscription', sub.id)
-                const fullUrl = getFullSubscriptionUrl(sub.url)
-                const clashScheme = `clash://install-config?url=${encodeURIComponent(fullUrl + '?flag=clash')}`
-                const singboxScheme = `sing-box://import-remote?url=${encodeURIComponent(fullUrl + '?flag=singbox')}`
+                const useDomain = domainHostPreference[sub.id] ?? true
+                const subscriptionUrl = getSubscriptionUrl(sub.url, useDomain)
+                const clashUrl = getSubscriptionUrl(sub.url, useDomain, 'clash')
+                const singboxUrl = getSubscriptionUrl(sub.url, useDomain, 'singbox')
+                const clashScheme = `clash://install-config?url=${encodeURIComponent(clashUrl)}`
+                const singboxScheme = `sing-box://import-remote?url=${encodeURIComponent(singboxUrl)}`
 
                 return (
                   <Card
@@ -712,7 +736,7 @@ export default function Subscriptions() {
                         <span className="text-[11px] font-medium text-muted-foreground block">公网订阅地址</span>
                         <div className="flex items-center gap-2 p-2 rounded-lg bg-background border border-border">
                           <code className="text-xs font-mono text-foreground truncate flex-1 select-all px-1">
-                            {fullUrl}
+                            {subscriptionUrl}
                           </code>
                           <TooltipProvider>
                             <Tooltip>
@@ -720,7 +744,7 @@ export default function Subscriptions() {
                                 <Button
                                   size="sm"
                                   variant="ghost"
-                                  onClick={() => void copySubscriptionUrl(sub.url, sub.id)}
+                                  onClick={() => void copySubscriptionUrl(sub.url, sub.id, useDomain)}
                                   className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
                                 >
                                   {copiedId === sub.id ? (
@@ -742,7 +766,21 @@ export default function Subscriptions() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => setQrModal({ open: true, title: sub.name, url: fullUrl })}
+                          onClick={() => toggleDomainHostPreference(sub.id)}
+                          disabled={subPending || saving}
+                          className={`h-8 text-xs gap-1.5 cursor-pointer ${
+                            useDomain
+                              ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary'
+                              : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                          title={useDomain ? '当前使用域名作为节点 Host，点击切换为 IP/地址' : '当前使用节点地址作为 Host，点击切换为域名'}
+                        >
+                          <Globe className="h-3.5 w-3.5" /> {useDomain ? '域名 Host' : 'IP Host'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setQrModal({ open: true, title: sub.name, url: subscriptionUrl })}
                           className="h-8 text-xs border-border bg-background hover:bg-muted text-foreground gap-1.5 cursor-pointer"
                         >
                           <QrCode className="h-3.5 w-3.5 text-success" /> 扫码
@@ -771,7 +809,7 @@ export default function Subscriptions() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => void onPreviewSubscription(sub)}
+                          onClick={() => void onPreviewSubscription(sub, 'v2ray', useDomain)}
                           loading={subPending}
                           disabled={subPending}
                           className="h-8 text-xs text-muted-foreground hover:text-foreground gap-1.5 ml-auto cursor-pointer"
@@ -1256,7 +1294,7 @@ export default function Subscriptions() {
         <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4 shadow-xl">
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-base font-bold text-zinc-100">
-              订阅内容预览 · {textPreview?.subName}
+              订阅内容预览 · {textPreview?.subName} · {textPreview?.useDomain ? '域名 Host' : 'IP Host'}
             </DialogTitle>
           </DialogHeader>
 

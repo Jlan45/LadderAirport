@@ -1039,8 +1039,11 @@ export function deleteSubscription(id: string): Promise<void> {
   return request('DELETE', `/subscriptions/${id}`)
 }
 
-export async function previewSubscription(id: string, format?: string): Promise<string> {
-  const query = format ? `?format=${encodeURIComponent(format)}` : ''
+export async function previewSubscription(id: string, format?: string, useDomain?: boolean): Promise<string> {
+  const params = new URLSearchParams()
+  if (format) params.set('format', format)
+  if (useDomain !== undefined) params.set('use_domain', String(useDomain))
+  const query = params.toString() ? `?${params.toString()}` : ''
   return requestText(`/subscriptions/${id}/preview${query}`)
 }
 
