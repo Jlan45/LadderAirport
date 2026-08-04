@@ -42,7 +42,7 @@ export function ConfirmModal({
           {description ? <DialogDescription className="mt-1">{description}</DialogDescription> : null}
         </DialogHeader>
 
-        <DialogFooter className="mt-4 flex flex-row items-center justify-end gap-2">
+        <DialogFooter className="mt-6">
           <Button type="button" variant="outline" disabled={loading} onClick={onCancel}>
             {cancelText}
           </Button>

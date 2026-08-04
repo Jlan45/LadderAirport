@@ -572,7 +572,7 @@ export default function Fleet() {
             </button>
           </div>
 
-          <div className="flex items-center space-x-2 border border-border bg-card rounded-md px-3 py-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 border border-border bg-card rounded-md px-3 py-1.5 text-xs text-muted-foreground">
             <Switch
               id="auto-refresh"
               checked={auto}
@@ -588,7 +588,7 @@ export default function Fleet() {
             onClick={() => void refreshLive()}
             loading={refreshing}
             disabled={batchBusy}
-            className="border-zinc-800 text-zinc-300 hover:bg-zinc-900 gap-1.5 h-9"
+            className="gap-1.5 h-9"
           >
             <RefreshCw className="h-4 w-4" /> 探测全部
           </Button>
@@ -801,19 +801,19 @@ export default function Fleet() {
             </div>
           ) : !ov && loadError ? (
             <div className="flex flex-col items-center justify-center py-12 space-y-4">
-              <span className="text-sm text-zinc-400 font-semibold">节点列表获取失败</span>
-              <Button variant="outline" className="border-zinc-800" onClick={() => void loadCached()}>
-                <RefreshCw className="h-4 w-4 mr-2" /> 重试加载
+              <span className="text-sm font-semibold text-muted-foreground">节点列表获取失败</span>
+              <Button variant="outline" onClick={() => void loadCached()}>
+                <RefreshCw className="h-4 w-4" /> 重试加载
               </Button>
             </div>
           ) : nodes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 space-y-4 text-center">
               {allNodes.length === 0 ? (
                 <>
-                  <Server className="h-8 w-8 text-zinc-700" />
+                  <Server className="h-8 w-8 text-muted-foreground" />
                   <div className="space-y-1">
-                    <span className="text-sm text-zinc-400 font-medium">暂无节点数据</span>
-                    <p className="text-xs text-zinc-500">点击下方按钮，开始添加您的第一个管控节点。</p>
+                    <span className="text-sm font-medium text-foreground">暂无节点数据</span>
+                    <p className="text-xs text-muted-foreground">点击下方按钮，开始添加您的第一个管控节点。</p>
                   </div>
                   <Button onClick={() => setAddOpen(true)} className="gap-1.5 mt-2">
                     <Plus className="h-4 w-4" /> 添加节点
@@ -821,8 +821,8 @@ export default function Fleet() {
                 </>
               ) : (
                 <>
-                  <Filter className="h-8 w-8 text-zinc-700" />
-                  <span className="text-sm text-zinc-500">没有匹配标签的节点</span>
+                  <Filter className="h-8 w-8 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">没有匹配标签的节点</span>
                 </>
               )}
             </div>
@@ -853,7 +853,7 @@ export default function Fleet() {
             /* Redesigned Premium Table view */
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader className="bg-zinc-900/40 border-zinc-800">
+                <TableHeader className="bg-muted/40 border-border">
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="w-12 text-center">
                       <Checkbox
@@ -882,7 +882,7 @@ export default function Fleet() {
                     const outdated = n.status !== 'pending' && isAgentOutdated(n.agent_version, recommended)
                     const actionBusy = batchBusy || activeActions[n.id] !== undefined
                     return (
-                      <TableRow key={n.id} className="hover:bg-zinc-900/30 border-zinc-900/60">
+                      <TableRow key={n.id} className="hover:bg-muted/50 border-border">
                         <TableCell className="text-center">
                           <Checkbox
                             checked={selected.has(n.id)}
@@ -894,18 +894,18 @@ export default function Fleet() {
                           <button
                             type="button"
                             onClick={() => openDetail(n.id)}
-                            className="font-semibold text-zinc-200 hover:text-zinc-100 hover:underline text-left cursor-pointer"
+                            className="font-semibold text-foreground hover:underline text-left cursor-pointer"
                           >
                             {n.name}
                           </button>
                         </TableCell>
                         <TableCell className="space-y-1">
-                          <code className="text-xs font-mono text-zinc-300 block">
+                          <code className="text-xs font-mono text-foreground block">
                             {n.address || '（待填）'}:{n.grpc_port}
                           </code>
                           {n.public_address && n.public_address !== n.address && (
-                            <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
-                              订阅: <code className="text-[10px] text-zinc-400">{n.public_address}</code>
+                            <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
+                              订阅: <code className="text-[10px] text-muted-foreground">{n.public_address}</code>
                             </span>
                           )}
                         </TableCell>
@@ -915,13 +915,13 @@ export default function Fleet() {
                         <TableCell>
                           <Badge variant={runtimeTheme(n.runtime_state)}>{runtimeLabel(n.runtime_state)}</Badge>
                         </TableCell>
-                        <TableCell className="text-center text-zinc-300 font-medium">
+                        <TableCell className="text-center text-foreground font-medium">
                           {n.inbound_count ?? 0}
                         </TableCell>
-                        <TableCell className="text-center text-zinc-300 font-mono">
+                        <TableCell className="text-center text-foreground font-mono">
                           {fresh ? (n.connections ?? 0) : '—'}
                         </TableCell>
-                        <TableCell className="text-zinc-400 font-mono text-xs space-y-0.5">
+                        <TableCell className="text-muted-foreground font-mono text-xs space-y-0.5">
                           {fresh ? (
                             <>
                               <div className="flex items-center text-[10px] text-emerald-500">
@@ -933,38 +933,38 @@ export default function Fleet() {
                             </>
                           ) : '—'}
                         </TableCell>
-                        <TableCell className="text-zinc-300 font-mono text-xs">
+                        <TableCell className="text-foreground font-mono text-xs">
                           {fresh ? formatBytes(n.memory_rss_bytes) : '—'}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
                             {(n.labels ?? []).map((l) => (
-                              <Badge key={l} variant="outline" className="text-[10px] border-zinc-800 text-zinc-400 px-1.5 py-0">
+                              <Badge key={l} variant="outline" className="text-[10px] border-border text-muted-foreground px-1.5 py-0">
                                 {l}
                               </Badge>
                             ))}
                           </div>
                         </TableCell>
-                        <TableCell className="text-xs text-zinc-400 font-mono">
+                        <TableCell className="text-xs text-muted-foreground font-mono">
                           {formatTime(n.last_seen_unix || n.metrics_at_unix)}
                         </TableCell>
                         <TableCell className="space-y-0.5">
-                          <code className="text-xs font-mono text-zinc-300 block">{n.agent_version || '—'}</code>
+                          <code className="text-xs font-mono text-foreground block">{n.agent_version || '—'}</code>
                           {outdated ? (
                             <Badge variant="warning" className="text-[9px] px-1 py-0 scale-95 origin-left">可升级</Badge>
                           ) : n.agent_version ? (
-                            <Badge variant="outline" className="text-[9px] px-1 py-0 scale-95 origin-left border-emerald-900/50 text-emerald-400/80">已最新</Badge>
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 scale-95 origin-left border-emerald-500/30 text-emerald-500">已最新</Badge>
                           ) : null}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
-                            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer" onClick={() => openDetail(n.id)}>
+                            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer" onClick={() => openDetail(n.id)}>
                               详情
                             </Button>
                             <Button
                               size="sm"
                               variant="ghost"
-                              className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                               loading={activeActions[n.id] === 'probe'}
                               disabled={actionBusy}
                               onClick={() => void onProbe(n.id)}
@@ -974,7 +974,7 @@ export default function Fleet() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                               loading={activeActions[n.id] === 'install'}
                               disabled={actionBusy}
                               onClick={() => void showInstall(n.id)}
@@ -1234,12 +1234,12 @@ function NodeCard({
         )}
 
         {/* Actions panel */}
-        <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-zinc-900">
+        <div className="grid grid-cols-4 gap-1.5 pt-2.5 border-t border-border">
           <Button
             size="sm"
             variant="outline"
             onClick={onDetail}
-            className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-zinc-300"
+            className="h-8 text-xs"
           >
             详情
           </Button>
@@ -1249,7 +1249,7 @@ function NodeCard({
             loading={activeAction === 'apply'}
             disabled={actionBusy && activeAction !== 'apply'}
             onClick={onApply}
-            className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-zinc-300"
+            className="h-8 text-xs"
           >
             下发
           </Button>
@@ -1259,7 +1259,7 @@ function NodeCard({
             loading={activeAction === 'start'}
             disabled={actionBusy && activeAction !== 'start'}
             onClick={onStart}
-            className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-zinc-300"
+            className="h-8 text-xs"
           >
             启动
           </Button>
@@ -1269,7 +1269,7 @@ function NodeCard({
             loading={activeAction === 'stop'}
             disabled={actionBusy && activeAction !== 'stop'}
             onClick={onStop}
-            className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-zinc-300"
+            className="h-8 text-xs"
           >
             停止
           </Button>
@@ -1279,7 +1279,7 @@ function NodeCard({
             loading={activeAction === 'probe'}
             disabled={actionBusy && activeAction !== 'probe'}
             onClick={onProbe}
-            className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-zinc-300"
+            className="h-8 text-xs"
           >
             探测
           </Button>
@@ -1289,7 +1289,7 @@ function NodeCard({
             loading={activeAction === 'install'}
             disabled={actionBusy && activeAction !== 'install'}
             onClick={onInstall}
-            className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-zinc-300"
+            className="h-8 text-xs"
           >
             安装
           </Button>
@@ -1300,8 +1300,8 @@ function NodeCard({
             disabled={actionBusy && activeAction !== 'upgrade'}
             onClick={onUpgrade}
             title={outdated ? '远程升级 Agent 到最新推荐版本' : `当前已是最新版本 (${n.agent_version || recommended})，点击可重新推送升级指令`}
-            className={`h-8 border-zinc-800 text-xs hover:bg-zinc-900 ${
-              outdated ? 'text-amber-500 hover:text-amber-400' : 'text-zinc-400 hover:text-zinc-200'
+            className={`h-8 text-xs ${
+              outdated ? 'text-amber-500 hover:text-amber-400 border-amber-500/30' : 'text-muted-foreground'
             }`}
           >
             {outdated ? '升级' : '重升'}
@@ -1312,7 +1312,7 @@ function NodeCard({
             loading={activeAction === 'delete'}
             disabled={actionBusy && activeAction !== 'delete'}
             onClick={onDelete}
-            className="h-8 border-zinc-800 text-xs hover:bg-zinc-900 text-red-500 hover:text-red-400 hover:border-red-900/30"
+            className="h-8 text-xs text-destructive hover:bg-destructive/10 border-destructive/30"
           >
             删除
           </Button>

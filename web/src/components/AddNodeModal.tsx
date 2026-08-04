@@ -111,7 +111,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v && !busy) onClose() }}>
-      <DialogContent className="max-w-2xl bg-zinc-950 border-zinc-800 text-zinc-100 max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold flex items-center gap-2">
             {installInfo ? `安装命令 · ${installInfo.node.name}` : '添加节点'}
@@ -120,8 +120,8 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
 
         {!installInfo ? (
           <div className="space-y-4 my-2">
-            <div className="flex gap-2.5 p-3 rounded-lg bg-zinc-900/50 border border-zinc-800 text-xs text-zinc-400 leading-relaxed">
-              <Info className="h-4 w-4 shrink-0 text-zinc-500 mt-0.5" />
+            <div className="flex gap-2.5 p-3 rounded-lg bg-muted/60 border border-border text-xs text-muted-foreground leading-relaxed">
+              <Info className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
               <div>
                 创建节点并生成一次性注册命令。目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。
                 请先在「设置」填写 HTTPS Public Base URL；控制面地址可留空由 Agent 探测。
@@ -136,8 +136,8 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
 
             <div className="space-y-4">
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-name" className="text-zinc-300">
-                  节点名称 <span className="text-red-500">*</span>
+                <Label htmlFor="add-node-name">
+                  节点名称 <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="add-node-name"
@@ -145,23 +145,21 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                   onChange={(e) => setName(e.target.value)}
                   placeholder="例如: 香港 01"
                   maxLength={80}
-                  className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-address" className="text-zinc-300">控制面地址（可选，Panel 拨号）</Label>
+                <Label htmlFor="add-node-address">控制面地址（可选，Panel 拨号）</Label>
                 <Input
                   id="add-node-address"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="可先留空；已填则注册不会覆盖"
-                  className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-grpc-port" className="text-zinc-300">控制面 gRPC 端口</Label>
+                <Label htmlFor="add-node-grpc-port">控制面 gRPC 端口</Label>
                 <Input
                   id="add-node-grpc-port"
                   type="number"
@@ -169,54 +167,50 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                   min={1}
                   max={65535}
                   onChange={(e) => setGrpcPort(Number(e.target.value) || 0)}
-                  className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-public-address" className="text-zinc-300">公网地址（可选，订阅用）</Label>
+                <Label htmlFor="add-node-public-address">公网地址（可选，订阅用）</Label>
                 <Input
                   id="add-node-public-address"
                   value={publicAddress}
                   onChange={(e) => setPublicAddress(e.target.value)}
                   placeholder="客户端入口；空则回退控制面地址"
-                  className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-labels" className="text-zinc-300">节点标签（英文逗号分隔）</Label>
+                <Label htmlFor="add-node-labels">节点标签（英文逗号分隔）</Label>
                 <Input
                   id="add-node-labels"
                   value={labels}
                   onChange={(e) => setLabels(e.target.value)}
                   placeholder="例如: edge,prod,hk"
-                  className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-agent-version" className="text-zinc-300">Agent 版本</Label>
+                <Label htmlFor="add-node-agent-version">Agent 版本</Label>
                 <Input
                   id="add-node-agent-version"
                   value={agentVersion}
                   onChange={(e) => setAgentVersion(e.target.value)}
                   placeholder="latest 或 v0.3.1"
-                  className="bg-zinc-900 border-zinc-800 focus-visible:ring-zinc-700"
                 />
               </div>
             </div>
           </div>
         ) : (
           <div className="space-y-4 my-2">
-            <div className="text-sm text-zinc-400 leading-relaxed">
+            <div className="text-sm text-muted-foreground leading-relaxed">
               命令只包含 15 分钟有效的一次性注册令牌；长期控制 Token 不会写入安装命令，由证书接口返回给 Agent。
               安装后将使用 {installInfo.panel_base_url || 'Panel'} 管理的 mTLS。
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-zinc-200">一键安装</span>
-              <Button size="sm" variant="outline" onClick={() => void copyCommand()} className="gap-1.5 text-zinc-300 border-zinc-800 hover:bg-zinc-900">
+              <span className="text-sm font-semibold text-foreground">一键安装</span>
+              <Button size="sm" variant="outline" onClick={() => void copyCommand()} className="gap-1.5">
                 {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? '已复制' : '复制命令'}
               </Button>
@@ -227,8 +221,8 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
             </pre>
 
             <div className="space-y-2">
-              <h4 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">后续步骤</h4>
-              <ol className="list-decimal pl-5 space-y-1.5 text-sm text-zinc-400">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">后续步骤</h4>
+              <ol className="list-decimal pl-5 space-y-1.5 text-sm text-muted-foreground">
                 {installInfo.steps.map((s, idx) => (
                   <li key={idx} className="leading-relaxed">
                     {s}
@@ -239,9 +233,12 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
           </div>
         )}
 
-        <DialogFooter className="mt-4 gap-2">
+        <DialogFooter className="mt-4">
           {installInfo ? (
             <>
+              <Button variant="outline" onClick={onClose}>
+                完成
+              </Button>
               <Button
                 variant="default"
                 onClick={() => {
@@ -251,9 +248,6 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
               >
                 打开节点详情
               </Button>
-              <Button variant="outline" onClick={onClose} className="border-zinc-800 hover:bg-zinc-900">
-                完成
-              </Button>
             </>
           ) : (
             <>
@@ -261,7 +255,6 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                 variant="outline"
                 disabled={busy}
                 onClick={onClose}
-                className="border-zinc-800 hover:bg-zinc-900"
               >
                 取消
               </Button>

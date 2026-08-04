@@ -133,6 +133,10 @@
 }
 
 @layer base {
+  html {
+    scrollbar-gutter: stable;
+    overflow-y: scroll;
+  }
   * {
     border-color: var(--border);
     outline-color: var(--ring);

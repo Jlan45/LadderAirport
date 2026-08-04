@@ -218,7 +218,7 @@ function DNSAccountForm({ providers, onCreate, busy }: { providers: DNSProviderM
   return <Card><CardHeader><CardTitle>添加 DNS 账号</CardTitle><CardDescription>一个账号只管理一个 DNS 区域；同一供应商的其他区域请创建独立账号。</CardDescription></CardHeader><CardContent><form className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" onSubmit={submit}>
     <Field label="名称"><Input value={name} onChange={(e) => setName(e.target.value)} required /></Field>
     <Field label="供应商"><select className={selectClass} value={provider} onChange={(e) => { setProvider(e.target.value); setCredentials({}) }}>{providers.map((item) => <option key={item.name} value={item.name}>{item.label}</option>)}</select></Field>
-    <Field label="管理区域（Zone）"><Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="example.com" required /><p className="text-xs text-zinc-500">该账号可写入此区域下的二级域名，例如 hk.example.com。</p></Field>
+    <Field label="管理区域（Zone）"><Input value={zone} onChange={(e) => setZone(e.target.value)} placeholder="example.com" required /><p className="text-xs text-muted-foreground">该账号可写入此区域下的二级域名，例如 hk.example.com。</p></Field>
     {metadata?.credential_fields.map((field) => <Field key={field.name} label={field.label}><Input type={field.secret ? 'password' : 'text'} value={credentials[field.name] ?? ''} required={field.required} onChange={(e) => setCredentials((current) => ({ ...current, [field.name]: e.target.value }))} /></Field>)}
     <div className="flex items-end"><Button type="submit" loading={busy}><Plus className="mr-2 h-4 w-4" />添加</Button></div>
   </form></CardContent></Card>
@@ -236,7 +236,7 @@ function DomainForm({ nodes, accounts, onCreate, busy }: { nodes: Node[]; accoun
     <Field label="节点"><select className={selectClass} value={nodeID} onChange={(e) => setNodeID(e.target.value)}>{nodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></Field>
     <Field label="DNS 账号"><select className={selectClass} value={accountID} onChange={(e) => setAccountID(e.target.value)}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></Field>
     <Field label="账号管理区域"><Input value={account?.zone ?? ''} readOnly placeholder="请先选择 DNS 账号" /></Field>
-    <Field label="主机名 / 二级域名"><Input value={fqdn} onChange={(e) => setFQDN(e.target.value)} placeholder="edge" required />{account?.zone && <p className="text-xs text-zinc-500">最终域名：{fqdn ? (fqdn.endsWith(`.${account.zone}`) || fqdn === account.zone ? fqdn : `${fqdn}.${account.zone}`) : `edge.${account.zone}`}</p>}</Field>
+    <Field label="主机名 / 二级域名"><Input value={fqdn} onChange={(e) => setFQDN(e.target.value)} placeholder="edge" required />{account?.zone && <p className="text-xs text-muted-foreground">最终域名：{fqdn ? (fqdn.endsWith(`.${account.zone}`) || fqdn === account.zone ? fqdn : `${fqdn}.${account.zone}`) : `edge.${account.zone}`}</p>}</Field>
     <Field label="手工 IPv4（留空由 Agent 探测）"><Input value={ipv4} onChange={(e) => setIPv4(e.target.value)} /></Field>
     <div className="flex items-end"><Button type="submit" loading={busy}><Plus className="mr-2 h-4 w-4" />添加</Button></div>
   </form></CardContent></Card>

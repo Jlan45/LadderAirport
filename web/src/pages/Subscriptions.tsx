@@ -959,8 +959,8 @@ export default function Subscriptions() {
         <TabsContent value="sources" className="space-y-6 mt-0">
           <div className="flex items-center justify-between">
             <div className="space-y-1">
-              <h2 className="text-sm font-semibold text-zinc-200">第三方外部订阅源聚合</h2>
-              <p className="text-xs text-zinc-500">
+              <h2 className="text-sm font-semibold text-foreground">第三方外部订阅源聚合</h2>
+              <p className="text-xs text-muted-foreground">
                 配置外部机场或提供者的订阅 URL，系统后台会定时抓取并解析节点，合并下发给指定订阅。
               </p>
             </div>
@@ -971,16 +971,16 @@ export default function Subscriptions() {
 
           {loading && sources.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 space-y-3">
-              <RefreshCw className="h-6 w-6 animate-spin text-zinc-500" />
-              <span className="text-sm text-zinc-400">正在加载外部订阅源列表…</span>
+              <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">正在加载外部订阅源列表…</span>
             </div>
           ) : sources.length === 0 ? (
-            <Card className="border-zinc-900 bg-zinc-900/20 py-12 text-center">
+            <Card className="border-border bg-card py-12 text-center">
               <CardContent className="space-y-3">
-                <Globe className="h-10 w-10 text-zinc-700 mx-auto" />
+                <Globe className="h-10 w-10 text-muted-foreground stroke-[1.5] mx-auto" />
                 <div className="space-y-1">
-                  <h3 className="text-base font-semibold text-zinc-300">暂无第三方外部订阅源</h3>
-                  <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+                  <h3 className="text-base font-semibold text-foreground">暂无第三方外部订阅源</h3>
+                  <p className="text-xs text-muted-foreground max-w-sm mx-auto">
                     添加外部订阅源链接后，面板可以自动抓取并将其中的节点合并到您发布的订阅中。
                   </p>
                 </div>
@@ -990,11 +990,11 @@ export default function Subscriptions() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="border-zinc-900 bg-zinc-900/30">
+            <Card className="border-border bg-card">
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <Table>
-                    <TableHeader className="bg-zinc-900/40 border-zinc-800">
+                    <TableHeader className="bg-muted/40 border-border">
                       <TableRow className="hover:bg-transparent">
                         <TableHead className="min-w-[140px]">源名称</TableHead>
                         <TableHead className="min-w-[220px]">抓取 URL</TableHead>
@@ -1005,31 +1005,31 @@ export default function Subscriptions() {
                         <TableHead className="w-[200px] text-right">操作</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody className="divide-y divide-zinc-900 border-zinc-900">
+                    <TableBody className="divide-y divide-border">
                       {sources.map((src) => {
                         const srcPending = entityOperationPending('source', src.id)
                         return (
-                          <TableRow key={src.id} className="hover:bg-zinc-900/30 border-zinc-900/60">
-                            <TableCell className="font-semibold text-zinc-200">
+                          <TableRow key={src.id} className="hover:bg-muted/50 border-border">
+                            <TableCell className="font-semibold text-foreground">
                               {src.name}
                             </TableCell>
                             <TableCell>
-                              <code className="text-xs font-mono text-zinc-400 break-all block max-w-xs truncate">
+                              <code className="text-xs font-mono text-muted-foreground break-all block max-w-xs truncate">
                                 {src.url}
                               </code>
                               {src.last_error && (
-                                <span className="text-[10px] font-mono text-red-400 block truncate mt-0.5">
+                                <span className="text-[10px] font-mono text-destructive block truncate mt-0.5">
                                   抓取失败: {src.last_error}
                                 </span>
                               )}
                             </TableCell>
-                            <TableCell className="text-center font-mono font-bold text-zinc-200">
+                            <TableCell className="text-center font-mono font-bold text-foreground">
                               {src.cached_proxy_count ?? 0}
                             </TableCell>
-                            <TableCell className="text-center font-mono text-xs text-zinc-400">
+                            <TableCell className="text-center font-mono text-xs text-muted-foreground">
                               {formatInterval(src.refresh_interval_sec)}
                             </TableCell>
-                            <TableCell className="text-xs text-zinc-400 font-mono">
+                            <TableCell className="text-xs text-muted-foreground font-mono">
                               {formatTime(src.updated_at_unix)}
                             </TableCell>
                             <TableCell>
@@ -1048,7 +1048,7 @@ export default function Subscriptions() {
                                   loading={srcPending}
                                   disabled={srcPending}
                                   onClick={() => void onRefreshSource(src)}
-                                  className="h-8 px-2 text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-950/20 cursor-pointer gap-1"
+                                  className="h-8 px-2 text-xs text-primary hover:text-primary/80 cursor-pointer gap-1"
                                 >
                                   <RefreshCw className="h-3.5 w-3.5" /> 刷新
                                 </Button>
@@ -1058,7 +1058,7 @@ export default function Subscriptions() {
                                   loading={srcPending}
                                   disabled={srcPending}
                                   onClick={() => void onPreviewSource(src)}
-                                  className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer gap-1"
+                                  className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer gap-1"
                                 >
                                   <Eye className="h-3.5 w-3.5" /> 预览
                                 </Button>
@@ -1067,7 +1067,7 @@ export default function Subscriptions() {
                                   variant="ghost"
                                   disabled={srcPending}
                                   onClick={() => openEditSource(src)}
-                                  className="h-8 px-2 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer gap-1"
+                                  className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer gap-1"
                                 >
                                   <Edit className="h-3.5 w-3.5" /> 编辑
                                 </Button>
@@ -1076,7 +1076,7 @@ export default function Subscriptions() {
                                   variant="ghost"
                                   disabled={srcPending}
                                   onClick={() => onRequestDeleteSource(src)}
-                                  className="h-8 px-2 text-xs text-red-500 hover:text-red-400 hover:bg-red-950/20 cursor-pointer gap-1"
+                                  className="h-8 px-2 text-xs text-destructive hover:text-destructive/80 cursor-pointer gap-1"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" /> 删除
                                 </Button>
@@ -1124,14 +1124,14 @@ export default function Subscriptions() {
               />
             </div>
 
-            <div className="space-y-2 pt-2 border-t border-zinc-900">
+            <div className="space-y-2 pt-2 border-t border-border">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-xs text-zinc-300 block">服务端代理链</Label>
-                  <p className="text-[10px] text-zinc-500 mt-0.5">客户端只连接链的入口，不会看到中间跳</p>
+                  <Label className="text-xs text-muted-foreground block">服务端代理链</Label>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">客户端只连接链的入口，不会看到中间跳</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="sub-all-chains" className="text-[11px] text-zinc-400">全部已启用链</Label>
+                  <Label htmlFor="sub-all-chains" className="text-[11px] text-muted-foreground">全部已启用链</Label>
                   <Switch
                     id="sub-all-chains"
                     checked={subEditor.includeAllChains}
@@ -1140,9 +1140,9 @@ export default function Subscriptions() {
                 </div>
               </div>
               {!subEditor.includeAllChains && (
-                <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 max-h-40 overflow-y-auto space-y-2">
+                <div className="p-3 bg-muted/60 rounded-lg border border-border max-h-40 overflow-y-auto space-y-2">
                   {chains.length === 0 ? (
-                    <div className="text-xs text-zinc-500 text-center py-2">暂无代理链，请先在“代理链”页面创建</div>
+                    <div className="text-xs text-muted-foreground text-center py-2">暂无代理链，请先在“代理链”页面创建</div>
                   ) : (
                     chains.map((chain) => (
                       <div key={chain.id} className="flex items-center space-x-2 text-xs">
@@ -1151,9 +1151,9 @@ export default function Subscriptions() {
                           checked={subEditor.chainIds.has(chain.id)}
                           onCheckedChange={() => toggleEditorChain(chain.id)}
                         />
-                        <label htmlFor={`chain-${chain.id}`} className="text-zinc-300 cursor-pointer flex-1">
+                        <label htmlFor={`chain-${chain.id}`} className="text-foreground cursor-pointer flex-1">
                           {chain.name}
-                          <span className="text-zinc-500 ml-1">({chain.hops.length} 跳 · {chainStateText(chain.state)})</span>
+                          <span className="text-muted-foreground ml-1">({chain.hops.length} 跳 · {chainStateText(chain.state)})</span>
                         </label>
                       </div>
                     ))
@@ -1162,16 +1162,16 @@ export default function Subscriptions() {
               )}
             </div>
 
-            <div className="space-y-2 pt-2 border-t border-zinc-900">
-              <Label className="text-xs text-zinc-300 block">包含本地节点范围</Label>
+            <div className="space-y-2 pt-2 border-t border-border">
+              <Label className="text-xs text-muted-foreground block">包含本地节点范围</Label>
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => setSubEditor({ ...subEditor, localMode: 'all' })}
                   className={`p-2 text-center rounded border text-xs font-medium transition-all cursor-pointer ${
                     subEditor.localMode === 'all'
-                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   包含全部节点
@@ -1181,8 +1181,8 @@ export default function Subscriptions() {
                   onClick={() => setSubEditor({ ...subEditor, localMode: 'custom' })}
                   className={`p-2 text-center rounded border text-xs font-medium transition-all cursor-pointer ${
                     subEditor.localMode === 'custom'
-                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   选择指定节点
@@ -1192,8 +1192,8 @@ export default function Subscriptions() {
                   onClick={() => setSubEditor({ ...subEditor, localMode: 'none' })}
                   className={`p-2 text-center rounded border text-xs font-medium transition-all cursor-pointer ${
                     subEditor.localMode === 'none'
-                      ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-                      : 'border-zinc-800 bg-zinc-900/40 text-zinc-400'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   不包含本地节点
@@ -1201,9 +1201,9 @@ export default function Subscriptions() {
               </div>
 
               {subEditor.localMode === 'custom' && (
-                <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 max-h-40 overflow-y-auto space-y-2 mt-2">
+                <div className="p-3 bg-muted/60 rounded-lg border border-border max-h-40 overflow-y-auto space-y-2 mt-2">
                   {inbounds.length === 0 ? (
-                    <div className="text-xs text-zinc-500 text-center py-2">暂无可用入站</div>
+                    <div className="text-xs text-muted-foreground text-center py-2">暂无可用入站</div>
                   ) : (
                     inbounds.map((ib) => (
                       <div key={ib.id} className="flex items-center space-x-2 text-xs">
@@ -1212,7 +1212,7 @@ export default function Subscriptions() {
                           checked={subEditor.inboundIds.has(ib.id)}
                           onCheckedChange={() => toggleEditorInbound(ib.id)}
                         />
-                        <label htmlFor={`ib-${ib.id}`} className="text-zinc-300 font-mono cursor-pointer">
+                        <label htmlFor={`ib-${ib.id}`} className="text-foreground font-mono cursor-pointer">
                           {ib.name} ({ib.protocol})
                         </label>
                       </div>
@@ -1222,12 +1222,12 @@ export default function Subscriptions() {
               )}
             </div>
 
-            <div className="space-y-2 pt-2 border-t border-zinc-900">
-              <Label className="text-xs text-zinc-300 block">合并第三方外部订阅源</Label>
+            <div className="space-y-2 pt-2 border-t border-border">
+              <Label className="text-xs text-muted-foreground block">合并第三方外部订阅源</Label>
               {sources.length === 0 ? (
-                <p className="text-xs text-zinc-500 italic">暂无已启用的外部订阅源</p>
+                <p className="text-xs text-muted-foreground italic">暂无已启用的外部订阅源</p>
               ) : (
-                <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 max-h-40 overflow-y-auto space-y-2">
+                <div className="p-3 bg-muted/60 rounded-lg border border-border max-h-40 overflow-y-auto space-y-2">
                   {sources.map((src) => (
                     <div key={src.id} className="flex items-center space-x-2 text-xs">
                       <Checkbox
@@ -1235,8 +1235,8 @@ export default function Subscriptions() {
                         checked={subEditor.sourceIds.has(src.id)}
                         onCheckedChange={() => toggleEditorSource(src.id)}
                       />
-                      <label htmlFor={`src-${src.id}`} className="text-zinc-300 cursor-pointer">
-                        {src.name} <span className="text-zinc-500 font-mono text-[10px]">({src.cached_proxy_count} 个节点)</span>
+                      <label htmlFor={`src-${src.id}`} className="text-foreground cursor-pointer">
+                        {src.name} <span className="text-muted-foreground font-mono text-[10px]">({src.cached_proxy_count} 个节点)</span>
                       </label>
                     </div>
                   ))}
@@ -1266,8 +1266,8 @@ export default function Subscriptions() {
               </select>
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
-              <Label className="text-xs text-zinc-300">启用该订阅分发</Label>
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <Label className="text-xs text-muted-foreground">启用该订阅分发</Label>
               <Switch
                 checked={subEditor.enabled}
                 onCheckedChange={(v) => setSubEditor({ ...subEditor, enabled: v })}
@@ -1275,11 +1275,11 @@ export default function Subscriptions() {
             </div>
           </div>
 
-          <DialogFooter className="gap-2 pt-2">
-            <Button variant="outline" onClick={closeSubscriptionEditor} disabled={saving} className="border-zinc-800 cursor-pointer">
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={closeSubscriptionEditor} disabled={saving}>
               取消
             </Button>
-            <Button onClick={() => void saveSubscription()} loading={saving} className="cursor-pointer">
+            <Button onClick={() => void saveSubscription()} loading={saving}>
               {subEditor.id ? '更新订阅' : '创建订阅'}
             </Button>
           </DialogFooter>
@@ -1288,13 +1288,13 @@ export default function Subscriptions() {
 
       {/* External Source Editor Dialog */}
       <Dialog open={sourceEditor.open} onOpenChange={(v) => !v && closeSourceEditor()}>
-        <DialogContent className="sm:max-w-lg bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-5 shadow-xl">
+        <DialogContent className="sm:max-w-lg p-6 space-y-5 shadow-xl">
           <DialogHeader className="space-y-1">
-            <DialogTitle className="text-lg font-bold flex items-center gap-2 text-zinc-100">
-              <Globe className="h-5 w-5 text-violet-400" />
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Globe className="h-5 w-5 text-primary" />
               {sourceEditor.id ? '编辑外部订阅源' : '添加外部订阅源'}
             </DialogTitle>
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-muted-foreground">
               抓取并解析外部 HTTP/HTTPS 机场订阅链接，将其中的节点合并入本系统的订阅分发中。
             </p>
           </DialogHeader>
@@ -1307,52 +1307,51 @@ export default function Subscriptions() {
 
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label className="text-xs text-zinc-300">源名称</Label>
+              <Label className="text-xs">源名称</Label>
               <Input
                 value={sourceEditor.name}
                 onChange={(e) => setSourceEditor({ ...sourceEditor, name: e.target.value })}
                 placeholder="例：香港备用节点池 / 外部机场"
-                className="bg-zinc-900 border-zinc-800 text-sm text-zinc-100"
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs text-zinc-300">抓取订阅 URL</Label>
+              <Label className="text-xs">抓取订阅 URL</Label>
               <Input
                 value={sourceEditor.url}
                 onChange={(e) => setSourceEditor({ ...sourceEditor, url: e.target.value })}
                 placeholder="https://example.com/api/v1/client/subscribe?token=..."
-                className="bg-zinc-900 border-zinc-800 text-sm font-mono text-zinc-100"
+                className="font-mono text-xs"
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs text-zinc-300">后台自动刷新间隔 (秒)</Label>
+              <Label className="text-xs">后台自动刷新间隔 (秒)</Label>
               <Input
                 type="number"
                 value={sourceEditor.interval}
                 onChange={(e) => setSourceEditor({ ...sourceEditor, interval: e.target.value })}
                 placeholder="86400 (默认 24 小时)"
-                className="bg-zinc-900 border-zinc-800 text-sm font-mono text-zinc-100"
+                className="font-mono text-xs"
               />
-              <span className="text-[10px] text-zinc-500 block">
+              <span className="text-[10px] text-muted-foreground block">
                 常用提示：86400 秒 = 24 小时，43200 秒 = 12 小时。
               </span>
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs text-zinc-300">自定义 HTTP 请求头 (可选，每行 Key: Value)</Label>
+              <Label className="text-xs">自定义 HTTP 请求头 (可选，每行 Key: Value)</Label>
               <textarea
                 value={sourceEditor.headers}
                 onChange={(e) => setSourceEditor({ ...sourceEditor, headers: e.target.value })}
                 rows={3}
                 placeholder="User-Agent: ClashMeta&#10;Authorization: Bearer xyz"
-                className="w-full rounded-md bg-zinc-900 border border-zinc-800 p-2.5 text-xs font-mono text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-700"
+                className="w-full rounded-md bg-background border border-input p-2.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
-              <Label className="text-xs text-zinc-300">启用自动抓取</Label>
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <Label className="text-xs text-muted-foreground">启用自动抓取</Label>
               <Switch
                 checked={sourceEditor.enabled}
                 onCheckedChange={(v) => setSourceEditor({ ...sourceEditor, enabled: v })}
@@ -1360,11 +1359,11 @@ export default function Subscriptions() {
             </div>
           </div>
 
-          <DialogFooter className="gap-2 pt-2">
-            <Button variant="outline" onClick={closeSourceEditor} disabled={saving} className="border-zinc-800 cursor-pointer">
+          <DialogFooter className="pt-2">
+            <Button variant="outline" onClick={closeSourceEditor} disabled={saving}>
               取消
             </Button>
-            <Button onClick={() => void saveSource()} loading={saving} className="cursor-pointer">
+            <Button onClick={() => void saveSource()} loading={saving}>
               {sourceEditor.id ? '更新外部源' : '创建外部源'}
             </Button>
           </DialogFooter>
@@ -1381,15 +1380,15 @@ export default function Subscriptions() {
 
       {/* Text Preview Modal */}
       <Dialog open={textPreview !== null} onOpenChange={(v) => !v && setTextPreview(null)}>
-        <DialogContent className="sm:max-w-2xl bg-zinc-950 border-zinc-900 text-zinc-100 p-6 space-y-4 shadow-xl">
+        <DialogContent className="sm:max-w-2xl p-6 space-y-4 shadow-xl">
           <DialogHeader className="space-y-1">
-            <DialogTitle className="text-base font-bold text-zinc-100">
+            <DialogTitle className="text-base font-bold">
               订阅内容预览 · {textPreview?.subName}
             </DialogTitle>
           </DialogHeader>
 
-          <div className="flex items-center gap-2 pb-2 border-b border-zinc-900">
-            <span className="text-xs text-zinc-400 mr-1 font-medium">预览格式：</span>
+          <div className="flex items-center gap-2 pb-2 border-b border-border">
+            <span className="text-xs text-muted-foreground mr-1 font-medium">预览格式：</span>
             {(['v2ray', 'clash', 'singbox'] as const).map((f) => (
               <button
                 key={f}
@@ -1398,11 +1397,11 @@ export default function Subscriptions() {
                 className={`px-3 py-1 rounded text-xs font-mono font-medium transition-all cursor-pointer ${
                   textPreview?.format === f
                     ? f === 'clash'
-                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                      ? 'bg-cyan-500/20 text-cyan-500 border border-cyan-500/40'
                       : f === 'singbox'
-                        ? 'bg-violet-500/20 text-violet-400 border border-violet-500/40'
-                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                    : 'bg-zinc-900 text-zinc-400 border border-zinc-800 hover:border-zinc-700'
+                        ? 'bg-violet-500/20 text-violet-500 border border-violet-500/40'
+                        : 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/40'
+                    : 'bg-muted text-muted-foreground border border-border hover:text-foreground'
                 }`}
               >
                 {f === 'v2ray' ? 'V2Ray 链接' : f === 'clash' ? 'Clash YAML' : 'sing-box JSON'}
@@ -1411,7 +1410,7 @@ export default function Subscriptions() {
           </div>
 
           <div className="relative">
-            <pre className="p-4 bg-zinc-900 border border-zinc-800 rounded-lg max-h-[60vh] overflow-y-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all leading-relaxed">
+            <pre className="p-4 bg-muted/60 border border-border rounded-lg max-h-[60vh] overflow-y-auto text-xs font-mono text-foreground whitespace-pre-wrap break-all leading-relaxed">
               {textPreview?.text}
             </pre>
           </div>

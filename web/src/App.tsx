@@ -188,7 +188,7 @@ function AppLayout() {
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                     active === item.path
                       ? 'bg-secondary text-secondary-foreground border border-border/60'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                      : 'border border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}
                   aria-current={active === item.path ? 'page' : undefined}
                 >

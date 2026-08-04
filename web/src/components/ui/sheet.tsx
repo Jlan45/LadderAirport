@@ -53,7 +53,7 @@ export const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDi
 SheetHeader.displayName = 'SheetHeader'
 
 export const SheetFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2', className)} {...props} />
+  <div className={cn('flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5', className)} {...props} />
 )
 SheetFooter.displayName = 'SheetFooter'
 
