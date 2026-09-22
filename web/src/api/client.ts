@@ -432,6 +432,8 @@ export interface ManagedDomain {
   last_reconcile_unix: number
   next_reconcile_unix: number
   last_error?: string
+  created_a_by_panel?: boolean
+  created_aaaa_by_panel?: boolean
 }
 
 export interface ACMEAccount {
@@ -1119,6 +1121,11 @@ export function reconcileManagedDomain(id: string): Promise<AutomationJob> {
   return request('POST', `/managed-domains/${id}/reconcile`)
 }
 
+export function deleteManagedDomain(id: string, deleteRecords: boolean): Promise<AutomationJob | void> {
+  const qs = deleteRecords ? '?delete_records=true' : ''
+  return request('DELETE', `/managed-domains/${encodeURIComponent(id)}${qs}`)
+}
+
 export function listACMEAccounts(): Promise<ACMEAccount[]> {
   return request('GET', '/acme/accounts')
 }
@@ -1138,6 +1145,10 @@ export function registerACMEAccount(id: string): Promise<ACMEAccount> {
   return request('POST', `/acme/accounts/${id}/register`)
 }
 
+export function deleteACMEAccount(id: string): Promise<void> {
+  return request('DELETE', `/acme/accounts/${encodeURIComponent(id)}`)
+}
+
 export function listProtocolCertificates(): Promise<ProtocolCertificate[]> {
   return request('GET', '/protocol-certificates')
 }
@@ -1152,6 +1163,10 @@ export function createProtocolCertificate(body: {
 
 export function issueProtocolCertificate(id: string): Promise<AutomationJob> {
   return request('POST', `/protocol-certificates/${id}/issue`)
+}
+
+export function deleteProtocolCertificate(id: string): Promise<void> {
+  return request('DELETE', `/protocol-certificates/${encodeURIComponent(id)}`)
 }
 
 export function listAutomationJobs(): Promise<AutomationJob[]> {

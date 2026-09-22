@@ -14,7 +14,10 @@ import {
   createDNSAccount,
   createManagedDomain,
   createProtocolCertificate,
+  deleteACMEAccount,
   deleteDNSAccount,
+  deleteManagedDomain,
+  deleteProtocolCertificate,
   issueProtocolCertificate,
   listACMEAccounts,
   listAutomationJobs,
@@ -88,22 +91,67 @@ export default function DNSCertificates() {
     }
   }
 
-  const [deleteTarget, setDeleteTarget] = useState<DNSAccount | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: 'dns'; item: DNSAccount }
+    | { kind: 'domain'; item: ManagedDomain }
+    | { kind: 'acme'; item: ACMEAccount }
+    | { kind: 'cert'; item: ProtocolCertificate }
+    | null
+  >(null)
 
-  function removeDNSAccount(account: DNSAccount) {
-    setDeleteTarget(account)
-  }
-
-  function confirmDeleteDNSAccount() {
+  function confirmDelete() {
     if (!deleteTarget) return
-    const account = deleteTarget
+    const target = deleteTarget
     setDeleteTarget(null)
-    void action(
-      `dns-delete-${account.id}`,
-      () => deleteDNSAccount(account.id),
-      `DNS 账号「${account.name}」已删除`,
-    )
+    if (target.kind === 'dns') {
+      void action(`dns-delete-${target.item.id}`, () => deleteDNSAccount(target.item.id), `DNS 账号「${target.item.name}」已删除`)
+      return
+    }
+    if (target.kind === 'domain') {
+      const purge = !!(target.item.created_a_by_panel || target.item.created_aaaa_by_panel)
+      void action(
+        `domain-delete-${target.item.id}`,
+        () => deleteManagedDomain(target.item.id, purge),
+        purge ? `托管域名「${target.item.fqdn}」已进入删除队列，DNS 记录清理后会从列表消失` : `托管域名「${target.item.fqdn}」已删除`,
+      )
+      return
+    }
+    if (target.kind === 'acme') {
+      void action(`acme-delete-${target.item.id}`, () => deleteACMEAccount(target.item.id), `ACME 账号「${target.item.name}」已删除`)
+      return
+    }
+    const label = target.item.domains.join(', ')
+    void action(`cert-delete-${target.item.id}`, () => deleteProtocolCertificate(target.item.id), `协议证书「${label}」已删除`)
   }
+
+  const deleteCopy = (() => {
+    if (!deleteTarget) return { title: '', description: '' }
+    if (deleteTarget.kind === 'dns') {
+      return {
+        title: '删除 DNS 账号',
+        description: `确定要删除 DNS 账号「${deleteTarget.item.name}」吗？如果账号仍有关联的托管域名，系统会拒绝删除。`,
+      }
+    }
+    if (deleteTarget.kind === 'domain') {
+      const purge = !!(deleteTarget.item.created_a_by_panel || deleteTarget.item.created_aaaa_by_panel)
+      return {
+        title: '删除托管域名',
+        description: purge
+          ? `确定要删除托管域名「${deleteTarget.item.fqdn}」吗？Panel 在 DNS 上创建的 A/AAAA 记录会一并删除。如果仍关联协议证书或 TLS 绑定，系统会拒绝删除。`
+          : `确定要删除托管域名「${deleteTarget.item.fqdn}」吗？已有的 DNS 记录会保留。如果仍关联协议证书或 TLS 绑定，系统会拒绝删除。`,
+      }
+    }
+    if (deleteTarget.kind === 'acme') {
+      return {
+        title: '删除 ACME 账号',
+        description: `确定要删除 ACME 账号「${deleteTarget.item.name}」吗？如果仍有协议证书使用它，系统会拒绝删除。`,
+      }
+    }
+    return {
+      title: '删除协议证书',
+      description: `确定要删除协议证书「${deleteTarget.item.domains.join(', ')}」吗？入站仍在使用托管 TLS 时会拒绝删除。节点上已生成的私钥和证书文件不会被清除。`,
+    }
+  })()
 
   if (loading && providers.length === 0) {
     return <div className="flex min-h-[320px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-500" /></div>
@@ -145,7 +193,7 @@ export default function DNSCertificates() {
                 <TableCell>{account.last_test_unix ? formatTime(account.last_test_unix) : '未测试'}{account.last_test_error && <div className="max-w-[360px] truncate text-xs text-destructive">{account.last_test_error}</div>}</TableCell>
                 <TableCell className="text-right"><div className="flex justify-end gap-1">
                   <Button variant="ghost" size="sm" loading={busy === `dns-test-${account.id}`} disabled={busy === `dns-delete-${account.id}`} onClick={() => void action(`dns-test-${account.id}`, () => testDNSAccount(account.id), 'DNS 连接测试通过')}><TestTube2 className="mr-2 h-4 w-4" />测试</Button>
-                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" loading={busy === `dns-delete-${account.id}`} disabled={busy === `dns-test-${account.id}`} onClick={() => removeDNSAccount(account)}><Trash2 className="mr-2 h-4 w-4" />删除</Button>
+                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" loading={busy === `dns-delete-${account.id}`} disabled={busy === `dns-test-${account.id}`} onClick={() => setDeleteTarget({ kind: 'dns', item: account })}><Trash2 className="mr-2 h-4 w-4" />删除</Button>
                 </div></TableCell>
               </TableRow>)}</TableBody></Table></CardContent>
           </Card>
@@ -159,7 +207,10 @@ export default function DNSCertificates() {
                 <TableCell className="font-mono text-xs">{[domain.desired_ipv4, domain.desired_ipv6, domain.desired_cname].filter(Boolean).join(' / ') || '等待同步'}</TableCell>
                 <TableCell><StatusBadge value={domain.state} />{domain.last_error && <div className="mt-1 max-w-[300px] truncate text-xs text-destructive">{domain.last_error}</div>}</TableCell>
                 <TableCell>{domain.next_reconcile_unix ? formatTime(domain.next_reconcile_unix) : '立即'}</TableCell>
-                <TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `reconcile-${domain.id}`} onClick={() => void action(`reconcile-${domain.id}`, () => reconcileManagedDomain(domain.id), '已提交 DNS 同步')}><RefreshCw className="mr-2 h-4 w-4" />同步</Button></TableCell>
+                <TableCell className="text-right"><div className="flex justify-end gap-1">
+                  <Button variant="ghost" size="sm" loading={busy === `reconcile-${domain.id}`} disabled={busy === `domain-delete-${domain.id}`} onClick={() => void action(`reconcile-${domain.id}`, () => reconcileManagedDomain(domain.id), '已提交 DNS 同步')}><RefreshCw className="mr-2 h-4 w-4" />同步</Button>
+                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" loading={busy === `domain-delete-${domain.id}`} disabled={busy === `reconcile-${domain.id}`} onClick={() => setDeleteTarget({ kind: 'domain', item: domain })}><Trash2 className="mr-2 h-4 w-4" />删除</Button>
+                </div></TableCell>
               </TableRow>)}</TableBody></Table></CardContent>
           </Card>
         </TabsContent>
@@ -171,12 +222,12 @@ export default function DNSCertificates() {
           </div>
           <Card><CardHeader><CardTitle>ACME 账号</CardTitle></CardHeader><CardContent>
             <Table><TableHeader><TableRow><TableHead>名称</TableHead><TableHead>目录</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>
-              {acmeAccounts.map((account) => <TableRow key={account.id}><TableCell className="font-medium">{account.name}</TableCell><TableCell className="max-w-[420px] truncate font-mono text-xs">{account.directory_url}</TableCell><TableCell><StatusBadge value={account.status} /></TableCell><TableCell className="text-right">{account.status !== 'active' && <Button variant="ghost" size="sm" loading={busy === `register-${account.id}`} onClick={() => void action(`register-${account.id}`, () => registerACMEAccount(account.id), 'ACME 账号注册成功')}><Play className="mr-2 h-4 w-4" />注册</Button>}</TableCell></TableRow>)}
+              {acmeAccounts.map((account) => <TableRow key={account.id}><TableCell className="font-medium">{account.name}</TableCell><TableCell className="max-w-[420px] truncate font-mono text-xs">{account.directory_url}</TableCell><TableCell><StatusBadge value={account.status} /></TableCell><TableCell className="text-right"><div className="flex justify-end gap-1">{account.status !== 'active' && <Button variant="ghost" size="sm" loading={busy === `register-${account.id}`} disabled={busy === `acme-delete-${account.id}`} onClick={() => void action(`register-${account.id}`, () => registerACMEAccount(account.id), 'ACME 账号注册成功')}><Play className="mr-2 h-4 w-4" />注册</Button>}<Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" loading={busy === `acme-delete-${account.id}`} disabled={busy === `register-${account.id}`} onClick={() => setDeleteTarget({ kind: 'acme', item: account })}><Trash2 className="mr-2 h-4 w-4" />删除</Button></div></TableCell></TableRow>)}
             </TableBody></Table>
           </CardContent></Card>
           <Card><CardHeader><CardTitle>协议证书</CardTitle><CardDescription>签发完成后可在节点入站中切换到托管 TLS。</CardDescription></CardHeader><CardContent>
             <Table><TableHeader><TableRow><TableHead>域名</TableHead><TableHead>状态</TableHead><TableHead>有效期</TableHead><TableHead>版本</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>
-              {certificates.map((cert) => <TableRow key={cert.id}><TableCell className="font-medium">{cert.domains.join(', ')}</TableCell><TableCell><StatusBadge value={cert.status} />{cert.last_error && <div className="max-w-[320px] truncate text-xs text-destructive">{cert.last_error}</div>}</TableCell><TableCell>{cert.not_after_unix ? formatTime(cert.not_after_unix) : '尚未签发'}</TableCell><TableCell>r{cert.revision}</TableCell><TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `issue-${cert.id}`} onClick={() => void action(`issue-${cert.id}`, () => issueProtocolCertificate(cert.id), '已提交签发/续期')}><RefreshCw className="mr-2 h-4 w-4" />签发 / 续期</Button></TableCell></TableRow>)}
+              {certificates.map((cert) => <TableRow key={cert.id}><TableCell className="font-medium">{cert.domains.join(', ')}</TableCell><TableCell><StatusBadge value={cert.status} />{cert.last_error && <div className="max-w-[320px] truncate text-xs text-destructive">{cert.last_error}</div>}</TableCell><TableCell>{cert.not_after_unix ? formatTime(cert.not_after_unix) : '尚未签发'}</TableCell><TableCell>r{cert.revision}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" loading={busy === `issue-${cert.id}`} disabled={busy === `cert-delete-${cert.id}`} onClick={() => void action(`issue-${cert.id}`, () => issueProtocolCertificate(cert.id), '已提交签发/续期')}><RefreshCw className="mr-2 h-4 w-4" />签发 / 续期</Button><Button variant="ghost" size="sm" className="text-destructive hover:text-destructive/80" loading={busy === `cert-delete-${cert.id}`} disabled={busy === `issue-${cert.id}`} onClick={() => setDeleteTarget({ kind: 'cert', item: cert })}><Trash2 className="mr-2 h-4 w-4" />删除</Button></div></TableCell></TableRow>)}
             </TableBody></Table>
           </CardContent></Card>
         </TabsContent>
@@ -190,14 +241,13 @@ export default function DNSCertificates() {
         </TabsContent>
       </Tabs>
 
-      {/* Delete DNS Account Confirm Modal */}
       <ConfirmModal
         open={!!deleteTarget}
-        title="删除 DNS 账号"
-        description={`确定要删除 DNS 账号「${deleteTarget?.name || ''}」吗？如果账号仍有关联的托管域名，系统会拒绝删除。`}
+        title={deleteCopy.title}
+        description={deleteCopy.description}
         confirmText="确认删除"
         confirmVariant="destructive"
-        onConfirm={confirmDeleteDNSAccount}
+        onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
     </div>
