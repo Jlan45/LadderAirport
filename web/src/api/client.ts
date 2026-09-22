@@ -52,7 +52,76 @@ async function request<T>(
         : res.statusText || `HTTP ${res.status}`
     throw new ApiError(res.status, msg)
   }
+  // Uplink nodes cannot be dialed live: the immediate operation was enqueued
+  // (HTTP 202 + command_id). Transparently poll the command to completion so
+  // callers get the same resolved result as a push node's synchronous reply.
+  if (res.status === 202 && isQueuedCommand(data)) {
+    return awaitCommand<T>((data as QueuedCommand).command_id)
+  }
   return data as T
+}
+
+interface QueuedCommand {
+  queued: true
+  command_id: string
+  type?: string
+  message?: string
+}
+
+function isQueuedCommand(data: unknown): data is QueuedCommand {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { queued?: unknown }).queued === true &&
+    typeof (data as { command_id?: unknown }).command_id === 'string'
+  )
+}
+
+/** Terminal + in-flight states of an enqueued uplink command. */
+type CommandStatus = 'pending' | 'leased' | 'succeeded' | 'failed' | 'expired'
+
+interface AgentCommand {
+  id: string
+  status: CommandStatus
+  result?: string
+  error?: string
+}
+
+const COMMAND_POLL_INTERVAL_MS = 700
+const COMMAND_POLL_TIMEOUT_MS = 90_000
+
+/**
+ * awaitCommand polls a queued uplink command until it reaches a terminal state.
+ * On success it parses the stored JSON result into T (matching the push-mode
+ * shape); on failure/expiry/timeout it throws an ApiError.
+ */
+async function awaitCommand<T>(commandId: string): Promise<T> {
+  const deadline = Date.now() + COMMAND_POLL_TIMEOUT_MS
+  for (;;) {
+    const cmd = await request<AgentCommand>('GET', `/commands/${commandId}`)
+    if (cmd.status === 'succeeded') {
+      if (!cmd.result) return undefined as T
+      try {
+        return JSON.parse(cmd.result) as T
+      } catch {
+        return cmd.result as unknown as T
+      }
+    }
+    if (cmd.status === 'failed') {
+      throw new ApiError(502, cmd.error || '节点执行命令失败')
+    }
+    if (cmd.status === 'expired') {
+      throw new ApiError(504, '节点未在有效期内执行命令（可能离线）')
+    }
+    if (Date.now() >= deadline) {
+      throw new ApiError(504, '等待节点执行命令超时')
+    }
+    await sleep(COMMAND_POLL_INTERVAL_MS)
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function notifyAuthExpired(status: number, path: string) {

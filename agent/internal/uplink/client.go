@@ -19,7 +19,8 @@ import (
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
 
-// Runtime is the local Agent control surface used to apply pulled config.
+// Runtime is the local Agent control surface used to apply pulled config and
+// execute queued immediate commands. It is satisfied by *control.Server.
 type Runtime interface {
 	GetStatus(context.Context, *agentv1.GetStatusRequest) (*agentv1.GetStatusResponse, error)
 	GetMetrics(context.Context, *agentv1.GetMetricsRequest) (*agentv1.GetMetricsResponse, error)
@@ -28,6 +29,19 @@ type Runtime interface {
 	ApplyFRPServerConfig(context.Context, *agentv1.ApplyFRPServerConfigRequest) (*agentv1.ApplyFRPServerConfigResponse, error)
 	Start(context.Context, *agentv1.StartRequest) (*agentv1.StartResponse, error)
 	Stop(context.Context, *agentv1.StopRequest) (*agentv1.StopResponse, error)
+
+	// Command-queue surface: uplink nodes execute these locally in response to
+	// commands pulled from Panel, instead of exposing a live gRPC control port.
+	ProbeOutbound(context.Context, *agentv1.ProbeOutboundRequest) (*agentv1.ProbeOutboundResponse, error)
+	ListInterfaces(context.Context, *agentv1.ListInterfacesRequest) (*agentv1.ListInterfacesResponse, error)
+	UpgradeAgent(context.Context, *agentv1.UpgradeAgentRequest) (*agentv1.UpgradeAgentResponse, error)
+	GetNodeMetrics(context.Context, *agentv1.GetNodeMetricsRequest) (*agentv1.GetNodeMetricsResponse, error)
+	GetBBRStatus(context.Context, *agentv1.GetBBRStatusRequest) (*agentv1.GetBBRStatusResponse, error)
+	SetBBR(context.Context, *agentv1.SetBBRRequest) (*agentv1.SetBBRResponse, error)
+	GetFRPServerMappings(context.Context, *agentv1.GetFRPServerMappingsRequest) (*agentv1.GetFRPServerMappingsResponse, error)
+	StartFRPServer(context.Context, *agentv1.StartFRPServerRequest) (*agentv1.StartFRPServerResponse, error)
+	StopFRPServer(context.Context, *agentv1.StopFRPServerRequest) (*agentv1.StopFRPServerResponse, error)
+	GetFRPServerStatus(context.Context, *agentv1.GetFRPServerStatusRequest) (*agentv1.GetFRPServerStatusResponse, error)
 }
 
 const (
@@ -49,12 +63,18 @@ type Config struct {
 	Token       string
 	ReportEvery time.Duration
 	ConfigEvery time.Duration
+	// CommandWait bounds a single command long-poll. Panel clamps it to <=25s.
+	CommandWait time.Duration
 	HTTPClient  *http.Client
 	Control     Runtime
 }
 
 type Client struct {
 	cfg Config
+
+	// pollClient is a keep-alive client without a hard request timeout so a
+	// held command long-poll is bounded by context, not the 30s client cap.
+	pollClient *http.Client
 
 	mu            sync.Mutex
 	configHash    string
@@ -121,10 +141,16 @@ func New(cfg Config) (*Client, error) {
 	if cfg.ConfigEvery <= 0 {
 		cfg.ConfigEvery = 60 * time.Second
 	}
+	if cfg.CommandWait <= 0 {
+		cfg.CommandWait = 25 * time.Second
+	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = panelhttp.NewClient()
 	}
-	return &Client{cfg: cfg}, nil
+	// The long-poll client shares the Transport but drops the per-request
+	// timeout; each poll is instead bounded by the request context.
+	pollClient := &http.Client{Transport: cfg.HTTPClient.Transport}
+	return &Client{cfg: cfg, pollClient: pollClient}, nil
 }
 
 func (c *Client) Run(ctx context.Context) {
@@ -134,6 +160,10 @@ func (c *Client) Run(ctx context.Context) {
 	defer reportTick.Stop()
 	configTick := time.NewTicker(c.jitter(c.cfg.ConfigEvery))
 	defer configTick.Stop()
+	// The command loop is a self-driving long-poll on its own goroutine so it
+	// dispatches queued operations within milliseconds without waiting on the
+	// report/config tickers.
+	go c.runCommandLoop(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -361,6 +391,37 @@ func (c *Client) postJSON(ctx context.Context, path string, payload any) ([]byte
 	req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("Panel 返回 HTTP %d：%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return raw, nil
+}
+
+// getJSON issues a GET bounded by a per-request context deadline. It uses the
+// timeout-less pollClient so long-poll waits are not cut short by the shared
+// client's 30s cap; callers pass a deadline that exceeds the server wait.
+func (c *Client) getJSON(ctx context.Context, path string, timeout time.Duration) ([]byte, error) {
+	reqCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		reqCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	endpoint := strings.TrimRight(c.cfg.PanelURL, "/") + path
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.cfg.Token)
+	resp, err := c.pollClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

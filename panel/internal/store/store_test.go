@@ -978,3 +978,118 @@ func TestMarkUplinkUnreachableDoesNotClobberNewerReport(t *testing.T) {
 		t.Fatalf("runtime clobbered: %+v", got)
 	}
 }
+
+func TestAgentCommandLeaseAndComplete(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "edge", Token: "tok", ControlMode: ControlModeUplink}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &AgentCommand{NodeID: n.ID, Type: "probe", Payload: "{}"}
+	if err := s.CreateAgentCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.ID == "" || cmd.Status != AgentCommandPending || cmd.ExpiresAtUnix == 0 {
+		t.Fatalf("create defaults not applied: %+v", cmd)
+	}
+
+	// First lease claims the pending command and marks it leased.
+	leased, err := s.LeaseAgentCommands(n.ID, 10, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leased) != 1 || leased[0].ID != cmd.ID || leased[0].Status != AgentCommandLeased {
+		t.Fatalf("lease = %+v", leased)
+	}
+	if leased[0].Attempt != 1 || leased[0].LeaseExpiresUnix == 0 {
+		t.Fatalf("lease bookkeeping = %+v", leased[0])
+	}
+
+	// A second immediate lease sees nothing (still within visibility timeout).
+	again, err := s.LeaseAgentCommands(n.ID, 10, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("expected no redelivery within lease, got %+v", again)
+	}
+
+	// Completing is terminal and idempotent.
+	updated, applied, err := s.CompleteAgentCommand(cmd.ID, true, `{"ok":true}`, "")
+	if err != nil || !applied {
+		t.Fatalf("complete applied=%v err=%v", applied, err)
+	}
+	if updated.Status != AgentCommandSucceeded || updated.Result != `{"ok":true}` {
+		t.Fatalf("completed = %+v", updated)
+	}
+	_, applied2, err := s.CompleteAgentCommand(cmd.ID, false, "", "late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied2 {
+		t.Fatal("duplicate completion should be a no-op")
+	}
+	final, err := s.GetAgentCommand(cmd.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != AgentCommandSucceeded || final.Error != "" {
+		t.Fatalf("idempotency broke terminal state: %+v", final)
+	}
+}
+
+func TestAgentCommandLeaseRedeliversAfterExpiry(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "edge", Token: "tok", ControlMode: ControlModeUplink}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &AgentCommand{NodeID: n.ID, Type: "probe"}
+	if err := s.CreateAgentCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+	// leaseSec<=0 falls back to the default; use a negative-effect lease by
+	// leasing with a tiny window then forcing re-delivery via a 0 window read.
+	leased, err := s.LeaseAgentCommands(n.ID, 10, 1)
+	if err != nil || len(leased) != 1 {
+		t.Fatalf("first lease = %+v err=%v", leased, err)
+	}
+	// Rewind the lease so it appears expired, then re-lease.
+	if _, err := s.db.Exec(`UPDATE agent_commands SET lease_expires_unix = ? WHERE id = ?`,
+		nowUnix()-5, cmd.ID); err != nil {
+		t.Fatal(err)
+	}
+	redelivered, err := s.LeaseAgentCommands(n.ID, 10, 60)
+	if err != nil || len(redelivered) != 1 {
+		t.Fatalf("redelivery = %+v err=%v", redelivered, err)
+	}
+	if redelivered[0].Attempt != 2 {
+		t.Fatalf("attempt not incremented on redelivery: %+v", redelivered[0])
+	}
+}
+
+func TestAgentCommandTTLExpiry(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "edge", Token: "tok", ControlMode: ControlModeUplink}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	cmd := &AgentCommand{NodeID: n.ID, Type: "probe", ExpiresAtUnix: nowUnix() - 1}
+	if err := s.CreateAgentCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+	leased, err := s.LeaseAgentCommands(n.ID, 10, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leased) != 0 {
+		t.Fatalf("expired command should not be leased: %+v", leased)
+	}
+	got, err := s.GetAgentCommand(cmd.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != AgentCommandExpired {
+		t.Fatalf("status = %q, want expired", got.Status)
+	}
+}

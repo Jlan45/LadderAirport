@@ -87,6 +87,11 @@ type Server struct {
 	loginAttempts map[string]*loginAttempt
 	// chainsOnce guards lazy initialization of Chains (see chainService).
 	chainsOnce sync.Once
+
+	// cmdMu guards cmdWaiters, the per-node long-poll wakeup channels used by
+	// the uplink command queue for near-instant dispatch.
+	cmdMu      sync.Mutex
+	cmdWaiters map[string]chan struct{}
 }
 
 // Handler returns an http.Handler with all routes, auth middleware, and embedded SPA.
@@ -172,6 +177,14 @@ func isPublicAPI(r *http.Request) bool {
 	if (r.Method == http.MethodHead || r.Method == http.MethodGet) && r.URL.Path == "/api/v1/agent/config-sync" {
 		return true
 	}
+	// Uplink command queue: nodes long-poll for commands and post results,
+	// authenticated per-node via Bearer token (not the admin session).
+	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/commands" {
+		return true
+	}
+	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/agent/commands/") {
+		return true
+	}
 	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/pki/bundle" {
 		return true
 	}
@@ -194,6 +207,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("HEAD /api/v1/agent/config-sync", s.handleAgentConfigHead)
 	mux.HandleFunc("GET /api/v1/agent/config-sync", s.handleAgentConfigHead)
 	mux.HandleFunc("POST /api/v1/agent/config-sync", s.handleAgentConfigSync)
+	mux.HandleFunc("GET /api/v1/agent/commands", s.handleAgentPollCommands)
+	mux.HandleFunc("POST /api/v1/agent/commands/{id}/result", s.handleAgentCommandResult)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)
 
@@ -232,6 +247,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/start", s.handleStartNodeFRPS)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/stop", s.handleStopNodeFRPS)
 	mux.HandleFunc("POST /api/v1/nodes/{id}/frps/token/reveal", s.handleRevealNodeFRPSToken)
+
+	// Admin-facing read of a queued uplink command's status/result.
+	mux.HandleFunc("GET /api/v1/commands/{id}", s.handleGetCommand)
 
 	mux.HandleFunc("POST /api/v1/batch/apply", s.handleBatchApply)
 	mux.HandleFunc("POST /api/v1/batch/start", s.handleBatchStart)

@@ -16,8 +16,11 @@ uplink 模式反过来由 Agent 主动出站访问 Panel HTTP，复用**证书�
 |------|------|------|
 | 发起方 | Panel 拨号 Agent gRPC | Agent 出站访问 Panel HTTP |
 | 网络要求 | Agent 公网可达 / 端口映射 | 仅需 Agent 能出站到 Panel（NAT 友好） |
-| 下发时延 | 即时 | 最长一个拉取周期（默认 60 秒） |
-| 即时操作（探测 / 日志 / 升级 / 出站探测 / 协议证书部署） | 支持 | 拒绝（`409`），改为异步或读最近一次上报 |
+| 下发时延 | 即时 | 配置类最长一个拉取周期（默认 60 秒）；即时操作走命令队列，通常亚秒级 |
+| 即时操作（接口枚举 / 升级 / 系统指标 / BBR / FRPS 管理动作） | 支持 | 支持（命令队列异步下发 + 结果回传，见下） |
+| 探测（probe） | 拨号即时 | 读最近一次上报快照 |
+| 日志流 | 支持 | 暂不支持（无即时通道；`409`） |
+| 出站探测 / 协议证书部署 / DNS 公网探测 | 支持 | 暂不支持（`409`） |
 | 认证 | mTLS 客户端证书 + Bearer | 节点 Bearer 令牌（与续签同源） |
 | 控制面 gRPC 端口 | 必填（默认 50051） | 可不填 |
 
@@ -86,13 +89,33 @@ push 的启停是即时 RPC；uplink 没有即时通道，因此引入节点级 
 - 操作员在面板点「启动 / 停止」→ Panel 只更新 `desired_runtime` 并建一条 `success` 状态的任务，提示「已记录，节点将在下次拉取时应用」。单节点操作与批处理各有一份等价实现。
 - Agent 每次 config-sync 用 `X-Desired-State`（或 body 中的 `desired_state`）对齐本地 core 运行态：期望 `stopped` 则 `Stop`，期望 `running` 且当前未运行则 `Start`。
 
+## 命令队列（即时操作）
+
+配置下发是**声明式收敛**（期望态 hash，Agent 周期对齐），但接口枚举、Agent 升级、系统指标、BBR 开关、FRPS 管理动作这类**一次性、有副作用、要拿实时返回**的操作不适合塞进声明式配置。为此 uplink 增加一条独立的**命令队列**通道，语义是「请求—应答式的幂等任务队列」：
+
+```text
+浏览器 ──HTTP──► Panel ──入队──► agent_commands（pending）
+                         │
+Agent ◄──长轮询 lease──── ┘   GET  /api/v1/agent/commands?node_id=..&wait=25s
+Agent ──执行本地操作──► 回传结果  POST /api/v1/agent/commands/{id}/result
+浏览器 ──轮询────────► 命令结果    GET  /api/v1/commands/{id}
+```
+
+- **入队**：面板触发 uplink 节点的即时操作时，对应 handler 不再返回 `409`，而是写一条 `agent_commands` 记录并返回 `202 { queued, command_id, type }`。前端 `client.ts` 透明识别 202，改为轮询 `GET /api/v1/commands/{id}` 直到终态，把结果解析成与 push 模式同构的返回值，调用方无感知。
+- **长轮询下发**：Agent 用节点 Bearer 长轮询 `GET /api/v1/agent/commands`，`wait` 上限 25 秒（低于 Panel HTTP `ReadTimeout`）。Panel 侧维护每节点唤醒 channel，入队即唤醒挂起的轮询，实现亚秒级下发；无命令则到点返回空。
+- **投递语义**：at-least-once + 幂等。`LeaseAgentCommands` 用可见性超时（`defaultLeaseSec=60`）租约，租约到期未回传结果则重新投递并累加 `attempt`。命令带 TTL（`defaultCommandTTLSec=300`），过期未取直接置 `expired`。
+- **结果回传**：`CompleteAgentCommand` 写终态（`succeeded` / `failed`）且幂等——已终态的命令再次回传是 no-op（`applied=false`），避免重投把结果覆盖。节点只能完成发给自己的命令（按 `node_id` + Bearer 校验）。
+- **命令类型**：`interfaces` / `upgrade` / `sysmetrics` / `bbr-status` / `bbr-set` / `frps-mappings` / `frps-start` / `frps-stop`。Agent 侧 `dispatchCommand` 按 type 调本地 `control.Server` 的等价方法，结果 marshal 成 JSON 回传。
+- **局限**：唤醒 channel 是 pod-local 的，多 Panel 实例部署时跨实例入队只能靠轮询到点兜底（≤`wait`），不影响正确性只影响时延。probe 仍走「读最近上报」，日志流暂未纳入队列。
+
 ## Panel 侧行为差异
 
-对 uplink 节点，Panel 禁用一切即时拨号型操作，改为异步或读最近一次上报：
+对 uplink 节点，Panel 把即时拨号型操作分成两类：**命令队列**（接口枚举 / 升级 / 系统指标 / BBR / FRPS 管理动作，入队异步执行，见上）与**仍不支持**（日志流、出站探测、协议证书部署、DNS 公网探测，返回 `409`）：
 
-- **拒绝即时拨号**：网络接口枚举、日志流、Agent 升级返回 `409`（`uplink 节点不支持即时操作`）。
+- **命令队列**：接口枚举、Agent 升级、系统指标、BBR 读/写、FRPS mappings/start/stop 入队并返回 `202 + command_id`，前端轮询结果。
+- **仍拒绝即时拨号**：日志流、出站探测、协议证书部署、DNS 公网探测对 uplink 返回 `409`（无即时通道或未纳入队列）。
 - **读最近上报**：探测（probe）返回最近一次上报的 `status` / 版本 / 能力，不发起拨号；节点指标直接回落库的 `connections` / 流量 / CPU / 内存。
-- **落快照代替直连**：代理链下发对 uplink 节点写配置快照而非拨号；出站探测、协议证书部署、DNS 公网探测对 uplink 直接报错（不支持即时）。
+- **落快照代替直连**：代理链下发对 uplink 节点写配置快照而非拨号。
 - **fleet 刷新**：不拨号，只看 `uplink_last_seen_unix` 是否超过 45 秒（`uplinkStaleAfter`），超时用带 cutoff 的 `MarkUplinkUnreachable` 置 `unreachable`，cutoff 条件避免并发上报被覆盖。
 - **bootstrap 跳过**：启动时的全量下发只针对 push 节点；uplink 节点自行拉取，不进 bootstrap 队列。
 - **切换保护**：把节点改成 uplink 时，要求它已上报过 `uplink-v1` 能力，否则拒绝并提示先升级 Agent。
@@ -103,6 +126,7 @@ push 的启停是即时 RPC；uplink 没有即时通道，因此引入节点级 
 - 间隔：`-uplink-report-interval`（默认 15 秒）、`-uplink-config-interval`（默认 60 秒，带 ±20% 抖动打散并发）。
 - 能力：`Ping` 的能力表包含 `uplink-v1`，供 Panel 判断该节点是否支持 uplink 与是否允许切换。
 - config-sync 连续失败按次数退避：第 1 次 1 分钟，第 2 次 5 分钟，第 3 次起 15 分钟；成功后清零。
+- 命令队列：`Run()` 额外拉起 `runCommandLoop`，用一个**无单请求超时**的 client（`CommandWait` 默认 25 秒，由 context 兜底）长轮询命令，收到即 `dispatchCommand` 调本地 `control.Server` 执行并回传结果；轮询失败按退避重试。
 
 ### 控制端口监听（gRPC）
 
@@ -111,7 +135,7 @@ uplink 节点通常位于 NAT 后，Panel 拨不进它的 gRPC 控制口，那�
 - **默认行为**：uplink 节点**不监听 gRPC 控制端口**，也不构建 mTLS 服务端 TLS 配置（`RequireAndVerifyClientCert`），只保留 HTTP 上报 / 拉配置。
 - **开关**：`-uplink-serve-grpc` 命令行标志，或环境变量 `LADDER_UPLINK_SERVE_GRPC=1`，令 uplink 节点**仍然监听** gRPC 控制口，保留被 push 拨号的能力（例如节点其实公网可达、或想随时回切 push）。
 - push 节点（未开 `-uplink`）**始终监听**，不受该开关影响。
-- 无论是否监听，**证书续签始终运行**：叶子证书 / 私钥是共享 Bearer 身份的基础，也让节点日后能无缝切回 push。关闭监听不会破坏任何面板功能——Panel 侧对 uplink 本就全面禁用即时拨号（probe/logs/upgrade 返回 `409`）。
+- 无论是否监听，**证书续签始终运行**：叶子证书 / 私钥是共享 Bearer 身份的基础，也让节点日后能无缝切回 push。关闭监听不会破坏面板功能——即时操作走命令队列（接口枚举 / 升级 / 系统指标 / BBR / FRPS），少数无即时通道的操作（日志流 / 出站探测 / 协议证书部署）返回 `409`。
 
 判定逻辑：`serveGRPC = 非 uplink || uplink-serve-grpc`。
 

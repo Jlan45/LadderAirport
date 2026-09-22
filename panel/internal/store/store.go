@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,10 @@ import (
 // Store is a SQLite-backed persistence layer for the panel.
 type Store struct {
 	db *sql.DB
+	// mu serializes the read-modify-write command-queue transitions
+	// (lease/complete) so at-least-once delivery stays consistent on the
+	// single-writer SQLite connection.
+	mu sync.Mutex
 }
 
 // Open opens (or creates) a SQLite database at path and ensures schema + defaults.
@@ -202,6 +207,28 @@ func (s *Store) migrate() error {
 			created_at_unix INTEGER NOT NULL,
 			updated_at_unix INTEGER NOT NULL
 		)`,
+		// agent_commands is the uplink command queue: Panel enqueues immediate
+		// operations that uplink nodes (which do not expose a live gRPC control
+		// port) pull via long-poll and acknowledge with a result. Semantics are
+		// at-least-once + idempotent, guarded by a lease visibility timeout and
+		// a TTL for abandoned commands.
+		`CREATE TABLE IF NOT EXISTS agent_commands (
+			id TEXT PRIMARY KEY,
+			node_id TEXT NOT NULL,
+			type TEXT NOT NULL,
+			payload_json TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'pending',
+			attempt INTEGER NOT NULL DEFAULT 0,
+			lease_expires_unix INTEGER NOT NULL DEFAULT 0,
+			result_json TEXT NOT NULL DEFAULT '',
+			error TEXT NOT NULL DEFAULT '',
+			created_at_unix INTEGER NOT NULL,
+			completed_at_unix INTEGER NOT NULL DEFAULT 0,
+			expires_at_unix INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_commands_node_status
+			ON agent_commands (node_id, status, created_at_unix)`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			admin_password_hash TEXT NOT NULL DEFAULT '',
@@ -1751,6 +1778,192 @@ func (s *Store) ListTasks() ([]Task, error) {
 		out = []Task{}
 	}
 	return out, nil
+}
+
+// --- Agent commands (uplink command queue) ---
+
+const agentCommandCols = `id, node_id, type, payload_json, status, attempt, lease_expires_unix, result_json, error, created_at_unix, completed_at_unix, expires_at_unix`
+
+func scanAgentCommand(row interface {
+	Scan(dest ...any) error
+}) (*AgentCommand, error) {
+	var c AgentCommand
+	err := row.Scan(&c.ID, &c.NodeID, &c.Type, &c.Payload, &c.Status, &c.Attempt,
+		&c.LeaseExpiresUnix, &c.Result, &c.Error, &c.CreatedAtUnix, &c.CompletedAtUnix, &c.ExpiresAtUnix)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// CreateAgentCommand enqueues a pending command for a node.
+func (s *Store) CreateAgentCommand(c *AgentCommand) error {
+	if c == nil {
+		return fmt.Errorf("命令不能为空")
+	}
+	if c.NodeID == "" {
+		return fmt.Errorf("必须提供节点 ID")
+	}
+	if c.Type == "" {
+		return fmt.Errorf("必须提供命令类型")
+	}
+	if c.ID == "" {
+		c.ID = newID()
+	}
+	now := nowUnix()
+	if c.CreatedAtUnix == 0 {
+		c.CreatedAtUnix = now
+	}
+	if c.Status == "" {
+		c.Status = AgentCommandPending
+	}
+	if c.Payload == "" {
+		c.Payload = "{}"
+	}
+	if c.ExpiresAtUnix == 0 {
+		c.ExpiresAtUnix = now + defaultCommandTTLSec
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO agent_commands (`+agentCommandCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.ID, c.NodeID, c.Type, c.Payload, c.Status, c.Attempt, c.LeaseExpiresUnix,
+		c.Result, c.Error, c.CreatedAtUnix, c.CompletedAtUnix, c.ExpiresAtUnix,
+	)
+	if err != nil {
+		return fmt.Errorf("创建节点命令失败：%w", err)
+	}
+	return nil
+}
+
+// defaultCommandTTLSec is how long a queued command stays valid before it is
+// expired if the node never picks it up. defaultLeaseSec is the visibility
+// timeout: after a node leases a command, it becomes re-deliverable if no
+// result arrives before the lease expires.
+const (
+	defaultCommandTTLSec = 300
+	defaultLeaseSec      = 60
+)
+
+// GetAgentCommand reads a single command by ID.
+func (s *Store) GetAgentCommand(id string) (*AgentCommand, error) {
+	row := s.db.QueryRow(`SELECT `+agentCommandCols+` FROM agent_commands WHERE id = ?`, id)
+	c, err := scanAgentCommand(row)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("命令不存在：%s", id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("读取命令失败：%w", err)
+	}
+	return c, nil
+}
+
+// LeaseAgentCommands atomically claims up to limit deliverable commands for a
+// node and marks them leased with a fresh visibility timeout. A command is
+// deliverable when it is pending, or leased with an expired lease (redelivery),
+// and not past its TTL. Expired-by-TTL commands are swept to 'expired' first.
+func (s *Store) LeaseAgentCommands(nodeID string, limit int, leaseSec int64) ([]AgentCommand, error) {
+	if nodeID == "" {
+		return nil, fmt.Errorf("必须提供节点 ID")
+	}
+	if limit <= 0 {
+		limit = 16
+	}
+	if leaseSec <= 0 {
+		leaseSec = defaultLeaseSec
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := nowUnix()
+	// Sweep TTL-expired commands that were never completed.
+	if _, err := s.db.Exec(`
+		UPDATE agent_commands SET status = ?, completed_at_unix = ?, error = ?
+		WHERE node_id = ? AND status IN (?, ?) AND expires_at_unix > 0 AND expires_at_unix <= ?`,
+		AgentCommandExpired, now, "命令超时未被节点执行", nodeID,
+		AgentCommandPending, AgentCommandLeased, now,
+	); err != nil {
+		return nil, fmt.Errorf("清理过期命令失败：%w", err)
+	}
+
+	rows, err := s.db.Query(`
+		SELECT `+agentCommandCols+` FROM agent_commands
+		WHERE node_id = ? AND (
+			status = ? OR (status = ? AND lease_expires_unix <= ?)
+		)
+		ORDER BY created_at_unix ASC
+		LIMIT ?`,
+		nodeID, AgentCommandPending, AgentCommandLeased, now, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("查询待执行命令失败：%w", err)
+	}
+	var claimed []AgentCommand
+	for rows.Next() {
+		c, err := scanAgentCommand(rows)
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("读取待执行命令失败：%w", err)
+		}
+		claimed = append(claimed, *c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	lease := now + leaseSec
+	for i := range claimed {
+		c := &claimed[i]
+		c.Status = AgentCommandLeased
+		c.Attempt++
+		c.LeaseExpiresUnix = lease
+		if _, err := s.db.Exec(`
+			UPDATE agent_commands SET status = ?, attempt = ?, lease_expires_unix = ?
+			WHERE id = ?`,
+			c.Status, c.Attempt, c.LeaseExpiresUnix, c.ID,
+		); err != nil {
+			return nil, fmt.Errorf("锁定命令失败：%w", err)
+		}
+	}
+	if claimed == nil {
+		claimed = []AgentCommand{}
+	}
+	return claimed, nil
+}
+
+// CompleteAgentCommand records a terminal result for a command. It is
+// idempotent: once a command is succeeded/failed/expired it is not overwritten,
+// so duplicate deliveries from at-least-once semantics are safe. Returns the
+// stored command and whether this call actually applied the result.
+func (s *Store) CompleteAgentCommand(id string, ok bool, result, errMsg string) (*AgentCommand, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	c, err := s.GetAgentCommand(id)
+	if err != nil {
+		return nil, false, err
+	}
+	if c.Status == AgentCommandSucceeded || c.Status == AgentCommandFailed || c.Status == AgentCommandExpired {
+		return c, false, nil
+	}
+	now := nowUnix()
+	status := AgentCommandFailed
+	if ok {
+		status = AgentCommandSucceeded
+	}
+	if _, err := s.db.Exec(`
+		UPDATE agent_commands SET status = ?, result_json = ?, error = ?, completed_at_unix = ?, lease_expires_unix = 0
+		WHERE id = ?`,
+		status, result, errMsg, now, id,
+	); err != nil {
+		return nil, false, fmt.Errorf("写入命令结果失败：%w", err)
+	}
+	c.Status = status
+	c.Result = result
+	c.Error = errMsg
+	c.CompletedAtUnix = now
+	c.LeaseExpiresUnix = 0
+	return c, true, nil
 }
 
 // --- Settings ---

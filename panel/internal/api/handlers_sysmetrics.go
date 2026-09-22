@@ -88,6 +88,9 @@ type sysMetricsResponse struct {
 }
 
 func (s *Server) handleNodeSysMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.enqueueIfUplink(w, r, capabilityNodeMetrics, cmdSysMetrics, nil) {
+		return
+	}
 	client, ok := s.dialNodeCapability(w, r, capabilityNodeMetrics)
 	if !ok {
 		return
@@ -144,6 +147,9 @@ func (s *Server) dialNodeBBR(w http.ResponseWriter, r *http.Request) (NodeBBR, N
 }
 
 func (s *Server) handleGetNodeBBR(w http.ResponseWriter, r *http.Request) {
+	if s.enqueueIfUplink(w, r, capabilityBBR, cmdBBRStatus, nil) {
+		return
+	}
 	bbrClient, client, ok := s.dialNodeBBR(w, r)
 	if !ok {
 		return
@@ -179,6 +185,9 @@ func (s *Server) handleSetNodeBBR(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(w, r, &body); err != nil {
 		writeDecodeError(w, err)
+		return
+	}
+	if s.enqueueIfUplink(w, r, capabilityBBR, cmdBBRSet, bbrSetCommandPayload{Enabled: body.Enabled}) {
 		return
 	}
 	bbrClient, client, ok := s.dialNodeBBR(w, r)

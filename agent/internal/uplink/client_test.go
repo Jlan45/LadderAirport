@@ -106,6 +106,36 @@ func (s *stubRuntime) Stop(context.Context, *agentv1.StopRequest) (*agentv1.Stop
 	s.state = "stopped"
 	return &agentv1.StopResponse{Ok: true}, nil
 }
+func (s *stubRuntime) ProbeOutbound(context.Context, *agentv1.ProbeOutboundRequest) (*agentv1.ProbeOutboundResponse, error) {
+	return &agentv1.ProbeOutboundResponse{Ok: true}, nil
+}
+func (s *stubRuntime) ListInterfaces(context.Context, *agentv1.ListInterfacesRequest) (*agentv1.ListInterfacesResponse, error) {
+	return &agentv1.ListInterfacesResponse{}, nil
+}
+func (s *stubRuntime) UpgradeAgent(context.Context, *agentv1.UpgradeAgentRequest) (*agentv1.UpgradeAgentResponse, error) {
+	return &agentv1.UpgradeAgentResponse{Ok: true}, nil
+}
+func (s *stubRuntime) GetNodeMetrics(context.Context, *agentv1.GetNodeMetricsRequest) (*agentv1.GetNodeMetricsResponse, error) {
+	return &agentv1.GetNodeMetricsResponse{}, nil
+}
+func (s *stubRuntime) GetBBRStatus(context.Context, *agentv1.GetBBRStatusRequest) (*agentv1.GetBBRStatusResponse, error) {
+	return &agentv1.GetBBRStatusResponse{}, nil
+}
+func (s *stubRuntime) SetBBR(context.Context, *agentv1.SetBBRRequest) (*agentv1.SetBBRResponse, error) {
+	return &agentv1.SetBBRResponse{Ok: true}, nil
+}
+func (s *stubRuntime) GetFRPServerMappings(context.Context, *agentv1.GetFRPServerMappingsRequest) (*agentv1.GetFRPServerMappingsResponse, error) {
+	return &agentv1.GetFRPServerMappingsResponse{}, nil
+}
+func (s *stubRuntime) StartFRPServer(context.Context, *agentv1.StartFRPServerRequest) (*agentv1.StartFRPServerResponse, error) {
+	return &agentv1.StartFRPServerResponse{Ok: true}, nil
+}
+func (s *stubRuntime) StopFRPServer(context.Context, *agentv1.StopFRPServerRequest) (*agentv1.StopFRPServerResponse, error) {
+	return &agentv1.StopFRPServerResponse{Ok: true}, nil
+}
+func (s *stubRuntime) GetFRPServerStatus(context.Context, *agentv1.GetFRPServerStatusRequest) (*agentv1.GetFRPServerStatusResponse, error) {
+	return &agentv1.GetFRPServerStatusResponse{State: s.state}, nil
+}
 
 func TestHeadConfigReadsHashHeaders(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

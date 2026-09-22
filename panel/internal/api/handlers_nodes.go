@@ -780,7 +780,8 @@ func (s *Server) handleNodeInterfaces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if rejectUplinkLive(w, node) {
+	if node.ControlMode == store.ControlModeUplink {
+		s.enqueueUplinkCommand(w, node.ID, cmdInterfaces, nil)
 		return
 	}
 
@@ -924,10 +925,6 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if rejectUplinkLive(w, node) {
-		return
-	}
-
 	var body struct {
 		Version     string `json:"version"`
 		Repo        string `json:"repo"`
@@ -947,6 +944,16 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 		} else {
 			version = "latest"
 		}
+	}
+
+	if node.ControlMode == store.ControlModeUplink {
+		s.enqueueUplinkCommand(w, node.ID, cmdUpgrade, upgradeCommandPayload{
+			Version:     version,
+			Repo:        strings.TrimSpace(body.Repo),
+			DownloadURL: strings.TrimSpace(body.DownloadURL),
+			SHA256:      strings.TrimSpace(body.SHA256),
+		})
+		return
 	}
 
 	// Staging + download may take longer than a normal probe.

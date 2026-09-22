@@ -349,13 +349,15 @@ export function NodeOverviewTab({
       {installInfo && (
         <div className="space-y-4 rounded-lg border border-border bg-card/40 p-5 pt-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-foreground">节点一键安装与升级命令</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              {installInfo.upgrade_command && installInfo.outdated ? '节点一键安装与升级命令' : '节点一键安装命令'}
+            </h3>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" onClick={copyInstallCommand} className="gap-1.5 text-xs">
                 {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? '安装命令已复制' : '复制安装命令'}
               </Button>
-              {installInfo.upgrade_command && (
+              {installInfo.upgrade_command && installInfo.outdated && (
                 <Button size="sm" variant="outline" onClick={copyUpgradeCommand} className="gap-1.5 text-xs">
                   {copiedUpgrade ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                   {copiedUpgrade ? '升级命令已复制' : '复制升级命令'}
@@ -371,7 +373,7 @@ export function NodeOverviewTab({
               </pre>
             </div>
 
-            {installInfo.upgrade_command && (
+            {installInfo.upgrade_command && installInfo.outdated && (
               <div className="space-y-1 pt-2 border-t border-border">
                 <span className="text-xs text-muted-foreground">一键升级命令：</span>
                 <pre className="p-3 bg-muted border border-border rounded-md text-[11px] font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">

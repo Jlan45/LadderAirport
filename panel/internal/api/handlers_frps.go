@@ -258,7 +258,12 @@ func (s *Server) handleGetNodeFRPSMappings(w http.ResponseWriter, r *http.Reques
 		writeError(w, status, err.Error())
 		return
 	}
-	if rejectUplinkLive(w, node) {
+	if node.ControlMode == store.ControlModeUplink {
+		if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, "frps-mappings-v1") {
+			writeError(w, http.StatusConflict, "节点 Agent 不支持 FRPS 在线映射，请先升级 Agent")
+			return
+		}
+		s.enqueueUplinkCommand(w, node.ID, cmdFRPSMappings, nil)
 		return
 	}
 	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, "frps-mappings-v1") {
@@ -342,9 +347,14 @@ func (s *Server) handleNodeFRPSAction(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 	if node.ControlMode == store.ControlModeUplink && action != "status" {
-		if rejectUplinkLive(w, node) {
-			return
+		// start/stop are immediate runtime ops; enqueue for the uplink node to
+		// execute locally instead of dialing its (absent) control port.
+		cmdType := cmdFRPSStart
+		if action == "stop" {
+			cmdType = cmdFRPSStop
 		}
+		s.enqueueUplinkCommand(w, node.ID, cmdType, nil)
+		return
 	}
 	config, err := s.Store.GetFRPServerConfig(nodeID)
 	if err != nil {

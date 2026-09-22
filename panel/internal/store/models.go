@@ -19,20 +19,20 @@ const (
 )
 
 type Node struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	Address        string   `json:"address"`   // control dial host (Panel → Agent)
-	GRPCPort       int      `json:"grpc_port"` // control dial port (external mapped port if NAT)
-	Token          string   `json:"token,omitempty"`
-	Labels         []string `json:"labels"`
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Address  string   `json:"address"`   // control dial host (Panel → Agent)
+	GRPCPort int      `json:"grpc_port"` // control dial port (external mapped port if NAT)
+	Token    string   `json:"token,omitempty"`
+	Labels   []string `json:"labels"`
 	// ControlMode selects how the node syncs: push is Panel-dialed gRPC;
 	// uplink is Agent-initiated HTTP report + config pull.
 	ControlMode string `json:"control_mode"`
 	// DesiredRuntime is the operator-intended core state for uplink pull (running|stopped).
 	DesiredRuntime string `json:"desired_runtime,omitempty"`
 	// UplinkLastSeenUnix is the newest accepted HTTP report timestamp.
-	UplinkLastSeenUnix int64 `json:"uplink_last_seen_unix,omitempty"`
-	PKICABundlePEM string   `json:"-"`
+	UplinkLastSeenUnix int64  `json:"uplink_last_seen_unix,omitempty"`
+	PKICABundlePEM     string `json:"-"`
 	// PKICertSerial binds Panel dialing to the currently active Panel-issued
 	// Agent server certificate.
 	PKICertSerial string `json:"pki_cert_serial,omitempty"`
@@ -50,10 +50,10 @@ type Node struct {
 	// DDNSEnabled lets the DNS reconcile worker probe this node's public
 	// address (managed domains with address_source=agent_public). New nodes
 	// default to true; false pauses probing while keeping the schedule.
-	DDNSEnabled bool `json:"ddns_enabled"`
-	Status          string `json:"status"` // online | unreachable | unauthorized | unknown
-	LastSeenUnix    int64  `json:"last_seen_unix"`
-	ConfigHash      string `json:"config_hash"`
+	DDNSEnabled  bool   `json:"ddns_enabled"`
+	Status       string `json:"status"` // online | unreachable | unauthorized | unknown
+	LastSeenUnix int64  `json:"last_seen_unix"`
+	ConfigHash   string `json:"config_hash"`
 	// Live monitoring cache (updated by fleet refresh / probe).
 	RuntimeState   string   `json:"runtime_state"` // running | stopped | error | ""
 	AgentVersion   string   `json:"agent_version"`
@@ -93,15 +93,15 @@ type FRPServerConfig struct {
 	MaxPortsPerClient   int64                `json:"max_ports_per_client"`
 	// ManagedDomainID optionally binds a managed domain as the frpc-facing
 	// server address. Display only — the agent-side FRPS bind config is unchanged.
-	ManagedDomainID     string               `json:"managed_domain_id,omitempty"`
-	DesiredHash         string               `json:"desired_hash"`
-	AppliedHash         string               `json:"applied_hash"`
-	RuntimeState        string               `json:"runtime_state"`
-	FRPSVersion         string               `json:"frps_version"`
-	LastError           string               `json:"last_error,omitempty"`
-	StartedAtUnix       int64                `json:"started_at_unix"`
-	CreatedAtUnix       int64                `json:"created_at_unix"`
-	UpdatedAtUnix       int64                `json:"updated_at_unix"`
+	ManagedDomainID string `json:"managed_domain_id,omitempty"`
+	DesiredHash     string `json:"desired_hash"`
+	AppliedHash     string `json:"applied_hash"`
+	RuntimeState    string `json:"runtime_state"`
+	FRPSVersion     string `json:"frps_version"`
+	LastError       string `json:"last_error,omitempty"`
+	StartedAtUnix   int64  `json:"started_at_unix"`
+	CreatedAtUnix   int64  `json:"created_at_unix"`
+	UpdatedAtUnix   int64  `json:"updated_at_unix"`
 }
 
 // NodeOperatorUpdate contains only fields controlled by an operator. Runtime
@@ -235,6 +235,32 @@ type TaskNodeResult struct {
 	Message string `json:"message"`
 	Phase   string `json:"phase,omitempty"`
 }
+
+// AgentCommand is a single queued immediate operation for an uplink node.
+// Panel enqueues it, the node long-polls, executes locally, and posts a result.
+type AgentCommand struct {
+	ID               string `json:"id"`
+	NodeID           string `json:"node_id"`
+	Type             string `json:"type"`    // probe|interfaces|upgrade|sysmetrics|bbr-status|bbr-set|frps-mappings|frps-start|frps-stop
+	Payload          string `json:"payload"` // opaque JSON arguments for the command type
+	Status           string `json:"status"`  // pending|leased|succeeded|failed|expired
+	Attempt          int    `json:"attempt"`
+	LeaseExpiresUnix int64  `json:"lease_expires_unix"`
+	Result           string `json:"result,omitempty"` // JSON result payload on success
+	Error            string `json:"error,omitempty"`
+	CreatedAtUnix    int64  `json:"created_at_unix"`
+	CompletedAtUnix  int64  `json:"completed_at_unix,omitempty"`
+	ExpiresAtUnix    int64  `json:"expires_at_unix,omitempty"`
+}
+
+// AgentCommand status values.
+const (
+	AgentCommandPending   = "pending"
+	AgentCommandLeased    = "leased"
+	AgentCommandSucceeded = "succeeded"
+	AgentCommandFailed    = "failed"
+	AgentCommandExpired   = "expired"
+)
 
 type Settings struct {
 	AdminPasswordHash string `json:"-"`

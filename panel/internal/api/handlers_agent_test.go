@@ -172,3 +172,146 @@ func TestAgentReportAndConfigSyncReuseHTTPBearer(t *testing.T) {
 		t.Fatalf("wrong HEAD token status = %d", wrongHeadResp.StatusCode)
 	}
 }
+
+// TestAgentCommandQueueLifecycle exercises the full uplink command path over
+// HTTP: enqueue -> node long-poll lease -> node result -> no redelivery, plus
+// the per-node Bearer gate on the poll endpoint.
+func TestAgentCommandQueueLifecycle(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	node := &store.Node{
+		Name:        "edge",
+		Token:       "node-secret",
+		ControlMode: store.ControlModeUplink,
+		Status:      "pending",
+	}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer((&Server{Store: st, Secret: []byte("test-secret")}).Handler())
+	defer server.Close()
+
+	cmd := &store.AgentCommand{NodeID: node.ID, Type: cmdInterfaces, Payload: "{}"}
+	if err := st.CreateAgentCommand(cmd); err != nil {
+		t.Fatal(err)
+	}
+
+	// A node long-poll leases the pending command.
+	pollURL := server.URL + "/api/v1/agent/commands?node_id=" + node.ID + "&wait=2s"
+	pollReq, _ := http.NewRequest(http.MethodGet, pollURL, nil)
+	pollReq.Header.Set("Authorization", "Bearer node-secret")
+	pollResp, err := http.DefaultClient.Do(pollReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pollResp.Body.Close()
+	if pollResp.StatusCode != http.StatusOK {
+		t.Fatalf("poll status = %d", pollResp.StatusCode)
+	}
+	var polled agentCommandsResponse
+	if err := json.NewDecoder(pollResp.Body).Decode(&polled); err != nil {
+		t.Fatal(err)
+	}
+	if len(polled.Commands) != 1 || polled.Commands[0].ID != cmd.ID || polled.Commands[0].Type != cmdInterfaces {
+		t.Fatalf("poll = %+v", polled.Commands)
+	}
+
+	// A wrong token is rejected before any command is leased.
+	wrongPoll, _ := http.NewRequest(http.MethodGet, pollURL, nil)
+	wrongPoll.Header.Set("Authorization", "Bearer nope")
+	wrongPollResp, err := http.DefaultClient.Do(wrongPoll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrongPollResp.Body.Close()
+	if wrongPollResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong poll token status = %d", wrongPollResp.StatusCode)
+	}
+
+	// The node posts a terminal result.
+	resultBody, _ := json.Marshal(agentCommandResultRequest{OK: true, Result: `{"interfaces":[]}`})
+	resultReq, _ := http.NewRequest(http.MethodPost,
+		server.URL+"/api/v1/agent/commands/"+cmd.ID+"/result", bytes.NewReader(resultBody))
+	resultReq.Header.Set("Authorization", "Bearer node-secret")
+	resultReq.Header.Set("Content-Type", "application/json")
+	resultResp, err := http.DefaultClient.Do(resultReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resultResp.Body.Close()
+	if resultResp.StatusCode != http.StatusOK {
+		t.Fatalf("result status = %d", resultResp.StatusCode)
+	}
+
+	// The stored command reflects the terminal outcome. (The browser-facing
+	// GET /api/v1/commands/{id} is admin-session gated and covered elsewhere.)
+	got, err := st.GetAgentCommand(cmd.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != store.AgentCommandSucceeded || got.Result != `{"interfaces":[]}` {
+		t.Fatalf("command read = %+v", got)
+	}
+
+	// A subsequent poll must not redeliver the terminal command.
+	againReq, _ := http.NewRequest(http.MethodGet,
+		server.URL+"/api/v1/agent/commands?node_id="+node.ID+"&wait=0", nil)
+	againReq.Header.Set("Authorization", "Bearer node-secret")
+	againResp, err := http.DefaultClient.Do(againReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer againResp.Body.Close()
+	var again agentCommandsResponse
+	if err := json.NewDecoder(againResp.Body).Decode(&again); err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Commands) != 0 {
+		t.Fatalf("terminal command redelivered: %+v", again.Commands)
+	}
+}
+
+// TestUplinkInterfacesEnqueuesCommand verifies a live-RPC handler queues a
+// command and answers 202 + command_id when the target node is uplink.
+func TestUplinkInterfacesEnqueuesCommand(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	node := &store.Node{Name: "edge", Token: "tok", ControlMode: store.ControlModeUplink}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{Store: st}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/"+node.ID+"/interfaces", nil)
+	req.SetPathValue("id", node.ID)
+	w := httptest.NewRecorder()
+	s.handleNodeInterfaces(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", w.Code)
+	}
+	var body struct {
+		Queued    bool   `json:"queued"`
+		CommandID string `json:"command_id"`
+		Type      string `json:"type"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Queued || body.CommandID == "" || body.Type != cmdInterfaces {
+		t.Fatalf("response = %+v", body)
+	}
+	stored, err := st.GetAgentCommand(body.CommandID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Type != cmdInterfaces || stored.Status != store.AgentCommandPending {
+		t.Fatalf("stored command = %+v", stored)
+	}
+}
