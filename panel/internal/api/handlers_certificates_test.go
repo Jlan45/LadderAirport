@@ -155,6 +155,43 @@ func TestManagedTLSBindingAcceptsActiveCertificate(t *testing.T) {
 	}
 }
 
+func TestManagedTLSBindingDerivesDomainFromCertificate(t *testing.T) {
+	ts, client, st := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	node, domain, account := createCertificateAPIFixture(t, st)
+	inbound := &store.InboundConfig{
+		Name: "trojan", Protocol: "trojan", Enabled: true,
+		Params: map[string]any{"listen": "0.0.0.0", "port": 443, "password": "secret"},
+	}
+	if err := st.CreateInbound(inbound); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(node.ID, []string{inbound.ID}); err != nil {
+		t.Fatal(err)
+	}
+	certificate := &store.ProtocolCertificate{
+		NodeID: node.ID, ManagedDomainID: domain.ID, ACMEAccountID: account.ID,
+		Domains: []string{domain.FQDN}, Status: "active",
+		ActiveCertPath: "/managed/r1/fullchain.pem", ActiveKeyPath: "/managed/r1/privkey.pem",
+	}
+	if err := st.CreateProtocolCertificate(certificate); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := doJSON(
+		t, client, http.MethodPut,
+		ts.URL+"/api/v1/nodes/"+node.ID+"/inbounds/"+inbound.ID+"/tls",
+		map[string]any{"mode": "managed", "certificate_id": certificate.ID},
+	)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%v", resp.StatusCode, body)
+	}
+	binding, err := st.GetNodeInboundTLSBinding(node.ID, inbound.ID)
+	if err != nil || binding.ManagedDomainID != domain.ID {
+		t.Fatalf("binding=%+v err=%v", binding, err)
+	}
+}
+
 func createCertificateAPIFixture(t *testing.T, st *store.Store) (*store.Node, *store.ManagedDomain, *store.ACMEAccount) {
 	t.Helper()
 	node := &store.Node{Name: "edge", Address: "192.0.2.10", GRPCPort: 50051, Status: "online"}

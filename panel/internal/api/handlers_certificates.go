@@ -168,12 +168,16 @@ func (s *Server) handlePutNodeInboundTLS(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("协议 %s 不支持托管 TLS", inbound.Protocol))
 			return
 		}
-		domain, err := s.Store.GetManagedDomain(strings.TrimSpace(request.ManagedDomainID))
+		certificate, err := s.Store.GetProtocolCertificate(strings.TrimSpace(request.CertificateID))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		certificate, err := s.Store.GetProtocolCertificate(strings.TrimSpace(request.CertificateID))
+		domainID := strings.TrimSpace(request.ManagedDomainID)
+		if domainID == "" {
+			domainID = certificate.ManagedDomainID
+		}
+		domain, err := s.Store.GetManagedDomain(domainID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return

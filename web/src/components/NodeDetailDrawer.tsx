@@ -503,9 +503,13 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     if (!binding || busy) return
     setTLSBusy(inboundId)
     try {
+      const certificate = binding.mode === 'managed'
+        ? protocolCertificates.find((item) => item.id === binding.certificate_id)
+        : undefined
       await putNodeInboundTLS(id, inboundId, {
         mode: binding.mode,
         certificate_id: binding.mode === 'managed' ? binding.certificate_id : undefined,
+        managed_domain_id: certificate?.managed_domain_id,
       })
       toast.success('协议 TLS 配置已保存')
     } catch (err) {
