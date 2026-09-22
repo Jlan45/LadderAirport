@@ -32,9 +32,15 @@ Web 端开关即可，无需登录节点操作。原理：Agent 以非特权用�
 
 运维排障：`systemctl status ladder-agent-bbr.path`、`journalctl -u ladder-agent-bbr.service`。卸载默认保留该 conf，`LADDER_PURGE=1` 全清时一并删除。
 
+## HTTP 上行（uplink）
+
+节点无法被 Panel 拨到时，创建或切换为 `control_mode=uplink`。安装命令会写入 `LADDER_UPLINK=1`，Agent 用已有的 `-panel-url` / `-node-id` / `LADDER_TOKEN` 访问 `POST /api/v1/agent/report`，并用 `HEAD /api/v1/agent/config-sync` 比对版本哈希后再按需 `POST` 拉配置，与证书续签同一套 HTTP + Bearer。不新开端口，也不要求即时推送；下发最多延迟一个拉取周期（默认 60 秒）。
+
+uplink 节点默认**不监听 gRPC 控制端口**（Panel 拨不进 NAT 后的节点，监听是死重），只保留 HTTP 上报 / 拉配置与证书续签。若该节点其实公网可达、或想保留被 push 拨号的能力，设 `LADDER_UPLINK_SERVE_GRPC=1` 让它继续监听。详见 [Agent 上行](../docs/agent-uplink.md)。
+
 ## NAT / 端口转发
 
-Panel 主动拨号 Agent gRPC。Agent 位于 NAT 后时，应通过 VPN、DNAT 或端口映射让 Panel 可达：
+push 模式由 Panel 主动拨号 Agent gRPC。Agent 位于 NAT 后又必须走 push 时，应通过 VPN、DNAT 或端口映射让 Panel 可达：
 
 ```text
 [客户端] --入站端口--> [公网 IP / DDNS] --DNAT--> [Agent 入站]

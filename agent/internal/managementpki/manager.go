@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ladderairport/agent/internal/fileutil"
+	"github.com/ladderairport/agent/internal/panelhttp"
 )
 
 type Config struct {
@@ -58,6 +59,9 @@ func New(cfg Config) (*Manager, error) {
 	}
 	if err := ParsePanelURL(cfg.PanelURL); err != nil {
 		return nil, err
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = panelhttp.NewClient()
 	}
 	m := &Manager{cfg: cfg}
 	if err := m.reload(); err != nil {
@@ -140,11 +144,7 @@ func (m *Manager) Renew(ctx context.Context) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+m.cfg.Token)
 	req.Header.Set("Content-Type", "application/json")
-	client := m.cfg.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	resp, err := client.Do(req)
+	resp, err := m.cfg.HTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("向 Panel 申请证书失败：%w", err)
 	}

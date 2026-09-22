@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from './ui/alert'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Copy, Check, Info } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { bootstrapNode, type NodeInstallInfo } from '../api/client'
 import { copyText } from '../lib/clipboard'
 import { toast } from '../lib/toast'
@@ -29,6 +30,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
   const [publicAddress, setPublicAddress] = useState('')
   const [labels, setLabels] = useState('')
   const [agentVersion, setAgentVersion] = useState('latest')
+  const [controlMode, setControlMode] = useState<'push' | 'uplink'>('push')
   const [busy, setBusy] = useState(false)
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
@@ -42,6 +44,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
     setPublicAddress('')
     setLabels('')
     setAgentVersion('latest')
+    setControlMode('push')
     setBusy(false)
     setInstallInfo(null)
     setCopied(false)
@@ -64,7 +67,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
       setFormError('公网地址只填写主机名或 IP，不要包含协议、端口或路径')
       return
     }
-    if (!Number.isInteger(grpcPort) || grpcPort < 1 || grpcPort > 65535) {
+    if (controlMode !== 'uplink' && (!Number.isInteger(grpcPort) || grpcPort < 1 || grpcPort > 65535)) {
       setFormError('gRPC 端口必须在 1 到 65535 之间')
       return
     }
@@ -86,6 +89,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
           ),
         ),
         agent_version: agentVersion.trim() || 'latest',
+        control_mode: controlMode,
       })
       setInstallInfo(info)
       onCreated()
@@ -124,7 +128,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
               <Info className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
               <div>
                 创建节点并生成一次性注册命令。目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。
-                请先在「设置」填写 HTTPS Public Base URL；控制面地址可留空由 Agent 探测。
+                请先在「设置」填写 HTTPS Public Base URL。push 由 Panel 拨号 gRPC；uplink 由 Agent 复用同一套 Panel HTTP 定时上报并拉配置，无需入站端口。
               </div>
             </div>
 
@@ -149,7 +153,27 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-address">控制面地址（可选，Panel 拨号）</Label>
+                <Label htmlFor="add-node-control-mode">控制模式</Label>
+                <Select value={controlMode} onValueChange={(value) => setControlMode(value as 'push' | 'uplink')}>
+                  <SelectTrigger id="add-node-control-mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border-border">
+                    <SelectItem value="push">push（Panel 拨号 gRPC）</SelectItem>
+                    <SelectItem value="uplink">uplink（Agent HTTP 上报 / 拉配置）</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {controlMode === 'uplink'
+                    ? '节点主动访问 Panel HTTP（与证书续签同一入口）。下发最多延迟一个拉取周期，默认 60 秒。'
+                    : 'Panel 主动拨号 Agent gRPC。NAT 后需要映射或 VPN。'}
+                </p>
+              </div>
+
+              <div className="flex flex-col space-y-1.5">
+                <Label htmlFor="add-node-address">
+                  控制面地址{controlMode === 'uplink' ? '（可选）' : '（可选，Panel 拨号）'}
+                </Label>
                 <Input
                   id="add-node-address"
                   value={address}
@@ -159,7 +183,9 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
               </div>
 
               <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-grpc-port">控制面 gRPC 端口</Label>
+                <Label htmlFor="add-node-grpc-port">
+                  控制面 gRPC 端口{controlMode === 'uplink' ? '（uplink 可不填）' : ''}
+                </Label>
                 <Input
                   id="add-node-grpc-port"
                   type="number"

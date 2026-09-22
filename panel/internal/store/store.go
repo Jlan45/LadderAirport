@@ -489,6 +489,9 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN pki_cert_serial TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE nodes ADD COLUMN pki_not_after_unix INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE nodes ADD COLUMN ddns_enabled INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE nodes ADD COLUMN control_mode TEXT NOT NULL DEFAULT 'push'`,
+		`ALTER TABLE nodes ADD COLUMN desired_runtime TEXT NOT NULL DEFAULT 'running'`,
+		`ALTER TABLE nodes ADD COLUMN uplink_last_seen_unix INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE node_frps_configs ADD COLUMN managed_domain_id TEXT REFERENCES managed_domains(id) ON DELETE SET NULL`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
@@ -632,6 +635,46 @@ func boolToInt(b bool) int {
 
 // --- Nodes ---
 
+func validateControlMode(mode string) error {
+	switch mode {
+	case ControlModePush, ControlModeUplink:
+		return nil
+	default:
+		return fmt.Errorf("control_mode 只能是 push 或 uplink")
+	}
+}
+
+func normalizeControlMode(mode string) (string, error) {
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		return ControlModePush, nil
+	}
+	if err := validateControlMode(mode); err != nil {
+		return "", err
+	}
+	return mode, nil
+}
+
+func validateDesiredRuntime(state string) error {
+	switch state {
+	case DesiredRuntimeRunning, DesiredRuntimeStopped:
+		return nil
+	default:
+		return fmt.Errorf("desired_runtime 只能是 running 或 stopped")
+	}
+}
+
+func normalizeDesiredRuntime(state string) (string, error) {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return DesiredRuntimeRunning, nil
+	}
+	if err := validateDesiredRuntime(state); err != nil {
+		return "", err
+	}
+	return state, nil
+}
+
 func (s *Store) CreateNode(n *Node) error {
 	if n == nil {
 		return fmt.Errorf("节点不能为空")
@@ -649,6 +692,16 @@ func (s *Store) CreateNode(n *Node) error {
 	if n.Labels == nil {
 		n.Labels = []string{}
 	}
+	mode, err := normalizeControlMode(n.ControlMode)
+	if err != nil {
+		return err
+	}
+	n.ControlMode = mode
+	desired, err := normalizeDesiredRuntime(n.DesiredRuntime)
+	if err != nil {
+		return err
+	}
+	n.DesiredRuntime = desired
 	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	labelsJSON, err := marshalJSON(n.Labels)
 	if err != nil {
@@ -670,15 +723,15 @@ func (s *Store) CreateNode(n *Node) error {
 			runtime_state, agent_version, singbox_version,
 			connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
 			metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
-			ddns_enabled, created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			ddns_enabled, control_mode, desired_runtime, uplink_last_seen_unix, created_at_unix, updated_at_unix
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		n.ID, n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON, n.PKICABundlePEM,
 		n.PKICertSerial, n.PKINotAfter,
 		n.Status, n.LastSeenUnix, n.ConfigHash,
 		n.RuntimeState, n.AgentVersion, n.SingboxVersion,
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
 		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress, mappingsJSON, capabilitiesJSON,
-		boolToInt(n.DDNSEnabled), n.CreatedAtUnix, n.UpdatedAtUnix,
+		boolToInt(n.DDNSEnabled), n.ControlMode, n.DesiredRuntime, n.UplinkLastSeenUnix, n.CreatedAtUnix, n.UpdatedAtUnix,
 	)
 	if err != nil {
 		return fmt.Errorf("创建节点失败：%w", err)
@@ -694,6 +747,16 @@ func (s *Store) UpdateNode(n *Node) error {
 	if n.Labels == nil {
 		n.Labels = []string{}
 	}
+	mode, err := normalizeControlMode(n.ControlMode)
+	if err != nil {
+		return err
+	}
+	n.ControlMode = mode
+	desired, err := normalizeDesiredRuntime(n.DesiredRuntime)
+	if err != nil {
+		return err
+	}
+	n.DesiredRuntime = desired
 	n.PortMappings = NormalizePortMappings(n.PortMappings)
 	labelsJSON, err := marshalJSON(n.Labels)
 	if err != nil {
@@ -718,6 +781,7 @@ func (s *Store) UpdateNode(n *Node) error {
 			connections = ?, uplink_bytes = ?, downlink_bytes = ?, cpu_percent = ?, memory_rss_bytes = ?,
 			metrics_at_unix = ?, last_error = ?, egress_interface = ?, public_address = ?,
 			port_mappings_json = ?, capabilities_json = ?, ddns_enabled = ?,
+			control_mode = ?, desired_runtime = ?, uplink_last_seen_unix = ?,
 			updated_at_unix = ?
 		WHERE id = ?`,
 		n.Name, n.Address, n.GRPCPort, n.Token, labelsJSON,
@@ -728,6 +792,7 @@ func (s *Store) UpdateNode(n *Node) error {
 		n.Connections, n.UplinkBytes, n.DownlinkBytes, n.CPUPercent, n.MemoryRSSBytes,
 		n.MetricsAtUnix, n.LastError, n.EgressInterface, n.PublicAddress,
 		mappingsJSON, capabilitiesJSON, boolToInt(n.DDNSEnabled),
+		n.ControlMode, n.DesiredRuntime, n.UplinkLastSeenUnix,
 		n.UpdatedAtUnix, n.ID,
 	)
 	if err != nil {
@@ -796,6 +861,20 @@ func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) e
 	if update.DDNSEnabled != nil {
 		add("ddns_enabled", boolToInt(*update.DDNSEnabled))
 	}
+	if update.ControlMode != nil {
+		mode := strings.TrimSpace(*update.ControlMode)
+		if err := validateControlMode(mode); err != nil {
+			return err
+		}
+		add("control_mode", mode)
+	}
+	if update.DesiredRuntime != nil {
+		state := strings.TrimSpace(*update.DesiredRuntime)
+		if err := validateDesiredRuntime(state); err != nil {
+			return err
+		}
+		add("desired_runtime", state)
+	}
 
 	add("updated_at_unix", nowUnix())
 	args = append(args, id)
@@ -806,6 +885,129 @@ func (s *Store) UpdateNodeOperatorFields(id string, update NodeOperatorUpdate) e
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("节点不存在：%s", id)
+	}
+	return nil
+}
+
+// ApplyNodeReport updates only report/live columns. Older collected_at_unix samples are dropped.
+func (s *Store) ApplyNodeReport(nodeID string, report NodeReport) (bool, error) {
+	if nodeID == "" {
+		return false, fmt.Errorf("必须提供节点 ID")
+	}
+	if report.CPUPercent < 0 || report.CPUPercent > 100 {
+		return false, fmt.Errorf("CPU 使用率无效")
+	}
+	if report.Connections < 0 || report.UplinkBytes < 0 || report.DownlinkBytes < 0 || report.MemoryRSSBytes < 0 {
+		return false, fmt.Errorf("上报指标不能为负数")
+	}
+	collected := report.CollectedAtUnix
+	if collected < 0 {
+		return false, fmt.Errorf("上报时间戳无效")
+	}
+	now := nowUnix()
+	if collected == 0 {
+		collected = now
+	}
+	if collected > now+300 {
+		return false, fmt.Errorf("上报时间戳超出允许范围")
+	}
+
+	capsJSON := "[]"
+	updateCaps := 0
+	if report.HasCapabilities {
+		updateCaps = 1
+		if report.Capabilities == nil {
+			report.Capabilities = []string{}
+		}
+		encoded, err := marshalJSON(report.Capabilities)
+		if err != nil {
+			return false, fmt.Errorf("编码节点能力失败：%w", err)
+		}
+		capsJSON = encoded
+	}
+	updateMetrics := 0
+	if report.HasMetrics {
+		updateMetrics = 1
+	}
+	updateHash := 0
+	if report.ConfigHash != "" {
+		updateHash = 1
+	}
+	updateAgent := 0
+	if report.AgentVersion != "" {
+		updateAgent = 1
+	}
+	updateSingbox := 0
+	if report.SingboxVersion != "" {
+		updateSingbox = 1
+	}
+
+	res, err := s.db.Exec(`
+		UPDATE nodes SET
+			status = CASE WHEN ? != '' THEN ? ELSE status END,
+			last_seen_unix = ?,
+			runtime_state = CASE WHEN ? != '' THEN ? ELSE runtime_state END,
+			config_hash = CASE WHEN ? != 0 THEN ? ELSE config_hash END,
+			last_error = ?,
+			connections = CASE WHEN ? != 0 THEN ? ELSE connections END,
+			uplink_bytes = CASE WHEN ? != 0 THEN ? ELSE uplink_bytes END,
+			downlink_bytes = CASE WHEN ? != 0 THEN ? ELSE downlink_bytes END,
+			cpu_percent = CASE WHEN ? != 0 THEN ? ELSE cpu_percent END,
+			memory_rss_bytes = CASE WHEN ? != 0 THEN ? ELSE memory_rss_bytes END,
+			metrics_at_unix = CASE WHEN ? != 0 THEN ? ELSE metrics_at_unix END,
+			capabilities_json = CASE WHEN ? != 0 THEN ? ELSE capabilities_json END,
+			agent_version = CASE WHEN ? != 0 THEN ? ELSE agent_version END,
+			singbox_version = CASE WHEN ? != 0 THEN ? ELSE singbox_version END,
+			uplink_last_seen_unix = ?,
+			updated_at_unix = ?
+		WHERE id = ? AND uplink_last_seen_unix <= ?`,
+		report.Status, report.Status,
+		collected,
+		report.RuntimeState, report.RuntimeState,
+		updateHash, report.ConfigHash,
+		report.LastError,
+		updateMetrics, report.Connections,
+		updateMetrics, report.UplinkBytes,
+		updateMetrics, report.DownlinkBytes,
+		updateMetrics, report.CPUPercent,
+		updateMetrics, report.MemoryRSSBytes,
+		updateMetrics, collected,
+		updateCaps, capsJSON,
+		updateAgent, report.AgentVersion,
+		updateSingbox, report.SingboxVersion,
+		collected, now,
+		nodeID, collected,
+	)
+	if err != nil {
+		return false, fmt.Errorf("写入节点上报失败：%w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		var exists int
+		if err := s.db.QueryRow(`SELECT COUNT(1) FROM nodes WHERE id = ?`, nodeID).Scan(&exists); err != nil {
+			return false, fmt.Errorf("检查节点失败：%w", err)
+		}
+		if exists == 0 {
+			return false, fmt.Errorf("节点不存在：%s", nodeID)
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+// MarkUplinkUnreachable sets status only when the newest accepted report is still older
+// than cutoffUnix, so a concurrent ApplyNodeReport cannot be overwritten.
+func (s *Store) MarkUplinkUnreachable(nodeID, lastError string, cutoffUnix int64) error {
+	if nodeID == "" {
+		return fmt.Errorf("必须提供节点 ID")
+	}
+	_, err := s.db.Exec(`
+		UPDATE nodes SET status = 'unreachable', last_error = ?, updated_at_unix = ?
+		WHERE id = ? AND control_mode = ? AND uplink_last_seen_unix > 0 AND uplink_last_seen_unix < ?`,
+		lastError, nowUnix(), nodeID, ControlModeUplink, cutoffUnix,
+	)
+	if err != nil {
+		return fmt.Errorf("标记 uplink 节点不可达失败：%w", err)
 	}
 	return nil
 }
@@ -904,12 +1106,18 @@ func scanNode(row interface {
 		&n.RuntimeState, &n.AgentVersion, &n.SingboxVersion,
 		&n.Connections, &n.UplinkBytes, &n.DownlinkBytes, &n.CPUPercent, &n.MemoryRSSBytes,
 		&n.MetricsAtUnix, &n.LastError, &n.EgressInterface, &n.PublicAddress, &mappingsJSON, &capabilitiesJSON,
-		&ddnsEnabled, &n.CreatedAtUnix, &n.UpdatedAtUnix,
+		&ddnsEnabled, &n.ControlMode, &n.DesiredRuntime, &n.UplinkLastSeenUnix, &n.CreatedAtUnix, &n.UpdatedAtUnix,
 	)
 	if err != nil {
 		return nil, err
 	}
 	n.DDNSEnabled = ddnsEnabled != 0
+	if n.ControlMode == "" {
+		n.ControlMode = ControlModePush
+	}
+	if n.DesiredRuntime == "" {
+		n.DesiredRuntime = DesiredRuntimeRunning
+	}
 	n.Labels = []string{}
 	if err := unmarshalJSON(labelsJSON, &n.Labels); err != nil {
 		return nil, fmt.Errorf("解析标签失败：%w", err)
@@ -932,7 +1140,7 @@ const nodeSelectCols = `id, name, address, grpc_port, token, labels_json, pki_ca
 	runtime_state, agent_version, singbox_version,
 	connections, uplink_bytes, downlink_bytes, cpu_percent, memory_rss_bytes,
 	metrics_at_unix, last_error, egress_interface, public_address, port_mappings_json, capabilities_json,
-	ddns_enabled, created_at_unix, updated_at_unix`
+	ddns_enabled, control_mode, desired_runtime, uplink_last_seen_unix, created_at_unix, updated_at_unix`
 
 func (s *Store) GetNode(id string) (*Node, error) {
 	row := s.db.QueryRow(`SELECT `+nodeSelectCols+` FROM nodes WHERE id = ?`, id)

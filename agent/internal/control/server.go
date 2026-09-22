@@ -57,7 +57,7 @@ func NewServer(rt Runtime, agentVersion, singboxVersion string, logs *LogBuf) *S
 }
 
 func (s *Server) Ping(context.Context, *agentv1.PingRequest) (*agentv1.PingResponse, error) {
-	capabilities := []string{"proxy_chain_v1"}
+	capabilities := []string{"proxy_chain_v1", "uplink-v1"}
 	capabilities = append(capabilities, nodeSysCapabilities()...)
 	if s.publicAddresses != nil {
 		capabilities = append(capabilities, "public-address-v1")

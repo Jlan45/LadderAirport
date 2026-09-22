@@ -283,7 +283,7 @@ func main() {
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		IdleTimeout:       3 * time.Minute,
 	}
 	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatalf("启动监听失败：%v", err)

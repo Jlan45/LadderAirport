@@ -37,6 +37,7 @@ type installCommandOpts struct {
 	GRPCPort        int
 	ReportAddress   string
 	Listen          string // optional LADDER_LISTEN override
+	Uplink          bool
 }
 
 // buildInstallCommand produces a strict Panel-PKI installation command.
@@ -75,6 +76,9 @@ func buildInstallCommand(opts installCommandOpts) string {
 	if opts.Listen != "" {
 		b.WriteString(" LADDER_LISTEN=")
 		b.WriteString(shellSingleQuote(opts.Listen))
+	}
+	if opts.Uplink {
+		b.WriteString(" LADDER_UPLINK=1")
 	}
 	b.WriteString(" bash")
 	return b.String()

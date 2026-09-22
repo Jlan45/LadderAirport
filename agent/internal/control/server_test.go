@@ -145,7 +145,7 @@ func TestPingCapabilityAndProbeOutbound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCapabilities := []string{"proxy_chain_v1"}
+	wantCapabilities := []string{"proxy_chain_v1", "uplink-v1"}
 	if runtime.GOOS == "linux" {
 		wantCapabilities = append(wantCapabilities, "node-metrics-v1", "bbr-v1")
 	}

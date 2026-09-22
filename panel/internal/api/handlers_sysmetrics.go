@@ -48,6 +48,9 @@ func (s *Server) dialNodeCapability(
 		writeError(w, status, err.Error())
 		return nil, false
 	}
+	if rejectUplinkLive(w, node) {
+		return nil, false
+	}
 	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, capability) {
 		writeError(w, http.StatusBadRequest, errAgentTooOld)
 		return nil, false

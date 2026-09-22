@@ -409,4 +409,71 @@ if [[ "${BAD_PROBE_CODE}" == "200" ]]; then
 fi
 echo "wrong-token probe: HTTP ${BAD_PROBE_CODE} (expected non-200)"
 
-echo "==> e2e smoke OK (apply=${TASK_STATUS}, templates=${TMPL_COUNT}, PKI enroll ×2, batch labels OK, wrong token rejected)"
+echo "==> HTTP agent report + config-sync (reuse Panel HTTP + Bearer)"
+UPLINK_BODY="$(curl -sf -c "${COOKIE_JAR}" -b "${COOKIE_JAR}" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"uplink-smoke","control_mode":"uplink","token":"uplink-e2e-token"}' \
+  "${PANEL_URL}/api/v1/nodes")"
+UPLINK_ID="$(json_get "${UPLINK_BODY}" 'id')"
+UPLINK_MODE="$(json_get "${UPLINK_BODY}" 'control_mode')"
+if [[ "${UPLINK_MODE}" != "uplink" ]]; then
+  echo "错误：uplink 节点 control_mode=${UPLINK_MODE}" >&2
+  echo "${UPLINK_BODY}" >&2
+  exit 1
+fi
+NOW_UNIX="$(date +%s)"
+REPORT_BODY="$(curl -sf \
+  -H "Authorization: Bearer uplink-e2e-token" \
+  -H 'Content-Type: application/json' \
+  -d "{\"node_id\":\"${UPLINK_ID}\",\"collected_at_unix\":${NOW_UNIX},\"runtime_state\":\"running\",\"config_hash\":\"e2e\",\"capabilities\":[\"uplink-v1\"],\"connections\":1,\"cpu_percent\":1}" \
+  "${PANEL_URL}/api/v1/agent/report")"
+if [[ "$(json_get "${REPORT_BODY}" 'ok')" != "True" && "$(json_get "${REPORT_BODY}" 'ok')" != "true" ]]; then
+  echo "错误：agent report 失败：${REPORT_BODY}" >&2
+  exit 1
+fi
+WRONG_REPORT_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer wrong-token" \
+  -H 'Content-Type: application/json' \
+  -d "{\"node_id\":\"${UPLINK_ID}\",\"collected_at_unix\":${NOW_UNIX}}" \
+  "${PANEL_URL}/api/v1/agent/report")"
+if [[ "${WRONG_REPORT_CODE}" != "401" ]]; then
+  echo "错误：错误令牌上报应返回 401，实际 ${WRONG_REPORT_CODE}" >&2
+  exit 1
+fi
+SYNC_BODY="$(curl -sf \
+  -H "Authorization: Bearer uplink-e2e-token" \
+  -H 'Content-Type: application/json' \
+  -d "{\"node_id\":\"${UPLINK_ID}\",\"applied_config_hash\":\"\",\"applied_frps_hash\":\"\"}" \
+  "${PANEL_URL}/api/v1/agent/config-sync")"
+if [[ "$(json_get "${SYNC_BODY}" 'changed')" != "True" && "$(json_get "${SYNC_BODY}" 'changed')" != "true" ]]; then
+  echo "错误：首次 config-sync 应 changed=true：${SYNC_BODY}" >&2
+  exit 1
+fi
+SYNC_HASH="$(json_get "${SYNC_BODY}" 'config_hash')"
+HEAD_HASH="$(curl -sI \
+  -H "Authorization: Bearer uplink-e2e-token" \
+  "${PANEL_URL}/api/v1/agent/config-sync?node_id=${UPLINK_ID}" \
+  | tr -d '\r' | awk -F': ' 'tolower($1)=="x-config-hash"{print $2; exit}')"
+if [[ "${HEAD_HASH}" != "${SYNC_HASH}" ]]; then
+  echo "错误：HEAD X-Config-Hash=${HEAD_HASH} 与 POST config_hash=${SYNC_HASH} 不一致" >&2
+  exit 1
+fi
+GET_META="$(curl -sf \
+  -H "Authorization: Bearer uplink-e2e-token" \
+  "${PANEL_URL}/api/v1/agent/config-sync?node_id=${UPLINK_ID}")"
+if [[ "$(json_get "${GET_META}" 'config_hash')" != "${SYNC_HASH}" ]]; then
+  echo "错误：GET config-sync 哈希不一致：${GET_META}" >&2
+  exit 1
+fi
+SYNC2_BODY="$(curl -sf \
+  -H "Authorization: Bearer uplink-e2e-token" \
+  -H 'Content-Type: application/json' \
+  -d "{\"node_id\":\"${UPLINK_ID}\",\"applied_config_hash\":\"${SYNC_HASH}\",\"applied_frps_hash\":\"\"}" \
+  "${PANEL_URL}/api/v1/agent/config-sync")"
+if [[ "$(json_get "${SYNC2_BODY}" 'changed')" != "False" && "$(json_get "${SYNC2_BODY}" 'changed')" != "false" ]]; then
+  echo "错误：hash 未变时 config-sync 应 changed=false：${SYNC2_BODY}" >&2
+  exit 1
+fi
+echo "uplink HTTP: report ok, wrong token 401, HEAD/GET hash=${SYNC_HASH}, config-sync ok"
+
+echo "==> e2e smoke OK (apply=${TASK_STATUS}, templates=${TMPL_COUNT}, PKI enroll ×2, batch labels OK, wrong token rejected, HTTP uplink OK)"

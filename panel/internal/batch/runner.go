@@ -210,6 +210,9 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 		res.Message = err.Error()
 		return res
 	}
+	if node.ControlMode == store.ControlModeUplink {
+		return r.finishUplinkIntent(nodeID, taskType)
+	}
 
 	token := node.Token
 	if token == "" {
@@ -277,6 +280,30 @@ func (r *Runner) runOne(ctx context.Context, timeout time.Duration, taskType, ta
 	default:
 		res.Message = fmt.Sprintf("未知任务类型 %q", taskType)
 	}
+	return res
+}
+
+func (r *Runner) finishUplinkIntent(nodeID, taskType string) store.TaskNodeResult {
+	res := store.TaskNodeResult{NodeID: nodeID, Message: "已记录，节点将在下次拉取时应用"}
+	switch taskType {
+	case "start":
+		state := store.DesiredRuntimeRunning
+		if err := r.Store.UpdateNodeOperatorFields(nodeID, store.NodeOperatorUpdate{DesiredRuntime: &state}); err != nil {
+			res.Message = err.Error()
+			return res
+		}
+	case "stop":
+		state := store.DesiredRuntimeStopped
+		if err := r.Store.UpdateNodeOperatorFields(nodeID, store.NodeOperatorUpdate{DesiredRuntime: &state}); err != nil {
+			res.Message = err.Error()
+			return res
+		}
+	case "apply":
+	default:
+		res.Message = fmt.Sprintf("未知任务类型 %q", taskType)
+		return res
+	}
+	res.OK = true
 	return res
 }
 

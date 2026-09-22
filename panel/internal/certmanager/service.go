@@ -98,6 +98,9 @@ func (s *Service) Issue(ctx context.Context, certificateID string) (resultErr er
 	if token == "" && s.DefaultToken != nil {
 		token = s.DefaultToken()
 	}
+	if node.ControlMode == store.ControlModeUplink {
+		return fmt.Errorf("uplink 节点不支持即时协议证书部署，请改用 push")
+	}
 	if s.DialAgent == nil {
 		return fmt.Errorf("Agent 证书连接器不可用")
 	}

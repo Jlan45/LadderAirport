@@ -353,3 +353,41 @@ func TestRunTaskDialError(t *testing.T) {
 		t.Fatalf("results: %+v", got.Results)
 	}
 }
+
+func TestRunTaskUplinkRecordsIntentWithoutDial(t *testing.T) {
+	s := openTestStore(t)
+	n := &store.Node{Name: "uplink", Token: "t", ControlMode: store.ControlModeUplink}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	task := &store.Task{Type: "stop", Status: "pending", NodeIDs: []string{n.ID}}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	dialed := false
+	r := batch.NewRunner(s, func() string { return "t" })
+	r.Dial = func(_ context.Context, _ store.Node, _ string) (batch.NodeRPC, error) {
+		dialed = true
+		return nil, fmt.Errorf("should not dial")
+	}
+	if err := r.RunTask(context.Background(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if dialed {
+		t.Fatal("uplink task dialed the node")
+	}
+	got, err := s.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "success" || len(got.Results) != 1 || !got.Results[0].OK {
+		t.Fatalf("task = %+v", got)
+	}
+	node, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.DesiredRuntime != store.DesiredRuntimeStopped {
+		t.Fatalf("desired_runtime = %q", node.DesiredRuntime)
+	}
+}

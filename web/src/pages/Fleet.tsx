@@ -898,6 +898,11 @@ export default function Fleet() {
                           >
                             {n.name}
                           </button>
+                          {n.control_mode === 'uplink' ? (
+                            <div className="mt-1">
+                              <Badge variant="outline" className="text-[10px]">HTTP 上行</Badge>
+                            </div>
+                          ) : null}
                         </TableCell>
                         <TableCell className="space-y-1">
                           <code className="text-xs font-mono text-foreground block">
@@ -1158,6 +1163,9 @@ function NodeCard({
             >
               {n.name}
             </button>
+            {n.control_mode === 'uplink' ? (
+              <Badge variant="outline" className="text-[10px]">HTTP 上行</Badge>
+            ) : null}
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <Badge variant={statusTheme(n.status)}>{statusLabel(n.status)}</Badge>
