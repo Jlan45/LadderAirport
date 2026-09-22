@@ -143,38 +143,45 @@ func (s *Store) DeleteDNSAccount(id string) error {
 }
 
 const managedDomainCols = `id, node_id, dns_account_id, zone, fqdn, record_mode,
-	address_source, manual_ipv4, manual_ipv6, ttl, enabled, state,
-	desired_ipv4, desired_ipv6, observed_ipv4_json, observed_ipv6_json,
-	provider_record_a_id, provider_record_aaaa_id, created_a_by_panel,
-	created_aaaa_by_panel, last_reconcile_unix, next_reconcile_unix,
-	retry_count, last_error, created_at_unix, updated_at_unix`
+	address_source, manual_ipv4, manual_ipv6, manual_cname, ttl, enabled, state,
+	desired_ipv4, desired_ipv6, desired_cname, observed_ipv4_json,
+	observed_ipv6_json, observed_cname_json, provider_record_a_id,
+	provider_record_aaaa_id, provider_record_cname_id, created_a_by_panel,
+	created_aaaa_by_panel, created_cname_by_panel, last_reconcile_unix,
+	next_reconcile_unix, retry_count, last_error, created_at_unix, updated_at_unix`
 
 func scanManagedDomain(row interface{ Scan(...any) error }) (*ManagedDomain, error) {
 	var domain ManagedDomain
-	var enabled, createdA, createdAAAA int
-	var observedIPv4JSON, observedIPv6JSON string
+	var enabled, createdA, createdAAAA, createdCNAME int
+	var observedIPv4JSON, observedIPv6JSON, observedCNAMEJSON string
 	if err := row.Scan(
 		&domain.ID, &domain.NodeID, &domain.DNSAccountID, &domain.Zone, &domain.FQDN,
 		&domain.RecordMode, &domain.AddressSource, &domain.ManualIPv4,
-		&domain.ManualIPv6, &domain.TTL, &enabled, &domain.State,
-		&domain.DesiredIPv4, &domain.DesiredIPv6, &observedIPv4JSON,
-		&observedIPv6JSON, &domain.ProviderRecordAID, &domain.ProviderRecordAAAAID,
-		&createdA, &createdAAAA, &domain.LastReconcileUnix,
-		&domain.NextReconcileUnix, &domain.RetryCount, &domain.LastError,
-		&domain.CreatedAtUnix, &domain.UpdatedAtUnix,
+		&domain.ManualIPv6, &domain.ManualCNAME, &domain.TTL, &enabled, &domain.State,
+		&domain.DesiredIPv4, &domain.DesiredIPv6, &domain.DesiredCNAME,
+		&observedIPv4JSON, &observedIPv6JSON, &observedCNAMEJSON,
+		&domain.ProviderRecordAID, &domain.ProviderRecordAAAAID,
+		&domain.ProviderRecordCNAMEID, &createdA, &createdAAAA, &createdCNAME,
+		&domain.LastReconcileUnix, &domain.NextReconcileUnix, &domain.RetryCount,
+		&domain.LastError, &domain.CreatedAtUnix, &domain.UpdatedAtUnix,
 	); err != nil {
 		return nil, err
 	}
 	domain.Enabled = enabled != 0
 	domain.CreatedAByPanel = createdA != 0
 	domain.CreatedAAAAByPanel = createdAAAA != 0
+	domain.CreatedCNAMEByPanel = createdCNAME != 0
 	domain.ObservedIPv4 = []string{}
 	domain.ObservedIPv6 = []string{}
+	domain.ObservedCNAME = []string{}
 	if err := unmarshalJSON(observedIPv4JSON, &domain.ObservedIPv4); err != nil {
 		return nil, fmt.Errorf("解析域名 IPv4 观测值失败：%w", err)
 	}
 	if err := unmarshalJSON(observedIPv6JSON, &domain.ObservedIPv6); err != nil {
 		return nil, fmt.Errorf("解析域名 IPv6 观测值失败：%w", err)
+	}
+	if err := unmarshalJSON(observedCNAMEJSON, &domain.ObservedCNAME); err != nil {
+		return nil, fmt.Errorf("解析域名 CNAME 观测值失败：%w", err)
 	}
 	return &domain, nil
 }
@@ -202,11 +209,24 @@ func (s *Store) CreateManagedDomain(domain *ManagedDomain) error {
 	if domain.State == "" {
 		domain.State = "pending"
 	}
+	if domain.ObservedIPv4 == nil {
+		domain.ObservedIPv4 = []string{}
+	}
+	if domain.ObservedIPv6 == nil {
+		domain.ObservedIPv6 = []string{}
+	}
+	if domain.ObservedCNAME == nil {
+		domain.ObservedCNAME = []string{}
+	}
 	observedIPv4JSON, err := marshalJSON(domain.ObservedIPv4)
 	if err != nil {
 		return err
 	}
 	observedIPv6JSON, err := marshalJSON(domain.ObservedIPv6)
+	if err != nil {
+		return err
+	}
+	observedCNAMEJSON, err := marshalJSON(domain.ObservedCNAME)
 	if err != nil {
 		return err
 	}
@@ -216,20 +236,22 @@ func (s *Store) CreateManagedDomain(domain *ManagedDomain) error {
 	_, err = s.db.Exec(`
 		INSERT INTO managed_domains (
 			id, node_id, dns_account_id, zone, fqdn, record_mode, address_source,
-			manual_ipv4, manual_ipv6, ttl, enabled, state, desired_ipv4,
-			desired_ipv6, observed_ipv4_json, observed_ipv6_json,
-			provider_record_a_id, provider_record_aaaa_id, created_a_by_panel,
-			created_aaaa_by_panel, last_reconcile_unix, next_reconcile_unix,
+			manual_ipv4, manual_ipv6, manual_cname, ttl, enabled, state, desired_ipv4,
+			desired_ipv6, desired_cname, observed_ipv4_json, observed_ipv6_json,
+			observed_cname_json, provider_record_a_id, provider_record_aaaa_id,
+			provider_record_cname_id, created_a_by_panel, created_aaaa_by_panel,
+			created_cname_by_panel, last_reconcile_unix, next_reconcile_unix,
 			retry_count, last_error, created_at_unix, updated_at_unix
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		domain.ID, domain.NodeID, domain.DNSAccountID, domain.Zone, domain.FQDN,
 		domain.RecordMode, domain.AddressSource, domain.ManualIPv4, domain.ManualIPv6,
-		domain.TTL, boolToInt(domain.Enabled), domain.State, domain.DesiredIPv4,
-		domain.DesiredIPv6, observedIPv4JSON, observedIPv6JSON,
-		domain.ProviderRecordAID, domain.ProviderRecordAAAAID,
+		domain.ManualCNAME, domain.TTL, boolToInt(domain.Enabled), domain.State,
+		domain.DesiredIPv4, domain.DesiredIPv6, domain.DesiredCNAME, observedIPv4JSON,
+		observedIPv6JSON, observedCNAMEJSON, domain.ProviderRecordAID,
+		domain.ProviderRecordAAAAID, domain.ProviderRecordCNAMEID,
 		boolToInt(domain.CreatedAByPanel), boolToInt(domain.CreatedAAAAByPanel),
-		domain.LastReconcileUnix, domain.NextReconcileUnix, domain.RetryCount,
-		domain.LastError, now, now,
+		boolToInt(domain.CreatedCNAMEByPanel), domain.LastReconcileUnix,
+		domain.NextReconcileUnix, domain.RetryCount, domain.LastError, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("创建托管域名失败：%w", err)
@@ -252,25 +274,33 @@ func (s *Store) UpdateManagedDomain(domain *ManagedDomain) error {
 	if err != nil {
 		return err
 	}
+	observedCNAMEJSON, err := marshalJSON(domain.ObservedCNAME)
+	if err != nil {
+		return err
+	}
 	domain.UpdatedAtUnix = nowUnix()
 	res, err := s.db.Exec(`
 		UPDATE managed_domains SET node_id = ?, dns_account_id = ?, zone = ?,
 			fqdn = ?, record_mode = ?, address_source = ?, manual_ipv4 = ?,
-			manual_ipv6 = ?, ttl = ?, enabled = ?, state = ?, desired_ipv4 = ?,
-			desired_ipv6 = ?, observed_ipv4_json = ?, observed_ipv6_json = ?,
+			manual_ipv6 = ?, manual_cname = ?, ttl = ?, enabled = ?, state = ?,
+			desired_ipv4 = ?, desired_ipv6 = ?, desired_cname = ?,
+			observed_ipv4_json = ?, observed_ipv6_json = ?, observed_cname_json = ?,
 			provider_record_a_id = ?, provider_record_aaaa_id = ?,
-			created_a_by_panel = ?, created_aaaa_by_panel = ?,
+			provider_record_cname_id = ?, created_a_by_panel = ?,
+			created_aaaa_by_panel = ?, created_cname_by_panel = ?,
 			last_reconcile_unix = ?, next_reconcile_unix = ?, retry_count = ?,
 			last_error = ?, updated_at_unix = ?
 		WHERE id = ?`,
 		domain.NodeID, domain.DNSAccountID, domain.Zone, domain.FQDN,
 		domain.RecordMode, domain.AddressSource, domain.ManualIPv4,
-		domain.ManualIPv6, domain.TTL, boolToInt(domain.Enabled), domain.State,
-		domain.DesiredIPv4, domain.DesiredIPv6, observedIPv4JSON,
-		observedIPv6JSON, domain.ProviderRecordAID, domain.ProviderRecordAAAAID,
+		domain.ManualIPv6, domain.ManualCNAME, domain.TTL, boolToInt(domain.Enabled),
+		domain.State, domain.DesiredIPv4, domain.DesiredIPv6, domain.DesiredCNAME,
+		observedIPv4JSON, observedIPv6JSON, observedCNAMEJSON, domain.ProviderRecordAID,
+		domain.ProviderRecordAAAAID, domain.ProviderRecordCNAMEID,
 		boolToInt(domain.CreatedAByPanel), boolToInt(domain.CreatedAAAAByPanel),
-		domain.LastReconcileUnix, domain.NextReconcileUnix, domain.RetryCount,
-		domain.LastError, domain.UpdatedAtUnix, domain.ID,
+		boolToInt(domain.CreatedCNAMEByPanel), domain.LastReconcileUnix,
+		domain.NextReconcileUnix, domain.RetryCount, domain.LastError,
+		domain.UpdatedAtUnix, domain.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("更新托管域名失败：%w", err)

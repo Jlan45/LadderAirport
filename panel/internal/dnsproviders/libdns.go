@@ -207,6 +207,8 @@ func toLibdnsRecord(record dnsprovider.Record) (libdns.Record, error) {
 		return libdns.Address{Name: name, TTL: record.TTL, IP: ip}, nil
 	case dnsprovider.TypeTXT:
 		return libdns.TXT{Name: name, TTL: record.TTL, Text: record.Value}, nil
+	case dnsprovider.TypeCNAME:
+		return libdns.CNAME{Name: name, TTL: record.TTL, Target: record.Value}, nil
 	default:
 		return nil, fmt.Errorf("不支持 DNS 记录类型：%s", record.Type)
 	}
@@ -228,6 +230,15 @@ func fromLibdnsRecord(record libdns.Record) (dnsprovider.Record, bool) {
 			Name: normalizeRelative(value.Name), Type: dnsprovider.TypeTXT,
 			Value: value.Text, TTL: value.TTL,
 		}, true
+	case libdns.CNAME:
+		target, err := dnsprovider.NormalizeFQDN(value.Target)
+		if err != nil {
+			target = normalizeRelative(value.Target)
+		}
+		return dnsprovider.Record{
+			Name: normalizeRelative(value.Name), Type: dnsprovider.TypeCNAME,
+			Value: target, TTL: value.TTL,
+		}, true
 	default:
 		rr := record.RR()
 		parsed, err := rr.Parse()
@@ -238,6 +249,8 @@ func fromLibdnsRecord(record libdns.Record) (dnsprovider.Record, bool) {
 		case libdns.Address:
 			return fromLibdnsRecord(typed)
 		case libdns.TXT:
+			return fromLibdnsRecord(typed)
+		case libdns.CNAME:
 			return fromLibdnsRecord(typed)
 		default:
 			return dnsprovider.Record{}, false

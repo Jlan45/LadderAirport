@@ -130,6 +130,12 @@ func NormalizeRecord(record Record, minTTL, maxTTL time.Duration) (Record, error
 		if record.Value == "" {
 			return Record{}, fmt.Errorf("TXT 记录值不能为空")
 		}
+	case TypeCNAME:
+		target, err := NormalizeFQDN(record.Value)
+		if err != nil {
+			return Record{}, fmt.Errorf("CNAME 记录目标无效：%w", err)
+		}
+		record.Value = target
 	default:
 		return Record{}, fmt.Errorf("不支持 DNS 记录类型：%s", record.Type)
 	}

@@ -156,7 +156,7 @@ export default function DNSCertificates() {
           <Card><CardHeader><CardTitle>托管域名</CardTitle><CardDescription>观测值会定期与 DNS 供应商重新对账。</CardDescription></CardHeader>
             <CardContent><Table><TableHeader><TableRow><TableHead>域名</TableHead><TableHead>地址</TableHead><TableHead>状态</TableHead><TableHead>下次同步</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
               <TableBody>{domains.map((domain) => <TableRow key={domain.id}><TableCell><div className="font-medium">{domain.fqdn}</div><div className="text-xs text-muted-foreground">{domain.zone} · {domain.record_mode.toUpperCase()}</div></TableCell>
-                <TableCell className="font-mono text-xs">{[domain.desired_ipv4, domain.desired_ipv6].filter(Boolean).join(' / ') || '等待探测'}</TableCell>
+                <TableCell className="font-mono text-xs">{[domain.desired_ipv4, domain.desired_ipv6, domain.desired_cname].filter(Boolean).join(' / ') || '等待同步'}</TableCell>
                 <TableCell><StatusBadge value={domain.state} />{domain.last_error && <div className="mt-1 max-w-[300px] truncate text-xs text-destructive">{domain.last_error}</div>}</TableCell>
                 <TableCell>{domain.next_reconcile_unix ? formatTime(domain.next_reconcile_unix) : '立即'}</TableCell>
                 <TableCell className="text-right"><Button variant="ghost" size="sm" loading={busy === `reconcile-${domain.id}`} onClick={() => void action(`reconcile-${domain.id}`, () => reconcileManagedDomain(domain.id), '已提交 DNS 同步')}><RefreshCw className="mr-2 h-4 w-4" />同步</Button></TableCell>
@@ -228,16 +228,46 @@ function DomainForm({ nodes, accounts, onCreate, busy }: { nodes: Node[]; accoun
   const [nodeID, setNodeID] = useState('')
   const [accountID, setAccountID] = useState('')
   const [fqdn, setFQDN] = useState('')
+  const [recordMode, setRecordMode] = useState<'a' | 'aaaa' | 'dual' | 'cname'>('a')
+  const [addressSource, setAddressSource] = useState<'manual' | 'node_address' | 'agent_public'>('manual')
   const [ipv4, setIPv4] = useState('')
+  const [ipv6, setIPv6] = useState('')
+  const [cname, setCNAME] = useState('')
+  const [ttl, setTTL] = useState('300')
   useEffect(() => { if (!nodeID && nodes[0]) setNodeID(nodes[0].id) }, [nodeID, nodes])
   useEffect(() => { if (!accountID && accounts[0]) setAccountID(accounts[0].id) }, [accountID, accounts])
+  // CNAME only supports manual; reset source when switching to/from cname
+  useEffect(() => { if (recordMode === 'cname') setAddressSource('manual') }, [recordMode])
   const account = accounts.find((item) => item.id === accountID)
-  return <Card><CardHeader><CardTitle>添加托管域名</CardTitle><CardDescription>DNS 区域由所选账号固定，域名必须位于该区域下。</CardDescription></CardHeader><CardContent><form className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" onSubmit={(e) => { e.preventDefault(); onCreate({ node_id: nodeID, dns_account_id: accountID, fqdn, record_mode: 'a', address_source: ipv4 ? 'manual' : 'agent_public', manual_ipv4: ipv4, ttl: 300 }) }}>
+  const manual = addressSource === 'manual'
+  const wantV4 = recordMode === 'a' || recordMode === 'dual'
+  const wantV6 = recordMode === 'aaaa' || recordMode === 'dual'
+  const isCNAME = recordMode === 'cname'
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    onCreate({
+      node_id: nodeID,
+      dns_account_id: accountID,
+      fqdn,
+      record_mode: recordMode,
+      address_source: addressSource,
+      manual_ipv4: manual && wantV4 ? ipv4.trim() : undefined,
+      manual_ipv6: manual && wantV6 ? ipv6.trim() : undefined,
+      manual_cname: isCNAME ? cname.trim() : undefined,
+      ttl: Number(ttl) || 300,
+    })
+  }
+  return <Card><CardHeader><CardTitle>添加托管域名</CardTitle><CardDescription>DNS 区域由所选账号固定；域名解析值可手工指定，与节点自身 IP 无需一致（适用于 NAT / 分离解析场景）。</CardDescription></CardHeader><CardContent><form className="grid gap-3 md:grid-cols-3 xl:grid-cols-4" onSubmit={submit}>
     <Field label="节点"><select className={selectClass} value={nodeID} onChange={(e) => setNodeID(e.target.value)}>{nodes.map((node) => <option key={node.id} value={node.id}>{node.name}</option>)}</select></Field>
     <Field label="DNS 账号"><select className={selectClass} value={accountID} onChange={(e) => setAccountID(e.target.value)}>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></Field>
     <Field label="账号管理区域"><Input value={account?.zone ?? ''} readOnly placeholder="请先选择 DNS 账号" /></Field>
     <Field label="主机名 / 二级域名"><Input value={fqdn} onChange={(e) => setFQDN(e.target.value)} placeholder="edge" required />{account?.zone && <p className="text-xs text-muted-foreground">最终域名：{fqdn ? (fqdn.endsWith(`.${account.zone}`) || fqdn === account.zone ? fqdn : `${fqdn}.${account.zone}`) : `edge.${account.zone}`}</p>}</Field>
-    <Field label="手工 IPv4（留空由 Agent 探测）"><Input value={ipv4} onChange={(e) => setIPv4(e.target.value)} /></Field>
+    <Field label="记录类型"><select className={selectClass} value={recordMode} onChange={(e) => setRecordMode(e.target.value as typeof recordMode)}><option value="a">A（IPv4）</option><option value="aaaa">AAAA（IPv6）</option><option value="dual">Dual（A + AAAA）</option><option value="cname">CNAME（别名）</option></select></Field>
+    {!isCNAME && <Field label="解析值来源"><select className={selectClass} value={addressSource} onChange={(e) => setAddressSource(e.target.value as typeof addressSource)}><option value="manual">手工指定</option><option value="node_address">节点控制地址</option><option value="agent_public">Agent 公网探测</option></select><p className="text-xs text-muted-foreground">{manual ? '手工填写的地址将原样写入 DNS，允许内网 / NAT 地址。' : addressSource === 'node_address' ? '使用节点注册的控制地址（须为公网 IP）。' : 'Agent 主动探测公网出口（uplink 节点不支持）。'}</p></Field>}
+    {manual && wantV4 && <Field label="解析 IPv4"><Input value={ipv4} onChange={(e) => setIPv4(e.target.value)} placeholder="203.0.113.10 / 10.0.0.5" required /></Field>}
+    {manual && wantV6 && <Field label="解析 IPv6"><Input value={ipv6} onChange={(e) => setIPv6(e.target.value)} placeholder="2001:db8::10" required /></Field>}
+    {isCNAME && <Field label="CNAME 目标域名"><Input value={cname} onChange={(e) => setCNAME(e.target.value)} placeholder="target.example.com" required /></Field>}
+    <Field label="TTL（秒）"><Input type="number" min={60} max={86400} value={ttl} onChange={(e) => setTTL(e.target.value)} /></Field>
     <div className="flex items-end"><Button type="submit" loading={busy}><Plus className="mr-2 h-4 w-4" />添加</Button></div>
   </form></CardContent></Card>
 }

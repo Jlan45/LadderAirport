@@ -33,6 +33,7 @@ type managedDomainRequest struct {
 	AddressSource string `json:"address_source"`
 	ManualIPv4    string `json:"manual_ipv4"`
 	ManualIPv6    string `json:"manual_ipv6"`
+	ManualCNAME   string `json:"manual_cname"`
 	TTL           int    `json:"ttl"`
 	Enabled       *bool  `json:"enabled"`
 }
@@ -464,9 +465,9 @@ func (s *Server) buildManagedDomain(current *store.ManagedDomain, request manage
 		domain.RecordMode = "a"
 	}
 	switch domain.RecordMode {
-	case "a", "aaaa", "dual":
+	case "a", "aaaa", "dual", "cname":
 	default:
-		return nil, fmt.Errorf("记录模式必须为 a、aaaa 或 dual")
+		return nil, fmt.Errorf("记录模式必须为 a、aaaa、dual 或 cname")
 	}
 	if request.AddressSource != "" {
 		domain.AddressSource = strings.ToLower(strings.TrimSpace(request.AddressSource))
@@ -479,13 +480,25 @@ func (s *Server) buildManagedDomain(current *store.ManagedDomain, request manage
 	default:
 		return nil, fmt.Errorf("地址来源无效")
 	}
+	if domain.RecordMode == "cname" && domain.AddressSource != "manual" {
+		return nil, fmt.Errorf("CNAME 记录只能使用手工指定目标")
+	}
 	if request.ManualIPv4 != "" || current == nil {
 		domain.ManualIPv4 = strings.TrimSpace(request.ManualIPv4)
 	}
 	if request.ManualIPv6 != "" || current == nil {
 		domain.ManualIPv6 = strings.TrimSpace(request.ManualIPv6)
 	}
-	if domain.AddressSource == "manual" {
+	if request.ManualCNAME != "" || current == nil {
+		domain.ManualCNAME = strings.TrimSpace(request.ManualCNAME)
+	}
+	if domain.RecordMode == "cname" {
+		normalized, err := dnsprovider.NormalizeFQDN(domain.ManualCNAME)
+		if err != nil {
+			return nil, fmt.Errorf("必须提供有效的 CNAME 目标域名")
+		}
+		domain.ManualCNAME = normalized
+	} else if domain.AddressSource == "manual" {
 		if (domain.RecordMode == "a" || domain.RecordMode == "dual") &&
 			!validAddressFamily(domain.ManualIPv4, true) {
 			return nil, fmt.Errorf("必须提供有效的手工 IPv4 地址")
@@ -510,6 +523,7 @@ func (s *Server) buildManagedDomain(current *store.ManagedDomain, request manage
 		domain.State = "pending"
 		domain.ObservedIPv4 = []string{}
 		domain.ObservedIPv6 = []string{}
+		domain.ObservedCNAME = []string{}
 	}
 	if request.Enabled != nil {
 		domain.Enabled = *request.Enabled

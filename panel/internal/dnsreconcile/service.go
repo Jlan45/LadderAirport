@@ -132,12 +132,12 @@ func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, no
 	if err != nil {
 		return "", err
 	}
-	previousIPv4, previousIPv6 := domain.DesiredIPv4, domain.DesiredIPv6
-	ipv4, ipv6, note, err := s.desiredAddresses(ctx, domain)
+	previousIPv4, previousIPv6, previousCNAME := domain.DesiredIPv4, domain.DesiredIPv6, domain.DesiredCNAME
+	ipv4, ipv6, cname, note, err := s.desiredAddresses(ctx, domain)
 	if err != nil {
 		return "", err
 	}
-	domain.DesiredIPv4, domain.DesiredIPv6 = ipv4, ipv6
+	domain.DesiredIPv4, domain.DesiredIPv6, domain.DesiredCNAME = ipv4, ipv6, cname
 	zone := dnsprovider.Zone{Name: domain.Zone}
 	name, err := dnsprovider.RelativeName(domain.FQDN, domain.Zone)
 	if err != nil {
@@ -165,6 +165,16 @@ func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, no
 		domain.DesiredIPv6, domain.ObservedIPv6 = "", []string{}
 		domain.ProviderRecordAAAAID, domain.CreatedAAAAByPanel = "", false
 	}
+	if domain.RecordMode != "cname" {
+		if err := cleanupDisabledRecord(
+			opCtx, provider, zone, name, dnsprovider.TypeCNAME, previousCNAME,
+			domain.ProviderRecordCNAMEID, domain.CreatedCNAMEByPanel,
+		); err != nil {
+			return "", secretstoreError(err, credentials)
+		}
+		domain.DesiredCNAME, domain.ObservedCNAME = "", []string{}
+		domain.ProviderRecordCNAMEID, domain.CreatedCNAMEByPanel = "", false
+	}
 	switch domain.RecordMode {
 	case "a":
 		domain.ObservedIPv4, domain.ProviderRecordAID, domain.CreatedAByPanel, err =
@@ -179,6 +189,9 @@ func (s *Service) reconcile(ctx context.Context, domain *store.ManagedDomain, no
 			domain.ObservedIPv6, domain.ProviderRecordAAAAID, domain.CreatedAAAAByPanel, err =
 				reconcileRecord(opCtx, provider, zone, name, dnsprovider.TypeAAAA, ipv6, time.Duration(domain.TTL)*time.Second, domain.CreatedAAAAByPanel)
 		}
+	case "cname":
+		domain.ObservedCNAME, domain.ProviderRecordCNAMEID, domain.CreatedCNAMEByPanel, err =
+			reconcileRecord(opCtx, provider, zone, name, dnsprovider.TypeCNAME, cname, time.Duration(domain.TTL)*time.Second, domain.CreatedCNAMEByPanel)
 	default:
 		return "", fmt.Errorf("记录模式无效：%s", domain.RecordMode)
 	}
@@ -275,43 +288,61 @@ func reconcileRecord(
 	return observed, ref.ID, created, nil
 }
 
-// desiredAddresses resolves the target A/AAAA values. The note return value
-// describes a degraded but usable resolution (agent probe fell back to the
-// node control address); it is empty for the normal path.
-func (s *Service) desiredAddresses(ctx context.Context, domain *store.ManagedDomain) (string, string, string, error) {
+// desiredAddresses resolves the target A/AAAA/CNAME values. The note return
+// value describes a degraded but usable resolution (agent probe fell back to
+// the node control address); it is empty for the normal path.
+func (s *Service) desiredAddresses(ctx context.Context, domain *store.ManagedDomain) (string, string, string, string, error) {
 	switch domain.AddressSource {
 	case "manual":
-		ipv4, ipv6, err := validateDesired(domain.ManualIPv4, domain.ManualIPv6, domain.RecordMode)
-		return ipv4, ipv6, "", err
+		// Manual entries are operator-authored: accept any well-formed address
+		// of the requested family, including private/internal targets. This is
+		// what makes it possible to bind a domain to a machine whose reachable
+		// address differs from its own IP (e.g. a NAT public address, or an
+		// internal split-horizon record). CNAME targets are validated as FQDNs.
+		if domain.RecordMode == "cname" {
+			cname, err := dnsprovider.NormalizeFQDN(domain.ManualCNAME)
+			if err != nil {
+				return "", "", "", "", fmt.Errorf("CNAME 目标域名无效：%w", err)
+			}
+			return "", "", cname, "", nil
+		}
+		ipv4, ipv6, err := validateDesired(domain.ManualIPv4, domain.ManualIPv6, domain.RecordMode, false)
+		return ipv4, ipv6, "", "", err
 	case "node_address":
+		if domain.RecordMode == "cname" {
+			return "", "", "", "", fmt.Errorf("CNAME 记录只能使用手工指定目标")
+		}
 		node, err := s.Store.GetNode(domain.NodeID)
 		if err != nil {
-			return "", "", "", err
+			return "", "", "", "", err
 		}
 		ipv4, ipv6, err := nodeAddressDesired(node, domain.RecordMode)
-		return ipv4, ipv6, "", err
+		return ipv4, ipv6, "", "", err
 	case "agent_public":
+		if domain.RecordMode == "cname" {
+			return "", "", "", "", fmt.Errorf("CNAME 记录只能使用手工指定目标")
+		}
 		if s.DialAgent == nil {
-			return "", "", "", fmt.Errorf("Agent 公网地址连接器不可用")
+			return "", "", "", "", fmt.Errorf("Agent 公网地址连接器不可用")
 		}
 		node, err := s.Store.GetNode(domain.NodeID)
 		if err != nil {
-			return "", "", "", err
+			return "", "", "", "", err
 		}
 		ipv4, ipv6, probeErr := s.probeAgentPublic(ctx, node, domain.RecordMode)
 		if probeErr == nil {
-			return ipv4, ipv6, "", nil
+			return ipv4, ipv6, "", "", nil
 		}
 		// Probe failed (RPC error or no public address reported): fall back
 		// to the node control address when it is itself a usable public IP.
 		fallbackIPv4, fallbackIPv6, fallbackErr := nodeAddressDesired(node, domain.RecordMode)
 		if fallbackErr == nil {
-			return fallbackIPv4, fallbackIPv6,
+			return fallbackIPv4, fallbackIPv6, "",
 				fmt.Sprintf("Agent 公网探测失败（%v），已回退使用节点控制地址", probeErr), nil
 		}
-		return "", "", "", probeErr
+		return "", "", "", "", probeErr
 	default:
-		return "", "", "", fmt.Errorf("地址来源无效：%s", domain.AddressSource)
+		return "", "", "", "", fmt.Errorf("地址来源无效：%s", domain.AddressSource)
 	}
 }
 
@@ -323,9 +354,9 @@ func nodeAddressDesired(node *store.Node, mode string) (string, string, error) {
 		return "", "", fmt.Errorf("节点控制地址不是可用公网 IP")
 	}
 	if address.Is4() {
-		return validateDesired(address.String(), "", mode)
+		return validateDesired(address.String(), "", mode, true)
 	}
-	return validateDesired("", address.String(), mode)
+	return validateDesired("", address.String(), mode, true)
 }
 
 func (s *Service) probeAgentPublic(ctx context.Context, node *store.Node, mode string) (string, string, error) {
@@ -349,27 +380,34 @@ func (s *Service) probeAgentPublic(ctx context.Context, node *store.Node, mode s
 	if err != nil {
 		return "", "", fmt.Errorf("Agent 公网地址探测失败：%w", err)
 	}
-	return validateDesired(response.GetIpv4(), response.GetIpv6(), mode)
+	return validateDesired(response.GetIpv4(), response.GetIpv6(), mode, true)
 }
 
-func validateDesired(ipv4, ipv6, mode string) (string, string, error) {
+func validateDesired(ipv4, ipv6, mode string, requirePublic bool) (string, string, error) {
 	ipv4 = strings.TrimSpace(ipv4)
 	ipv6 = strings.TrimSpace(ipv6)
 	if mode == "a" || mode == "dual" {
 		address, err := netip.ParseAddr(ipv4)
-		if err != nil || !address.Is4() || !publicAddress(address) {
-			return "", "", fmt.Errorf("IPv4 目标地址无效或不是公网地址")
+		if err != nil || !address.Is4() || (requirePublic && !publicAddress(address)) {
+			return "", "", fmt.Errorf("IPv4 目标地址无效%s", publicSuffix(requirePublic))
 		}
 		ipv4 = address.String()
 	}
 	if mode == "aaaa" || mode == "dual" {
 		address, err := netip.ParseAddr(ipv6)
-		if err != nil || !address.Is6() || !publicAddress(address) {
-			return "", "", fmt.Errorf("IPv6 目标地址无效或不是公网地址")
+		if err != nil || !address.Is6() || (requirePublic && !publicAddress(address)) {
+			return "", "", fmt.Errorf("IPv6 目标地址无效%s", publicSuffix(requirePublic))
 		}
 		ipv6 = address.String()
 	}
 	return ipv4, ipv6, nil
+}
+
+func publicSuffix(requirePublic bool) string {
+	if requirePublic {
+		return "或不是公网地址"
+	}
+	return ""
 }
 
 func recordValues(records []dnsprovider.Record) []string {

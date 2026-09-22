@@ -408,17 +408,20 @@ export interface ManagedDomain {
   dns_account_id: string
   zone: string
   fqdn: string
-  record_mode: 'a' | 'aaaa' | 'dual'
+  record_mode: 'a' | 'aaaa' | 'dual' | 'cname'
   address_source: 'manual' | 'node_address' | 'agent_public'
   manual_ipv4?: string
   manual_ipv6?: string
+  manual_cname?: string
   ttl: number
   enabled: boolean
   state: string
   desired_ipv4?: string
   desired_ipv6?: string
+  desired_cname?: string
   observed_ipv4: string[]
   observed_ipv6: string[]
+  observed_cname: string[]
   last_reconcile_unix: number
   next_reconcile_unix: number
   last_error?: string
@@ -1095,10 +1098,11 @@ export function createManagedDomain(body: {
   node_id: string
   dns_account_id: string
   fqdn: string
-  record_mode: 'a' | 'aaaa' | 'dual'
+  record_mode: 'a' | 'aaaa' | 'dual' | 'cname'
   address_source: 'manual' | 'node_address' | 'agent_public'
   manual_ipv4?: string
   manual_ipv6?: string
+  manual_cname?: string
   ttl?: number
 }): Promise<ManagedDomain> {
   return request('POST', '/managed-domains', body)

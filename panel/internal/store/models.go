@@ -443,21 +443,26 @@ type ManagedDomain struct {
 	DNSAccountID         string   `json:"dns_account_id"`
 	Zone                 string   `json:"zone"`
 	FQDN                 string   `json:"fqdn"`
-	RecordMode           string   `json:"record_mode"`    // a | aaaa | dual
+	RecordMode           string   `json:"record_mode"`    // a | aaaa | dual | cname
 	AddressSource        string   `json:"address_source"` // manual | node_address | agent_public
 	ManualIPv4           string   `json:"manual_ipv4,omitempty"`
 	ManualIPv6           string   `json:"manual_ipv6,omitempty"`
+	ManualCNAME          string   `json:"manual_cname,omitempty"`
 	TTL                  int      `json:"ttl"`
 	Enabled              bool     `json:"enabled"`
 	State                string   `json:"state"`
 	DesiredIPv4          string   `json:"desired_ipv4,omitempty"`
 	DesiredIPv6          string   `json:"desired_ipv6,omitempty"`
+	DesiredCNAME         string   `json:"desired_cname,omitempty"`
 	ObservedIPv4         []string `json:"observed_ipv4"`
 	ObservedIPv6         []string `json:"observed_ipv6"`
+	ObservedCNAME        []string `json:"observed_cname"`
 	ProviderRecordAID    string   `json:"provider_record_a_id,omitempty"`
 	ProviderRecordAAAAID string   `json:"provider_record_aaaa_id,omitempty"`
+	ProviderRecordCNAMEID string  `json:"provider_record_cname_id,omitempty"`
 	CreatedAByPanel      bool     `json:"created_a_by_panel"`
 	CreatedAAAAByPanel   bool     `json:"created_aaaa_by_panel"`
+	CreatedCNAMEByPanel  bool     `json:"created_cname_by_panel"`
 	LastReconcileUnix    int64    `json:"last_reconcile_unix"`
 	NextReconcileUnix    int64    `json:"next_reconcile_unix"`
 	RetryCount           int      `json:"retry_count"`

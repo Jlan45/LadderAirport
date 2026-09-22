@@ -9,9 +9,10 @@ import (
 type RecordType string
 
 const (
-	TypeA    RecordType = "A"
-	TypeAAAA RecordType = "AAAA"
-	TypeTXT  RecordType = "TXT"
+	TypeA     RecordType = "A"
+	TypeAAAA  RecordType = "AAAA"
+	TypeTXT   RecordType = "TXT"
+	TypeCNAME RecordType = "CNAME"
 )
 
 type Zone struct {
