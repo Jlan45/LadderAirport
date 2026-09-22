@@ -32,6 +32,12 @@ type Agent interface {
 
 type DialAgent func(ctx context.Context, node store.Node, token string) (Agent, error)
 
+// UplinkClientFunc resolves a live WS-backed Agent for a connected uplink node.
+// When it returns ok=true the node has a real-time channel and the returned
+// Agent drives protocol certificate deployment at parity with the push/gRPC
+// control plane.
+type UplinkClientFunc func(nodeID string) (Agent, bool)
+
 type IssueFunc func(
 	ctx context.Context,
 	account *store.ACMEAccount,
@@ -52,6 +58,10 @@ type Service struct {
 	Coordinator   *sync.Mutex
 	Timeout       time.Duration
 	Now           func() time.Time
+	// UplinkClient, when set, returns a live WS client for a connected uplink
+	// node so immediate protocol certificate deployment reaches it directly
+	// instead of failing.
+	UplinkClient UplinkClientFunc
 }
 
 func (s *Service) Issue(ctx context.Context, certificateID string) (resultErr error) {
@@ -98,17 +108,30 @@ func (s *Service) Issue(ctx context.Context, certificateID string) (resultErr er
 	if token == "" && s.DefaultToken != nil {
 		token = s.DefaultToken()
 	}
-	if node.ControlMode == store.ControlModeUplink {
-		return fmt.Errorf("uplink 节点不支持即时协议证书部署，请改用 push")
-	}
-	if s.DialAgent == nil {
-		return fmt.Errorf("Agent 证书连接器不可用")
-	}
 	opCtx, cancel := context.WithTimeout(ctx, s.timeout())
 	defer cancel()
-	agent, err := s.DialAgent(opCtx, *node, token)
-	if err != nil {
-		return fmt.Errorf("连接 Agent 准备协议证书失败：%w", err)
+	var agent Agent
+	if node.ControlMode == store.ControlModeUplink {
+		// Prefer the live WS uplink so protocol certificate deployment runs in
+		// real time, at parity with a push node's gRPC control plane. Only fail
+		// when no socket exists.
+		client, ok := (Agent)(nil), false
+		if s.UplinkClient != nil {
+			client, ok = s.UplinkClient(certificate.NodeID)
+		}
+		if !ok {
+			return fmt.Errorf("uplink 节点未建立实时通道，无法即时部署协议证书")
+		}
+		agent = client
+	} else {
+		if s.DialAgent == nil {
+			return fmt.Errorf("Agent 证书连接器不可用")
+		}
+		dialed, err := s.DialAgent(opCtx, *node, token)
+		if err != nil {
+			return fmt.Errorf("连接 Agent 准备协议证书失败：%w", err)
+		}
+		agent = dialed
 	}
 	defer func() { _ = agent.Close() }()
 	ping, err := agent.Ping(opCtx)

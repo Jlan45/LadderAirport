@@ -22,6 +22,7 @@ import (
 	"github.com/ladderairport/agent/internal/panelhttp"
 	"github.com/ladderairport/agent/internal/protocolcert"
 	"github.com/ladderairport/agent/internal/uplink"
+	"github.com/ladderairport/agent/internal/uplinkws"
 	"github.com/ladderairport/agent/internal/version"
 	"github.com/ladderairport/pkg/auth"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
@@ -44,6 +45,7 @@ func main() {
 	uplinkReport := flag.Duration("uplink-report-interval", 15*time.Second, "uplink 上报间隔")
 	uplinkConfig := flag.Duration("uplink-config-interval", 60*time.Second, "uplink 配置拉取间隔")
 	uplinkServeGRPC := flag.Bool("uplink-serve-grpc", false, "uplink 模式下仍监听 gRPC 控制端口以保留 push 能力（默认关闭；push 模式始终监听。也可用环境变量 LADDER_UPLINK_SERVE_GRPC=1）")
+	uplinkWS := flag.Bool("uplink-ws", true, "uplink 模式下建立 WebSocket 实时通道，提供与 push/gRPC 完全对齐的即时操作（默认开启；HTTP 上报/配置拉取/命令队列作为降级回退保留。也可用环境变量 LADDER_UPLINK_WS=0 关闭）")
 	showVersion := flag.Bool("version", false, "显示版本后退出")
 	flag.Parse()
 
@@ -70,6 +72,12 @@ func main() {
 		case "1", "true", "yes", "on":
 			*uplinkServeGRPC = true
 		}
+	}
+	// The WS uplink defaults on; allow LADDER_UPLINK_WS=0 to force the HTTP-only
+	// fallback path (report + config-sync + command-queue) without a live socket.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LADDER_UPLINK_WS"))) {
+	case "0", "false", "no", "off":
+		*uplinkWS = false
 	}
 	// serveGRPC decides whether the mTLS gRPC control server is built and listened.
 	// push nodes always serve; uplink nodes skip it unless explicitly opted back in.
@@ -203,6 +211,26 @@ func main() {
 		}
 		go uplinkClient.Run(runCtx)
 		log.Printf("uplink=HTTP 上报间隔=%s 配置拉取间隔=%s", *uplinkReport, *uplinkConfig)
+
+		if *uplinkWS {
+			// The WS uplink is the live channel: Panel drives the full AgentControl
+			// surface (probe, logs, protocol certs, DNS public probe, FRPS, …) over
+			// one socket at parity with push/gRPC. The HTTP paths above remain as a
+			// degraded fallback when the socket is unavailable.
+			wsClient, err := uplinkws.New(uplinkws.Config{
+				PanelURL:    *panelURL,
+				NodeID:      *nodeID,
+				Token:       *token,
+				ReportEvery: *uplinkReport,
+				HTTPClient:  panelHTTP,
+				Server:      srv,
+			})
+			if err != nil {
+				log.Fatalf("初始化 WS uplink 失败：%v", err)
+			}
+			go wsClient.Run(runCtx)
+			log.Printf("uplink=WS 实时通道已启用（与 push/gRPC 完全对齐；HTTP 路径降级回退）")
+		}
 	}
 
 	sigCh := make(chan os.Signal, 1)

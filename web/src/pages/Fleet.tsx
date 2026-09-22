@@ -900,7 +900,15 @@ export default function Fleet() {
                           </button>
                           {n.control_mode === 'uplink' ? (
                             <div className="mt-1">
-                              <Badge variant="outline" className="text-[10px]">HTTP 上行</Badge>
+                              {n.uplink_ws_connected ? (
+                                <Badge variant="outline" className="text-[10px] border-success/40 text-success">
+                                  WS 实时通道
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                  上行离线 · HTTP 回退
+                                </Badge>
+                              )}
                             </div>
                           ) : null}
                         </TableCell>

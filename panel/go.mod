@@ -3,6 +3,7 @@ module github.com/ladderairport/panel
 go 1.26.4
 
 require (
+	github.com/coder/websocket v1.8.13
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/ladderairport/pkg v0.0.0
@@ -15,6 +16,7 @@ require (
 	golang.org/x/net v0.56.0
 	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.82.0
+	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.53.0
 )
@@ -27,7 +29,6 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

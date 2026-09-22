@@ -53,6 +53,7 @@ func (s *Server) handleFleetOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ov := buildOverview(nodes, counts)
+	s.annotateUplinkWS(ov.Nodes)
 	writeJSON(w, http.StatusOK, ov)
 }
 
@@ -94,7 +95,18 @@ func (s *Server) handleFleetRefresh(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 
 	counts, _ := s.Store.CountInboundsByNode()
-	writeJSON(w, http.StatusOK, buildOverview(updated, counts))
+	ov := buildOverview(updated, counts)
+	s.annotateUplinkWS(ov.Nodes)
+	writeJSON(w, http.StatusOK, ov)
+}
+
+// annotateUplinkWS fills UplinkWSConnected for uplink nodes in-place so the UI
+// can distinguish a live WS control channel (full gRPC parity) from an uplink
+// node that is only reachable via the HTTP report/config-sync fallback.
+func (s *Server) annotateUplinkWS(nodes []store.Node) {
+	for i := range nodes {
+		nodes[i].UplinkWSConnected = s.uplinkWSConnected(nodes[i])
+	}
 }
 
 func (s *Server) refreshOneNode(parent context.Context, n store.Node) store.Node {

@@ -182,6 +182,13 @@ export interface Node {
   control_mode?: 'push' | 'uplink'
   desired_runtime?: 'running' | 'stopped'
   uplink_last_seen_unix?: number
+  /**
+   * For uplink nodes: whether a live WebSocket control channel is currently
+   * connected. When true the node supports the full real-time op set at parity
+   * with push/gRPC; when false it only has the HTTP report/config-sync fallback.
+   * Undefined for push nodes (not applicable).
+   */
+  uplink_ws_connected?: boolean
   status: string
   last_seen_unix: number
   config_hash: string

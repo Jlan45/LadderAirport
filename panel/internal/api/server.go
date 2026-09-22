@@ -23,6 +23,7 @@ import (
 	"github.com/ladderairport/panel/internal/secretstore"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
+	"github.com/ladderairport/panel/internal/uplinkhub"
 	"github.com/ladderairport/panel/web"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
@@ -92,6 +93,12 @@ type Server struct {
 	// the uplink command queue for near-instant dispatch.
 	cmdMu      sync.Mutex
 	cmdWaiters map[string]chan struct{}
+
+	// Uplink holds live Agent↔Panel WebSocket connections. When a node has a
+	// live socket here, real-time operations (probe/logs/protocol certs/DNS
+	// probe/FRPS/…) run over it with full gRPC parity; the HTTP report +
+	// config-sync + command-queue paths remain as a degraded fallback.
+	Uplink *uplinkhub.Hub
 }
 
 // Handler returns an http.Handler with all routes, auth middleware, and embedded SPA.
@@ -185,6 +192,11 @@ func isPublicAPI(r *http.Request) bool {
 	if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/agent/commands/") {
 		return true
 	}
+	// Uplink WebSocket: nodes authenticate per-node via Bearer token on the
+	// handshake, not the admin session.
+	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent/uplink" {
+		return true
+	}
 	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/pki/bundle" {
 		return true
 	}
@@ -209,6 +221,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/agent/config-sync", s.handleAgentConfigSync)
 	mux.HandleFunc("GET /api/v1/agent/commands", s.handleAgentPollCommands)
 	mux.HandleFunc("POST /api/v1/agent/commands/{id}/result", s.handleAgentCommandResult)
+	mux.HandleFunc("GET /api/v1/agent/uplink", s.handleAgentUplinkWS)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)
 
@@ -333,21 +346,63 @@ func hasCapability(caps []string, want string) bool {
 	return false
 }
 
-const errUplinkNoLiveRPC = "uplink 节点不支持即时操作，请改用 push 或等待下次配置拉取"
-
-func rejectUplinkLive(w http.ResponseWriter, node *store.Node) bool {
-	if node == nil || node.ControlMode != store.ControlModeUplink {
-		return false
-	}
-	writeError(w, http.StatusConflict, errUplinkNoLiveRPC)
-	return true
-}
+const errUplinkNoLiveRPC = "uplink 节点未建立实时通道，无法即时操作，请改用 push 或等待下次配置拉取"
 
 func (s *Server) liveDial(ctx context.Context, n store.Node, token string) (NodeLive, error) {
 	if s.Dial != nil {
 		return s.Dial(ctx, n, token)
 	}
 	return s.defaultLiveDial(ctx, n, token)
+}
+
+// uplinkClient returns a live WS-backed AgentControl client for a connected
+// uplink node, if one is currently registered in the Hub. The returned client
+// mirrors *nodeclient.Client so live handlers use it exactly like a gRPC dial.
+func (s *Server) uplinkClient(nodeID string) (*uplinkhub.Client, bool) {
+	if s.Uplink == nil {
+		return nil, false
+	}
+	return s.Uplink.Client(nodeID)
+}
+
+// uplinkWSConnected reports whether an uplink node currently has a live WS
+// socket, as an optional bool suitable for the store.Node display field. It
+// returns nil for non-uplink nodes (the field is only meaningful for uplink).
+func (s *Server) uplinkWSConnected(node store.Node) *bool {
+	if node.ControlMode != store.ControlModeUplink {
+		return nil
+	}
+	connected := false
+	if s.Uplink != nil {
+		connected = s.Uplink.Connected(node.ID)
+	}
+	return &connected
+}
+
+// liveClientFor resolves a live AgentControl client for node so a handler can
+// run the exact same RPC path for push and uplink nodes.
+//
+//   - push node: dials the gRPC control port.
+//   - uplink node with a live WS socket: returns the WS-backed client, achieving
+//     full parity with the gRPC control plane.
+//   - uplink node with no live socket: returns ok=false, err=nil so the caller
+//     runs its degraded HTTP fallback (command-queue enqueue / cached report).
+//   - dial/connect failure: returns ok=false, err!=nil (suitable for 502).
+//
+// When ok=true the caller owns the client and must Close it; the WS client's
+// Close is a no-op since the Hub owns the socket.
+func (s *Server) liveClientFor(ctx context.Context, node *store.Node) (NodeLive, bool, error) {
+	if node.ControlMode == store.ControlModeUplink {
+		if client, connected := s.uplinkClient(node.ID); connected {
+			return client, true, nil
+		}
+		return nil, false, nil
+	}
+	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	if err != nil {
+		return nil, false, err
+	}
+	return client, true, nil
 }
 
 func (s *Server) defaultLiveDial(ctx context.Context, n store.Node, token string) (NodeLive, error) {

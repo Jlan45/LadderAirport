@@ -67,8 +67,13 @@ type Node struct {
 	MetricsAtUnix  int64    `json:"metrics_at_unix"`
 	LastError      string   `json:"last_error,omitempty"`
 	InboundCount   int      `json:"inbound_count,omitempty"` // filled by overview, not persisted
-	CreatedAtUnix  int64    `json:"created_at_unix"`
-	UpdatedAtUnix  int64    `json:"updated_at_unix"`
+	// UplinkWSConnected reports whether an uplink node currently holds a live
+	// WebSocket control channel. It is computed by the API from the uplink Hub
+	// at read time (not persisted) and only set for uplink nodes; nil means
+	// "not applicable" (push node) or "not computed".
+	UplinkWSConnected *bool `json:"uplink_ws_connected,omitempty"`
+	CreatedAtUnix     int64 `json:"created_at_unix"`
+	UpdatedAtUnix     int64 `json:"updated_at_unix"`
 }
 
 // FRPServerPortRange limits the remote proxy ports that FRPS may allocate.

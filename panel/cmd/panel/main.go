@@ -26,6 +26,7 @@ import (
 	"github.com/ladderairport/panel/internal/secretstore"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
+	"github.com/ladderairport/panel/internal/uplinkhub"
 	"github.com/ladderairport/panel/internal/version"
 )
 
@@ -199,6 +200,18 @@ func main() {
 	agg := subscription.NewAggregator(st)
 	chainService := proxychain.NewService(st, runner.ConfigBuilder, runner.Coordinator)
 	chainService.PKI = ca
+	uplinkHub := uplinkhub.NewHub()
+	// Wire the live WS uplink into every service that must reach a connected
+	// uplink node in real time, at parity with the push/gRPC control plane.
+	chainService.UplinkClient = func(nodeID string) (proxychain.Agent, bool) {
+		return uplinkHub.Client(nodeID)
+	}
+	certificateService.UplinkClient = func(nodeID string) (certmanager.Agent, bool) {
+		return uplinkHub.Client(nodeID)
+	}
+	dnsService.UplinkClient = func(nodeID string) (dnsreconcile.Agent, bool) {
+		return uplinkHub.Client(nodeID)
+	}
 	srv := &api.Server{
 		Store:        st,
 		Runner:       runner,
@@ -209,6 +222,7 @@ func main() {
 		Secrets:      secrets,
 		DNSProviders: dnsRegistry,
 		ACME:         acmeService,
+		Uplink:       uplinkHub,
 	}
 
 	addr := *listen

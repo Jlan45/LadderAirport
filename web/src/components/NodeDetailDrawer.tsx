@@ -816,7 +816,11 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                       <Badge variant={runtimeTheme(node.runtime_state)}>{runtimeLabel(node.runtime_state)}</Badge>
                     ) : null}
                     {node.control_mode === 'uplink' ? (
-                      <Badge variant="outline">HTTP 上行</Badge>
+                      node.uplink_ws_connected ? (
+                        <Badge variant="outline" className="border-success/40 text-success">WS 实时通道</Badge>
+                      ) : (
+                        <Badge variant="outline">上行离线 · HTTP 回退</Badge>
+                      )
                     ) : null}
                     {installInfo ? (
                       isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (

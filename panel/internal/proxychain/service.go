@@ -26,12 +26,20 @@ type Agent interface {
 
 type DialFunc func(context.Context, store.Node, string) (Agent, error)
 
+// UplinkClientFunc resolves a live WS-backed Agent for a connected uplink node.
+// When it returns ok=true the node has a real-time channel and the returned
+// Agent drives it at parity with the push/gRPC control plane.
+type UplinkClientFunc func(nodeID string) (Agent, bool)
+
 type Service struct {
 	Store       *store.Store
 	Builder     *nodeconfig.Builder
 	Dial        DialFunc
 	Coordinator *sync.Mutex
 	PKI         *pki.Manager
+	// UplinkClient, when set, returns a live WS client for a connected uplink
+	// node so immediate outbound probes reach it directly instead of failing.
+	UplinkClient UplinkClientFunc
 }
 
 func NewService(st *store.Store, builder *nodeconfig.Builder, coordinator *sync.Mutex) *Service {
@@ -442,7 +450,15 @@ func (s *Service) probeNode(ctx context.Context, nodeID, tag, targetURL string) 
 		return nil, err
 	}
 	if node.ControlMode == store.ControlModeUplink {
-		return nil, fmt.Errorf("uplink 节点不支持即时出站探测")
+		// Prefer the live WS uplink so the probe runs in real time, at parity
+		// with a push node's gRPC control plane. Only fail when no socket exists.
+		if s.UplinkClient != nil {
+			if client, ok := s.UplinkClient(nodeID); ok {
+				defer func() { _ = client.Close() }()
+				return client.ProbeOutbound(ctx, tag, targetURL)
+			}
+		}
+		return nil, fmt.Errorf("uplink 节点未建立实时通道，无法即时出站探测")
 	}
 	client, err := s.Dial(ctx, *node, s.token(*node))
 	if err != nil {

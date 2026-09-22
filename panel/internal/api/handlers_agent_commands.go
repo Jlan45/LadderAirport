@@ -138,12 +138,13 @@ func (s *Server) enqueueUplinkCommand(w http.ResponseWriter, nodeID, cmdType str
 	return true
 }
 
-// enqueueIfUplink is the uplink fast-path for capability-gated live handlers
+// enqueueIfUplink is the uplink fallback for capability-gated live handlers
 // (sysmetrics/bbr). It loads the node by path ID; when the node runs in uplink
-// mode it enforces the capability gate and enqueues the command, returning true
-// so the caller returns immediately. For push nodes it returns false and the
-// caller proceeds with the normal live dial. Any error response is written
-// here and also returns true.
+// mode WITHOUT a live WS socket it enforces the capability gate and enqueues the
+// command, returning true so the caller returns immediately. When the uplink
+// node has a live socket it returns false so the caller runs the shared live
+// path over WS (full gRPC parity). For push nodes it returns false. Any error
+// response is written here and also returns true.
 func (s *Server) enqueueIfUplink(w http.ResponseWriter, r *http.Request, capability, cmdType string, payload any) bool {
 	node, err := s.Store.GetNode(pathID(r))
 	if err != nil {
@@ -155,6 +156,11 @@ func (s *Server) enqueueIfUplink(w http.ResponseWriter, r *http.Request, capabil
 		return true
 	}
 	if node.ControlMode != store.ControlModeUplink {
+		return false
+	}
+	// A live WS socket makes the uplink node behave like a push node: let the
+	// caller run the real-time RPC path instead of queuing a command.
+	if _, connected := s.uplinkClient(node.ID); connected {
 		return false
 	}
 	if capability != "" && len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, capability) {

@@ -59,6 +59,11 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Annotate uplink nodes with their live WS channel state so the UI can show
+	// whether a node currently supports full real-time (gRPC-parity) ops.
+	for i := range list {
+		list[i].UplinkWSConnected = s.uplinkWSConnected(list[i])
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -660,24 +665,40 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if node.ControlMode == store.ControlModeUplink {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":            node.Status == "online",
-			"status":        node.Status,
-			"agent_version": node.AgentVersion,
-			"capabilities":  node.Capabilities,
-			"message":       "uplink 节点使用最近一次上报，不发起拨号",
-		})
-		return
+		// Prefer the live WS uplink so probe hits the agent in real time, at
+		// parity with a push node's gRPC control plane. Fall back to the last
+		// report only when no socket is connected.
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok":            node.Status == "online",
+				"status":        node.Status,
+				"agent_version": node.AgentVersion,
+				"capabilities":  node.Capabilities,
+				"message":       "uplink 节点未建立实时通道，使用最近一次上报",
+			})
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
 	defer cancel()
 
-	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	client, live, err := s.liveClientFor(ctx, node)
 	if err != nil {
 		node.Status = "unreachable"
 		_ = s.Store.UpdateNode(node)
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
+		return
+	}
+	if !live {
+		// Uplink node lost its socket between the check above and now.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            node.Status == "online",
+			"status":        node.Status,
+			"agent_version": node.AgentVersion,
+			"capabilities":  node.Capabilities,
+			"message":       "uplink 节点未建立实时通道，使用最近一次上报",
+		})
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -715,6 +736,7 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	node.UplinkWSConnected = s.uplinkWSConnected(*node)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"node":            node,
 		"agent_version":   resp.GetAgentVersion(),
@@ -735,6 +757,29 @@ func (s *Server) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if node.ControlMode == store.ControlModeUplink {
+		// Serve the cached report unless a live WS socket lets us query the
+		// agent directly for fresh counters.
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"connections":      node.Connections,
+				"uplink_bytes":     node.UplinkBytes,
+				"downlink_bytes":   node.DownlinkBytes,
+				"cpu_percent":      node.CPUPercent,
+				"memory_rss_bytes": node.MemoryRSSBytes,
+			})
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
+	defer cancel()
+
+	client, live, err := s.liveClientFor(ctx, node)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
+		return
+	}
+	if !live {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"connections":      node.Connections,
 			"uplink_bytes":     node.UplinkBytes,
@@ -742,15 +787,6 @@ func (s *Server) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
 			"cpu_percent":      node.CPUPercent,
 			"memory_rss_bytes": node.MemoryRSSBytes,
 		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
-	defer cancel()
-
-	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
-	if err != nil {
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -781,16 +817,24 @@ func (s *Server) handleNodeInterfaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if node.ControlMode == store.ControlModeUplink {
-		s.enqueueUplinkCommand(w, node.ID, cmdInterfaces, nil)
-		return
+		// Prefer the live WS socket; only enqueue a queued command when the node
+		// has no real-time channel.
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			s.enqueueUplinkCommand(w, node.ID, cmdInterfaces, nil)
+			return
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
 	defer cancel()
 
-	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	client, live, err := s.liveClientFor(ctx, node)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
+		return
+	}
+	if !live {
+		s.enqueueUplinkCommand(w, node.ID, cmdInterfaces, nil)
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -838,8 +882,13 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if rejectUplinkLive(w, node) {
-		return
+	if node.ControlMode == store.ControlModeUplink {
+		// Live log streaming requires a real-time channel. The WS uplink provides
+		// one at parity with gRPC; without it, uplink has no way to stream.
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			writeError(w, http.StatusConflict, errUplinkNoLiveRPC)
+			return
+		}
 	}
 
 	level := r.URL.Query().Get("level")
@@ -866,9 +915,13 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	client, live, err := s.liveClientFor(ctx, node)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
+		return
+	}
+	if !live {
+		writeError(w, http.StatusConflict, errUplinkNoLiveRPC)
 		return
 	}
 	defer func() { _ = client.Close() }()
@@ -947,13 +1000,17 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if node.ControlMode == store.ControlModeUplink {
-		s.enqueueUplinkCommand(w, node.ID, cmdUpgrade, upgradeCommandPayload{
-			Version:     version,
-			Repo:        strings.TrimSpace(body.Repo),
-			DownloadURL: strings.TrimSpace(body.DownloadURL),
-			SHA256:      strings.TrimSpace(body.SHA256),
-		})
-		return
+		// Prefer the live WS socket for an immediate staged upgrade; enqueue a
+		// queued command only when the node has no real-time channel.
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			s.enqueueUplinkCommand(w, node.ID, cmdUpgrade, upgradeCommandPayload{
+				Version:     version,
+				Repo:        strings.TrimSpace(body.Repo),
+				DownloadURL: strings.TrimSpace(body.DownloadURL),
+				SHA256:      strings.TrimSpace(body.SHA256),
+			})
+			return
+		}
 	}
 
 	// Staging + download may take longer than a normal probe.
@@ -964,9 +1021,18 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	client, live, err := s.liveClientFor(ctx, node)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
+		return
+	}
+	if !live {
+		s.enqueueUplinkCommand(w, node.ID, cmdUpgrade, upgradeCommandPayload{
+			Version:     version,
+			Repo:        strings.TrimSpace(body.Repo),
+			DownloadURL: strings.TrimSpace(body.DownloadURL),
+			SHA256:      strings.TrimSpace(body.SHA256),
+		})
 		return
 	}
 	defer func() { _ = client.Close() }()

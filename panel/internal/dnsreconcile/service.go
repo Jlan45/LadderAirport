@@ -25,6 +25,12 @@ type Agent interface {
 
 type DialAgent func(ctx context.Context, node store.Node, token string) (Agent, error)
 
+// UplinkClientFunc resolves a live WS-backed Agent for a connected uplink node.
+// When it returns ok=true the node has a real-time channel and the returned
+// Agent drives public address probing at parity with the push/gRPC control
+// plane.
+type UplinkClientFunc func(nodeID string) (Agent, bool)
+
 type Service struct {
 	Store        *store.Store
 	Secrets      *secretstore.Store
@@ -33,6 +39,10 @@ type Service struct {
 	DefaultToken func() string
 	Timeout      time.Duration
 	Now          func() time.Time
+	// UplinkClient, when set, returns a live WS client for a connected uplink
+	// node so immediate public address probes reach it directly instead of
+	// failing.
+	UplinkClient UplinkClientFunc
 }
 
 func (s *Service) Reconcile(ctx context.Context, domainID string) error {
@@ -364,14 +374,26 @@ func (s *Service) probeAgentPublic(ctx context.Context, node *store.Node, mode s
 	if token == "" && s.DefaultToken != nil {
 		token = s.DefaultToken()
 	}
-	if node.ControlMode == store.ControlModeUplink {
-		return "", "", fmt.Errorf("uplink 节点不支持即时公网探测")
-	}
 	opCtx, cancel := context.WithTimeout(ctx, s.timeout())
 	defer cancel()
-	client, err := s.DialAgent(opCtx, *node, token)
-	if err != nil {
-		return "", "", fmt.Errorf("连接 Agent 获取公网地址失败：%w", err)
+	var client Agent
+	if node.ControlMode == store.ControlModeUplink {
+		// Prefer the live WS uplink so the probe runs in real time, at parity
+		// with a push node's gRPC control plane. Only fail when no socket exists.
+		live, ok := (Agent)(nil), false
+		if s.UplinkClient != nil {
+			live, ok = s.UplinkClient(node.ID)
+		}
+		if !ok {
+			return "", "", fmt.Errorf("uplink 节点未建立实时通道，无法即时公网探测")
+		}
+		client = live
+	} else {
+		dialed, err := s.DialAgent(opCtx, *node, token)
+		if err != nil {
+			return "", "", fmt.Errorf("连接 Agent 获取公网地址失败：%w", err)
+		}
+		client = dialed
 	}
 	defer func() { _ = client.Close() }()
 	want4 := mode == "a" || mode == "dual"

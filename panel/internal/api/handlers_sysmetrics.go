@@ -31,9 +31,13 @@ const (
 	errAgentTooOld = "agent 版本过旧，不支持该功能，请先升级节点"
 )
 
-// dialNodeCapability fetches the node, enforces the capability gate and dials
-// the agent. It writes the error response and returns ok=false on failure;
-// the caller must then return.
+// dialNodeCapability fetches the node, enforces the capability gate and
+// resolves a live client. For push nodes it dials the gRPC control port; for
+// uplink nodes with a live WS socket it returns the WS-backed client (full
+// gRPC parity). Uplink nodes without a socket are handled earlier by
+// enqueueIfUplink, so reaching here without a live socket yields a 409. It
+// writes the error response and returns ok=false on failure; the caller must
+// then return.
 func (s *Server) dialNodeCapability(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -48,18 +52,19 @@ func (s *Server) dialNodeCapability(
 		writeError(w, status, err.Error())
 		return nil, false
 	}
-	if rejectUplinkLive(w, node) {
-		return nil, false
-	}
 	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, capability) {
 		writeError(w, http.StatusBadRequest, errAgentTooOld)
 		return nil, false
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
 	defer cancel()
-	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+	client, live, err := s.liveClientFor(ctx, node)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
+		return nil, false
+	}
+	if !live {
+		writeError(w, http.StatusConflict, errUplinkNoLiveRPC)
 		return nil, false
 	}
 	return client, true

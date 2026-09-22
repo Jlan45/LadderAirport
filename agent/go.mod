@@ -3,6 +3,7 @@ module github.com/ladderairport/agent
 go 1.26.4
 
 require (
+	github.com/coder/websocket v1.8.13
 	github.com/fatedier/frp v0.0.0-00010101000000-000000000000
 	github.com/ladderairport/pkg v0.0.0
 	github.com/ladderairport/proto v0.0.0
@@ -10,6 +11,7 @@ require (
 	github.com/sagernet/sing-box v1.12.22
 	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.82.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -26,7 +28,6 @@ require (
 	github.com/caddyserver/certmagic v0.23.0 // indirect
 	github.com/caddyserver/zerossl v0.1.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coder/websocket v1.8.13 // indirect
 	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
 	github.com/coreos/go-oidc/v3 v3.14.1 // indirect
 	github.com/cretz/bine v0.2.0 // indirect
@@ -153,7 +154,6 @@ require (
 	golang.zx2c4.com/wireguard v0.0.0-20231211153847-12269c276173 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	k8s.io/apimachinery v0.28.8 // indirect

@@ -88,6 +88,18 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authenticateAgentNode(w, r, req.NodeID); !ok {
 		return
 	}
+	applied, err := s.Store.ApplyNodeReport(req.NodeID, reportFromRequest(req))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": applied})
+}
+
+// reportFromRequest maps a decoded agent report body onto a store.NodeReport.
+// It is shared by the HTTP report endpoint and the WebSocket uplink so both
+// transports update node state identically.
+func reportFromRequest(req agentReportRequest) store.NodeReport {
 	report := store.NodeReport{
 		CollectedAtUnix: req.CollectedAtUnix,
 		Status:          "online",
@@ -120,12 +132,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 			report.MemoryRSSBytes = *req.MemoryRSSBytes
 		}
 	}
-	applied, err := s.Store.ApplyNodeReport(req.NodeID, report)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": applied})
+	return report
 }
 
 func (s *Server) handleAgentConfigHead(w http.ResponseWriter, r *http.Request) {

@@ -192,8 +192,13 @@ func (s *Server) handlePutNodeFRPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if node.ControlMode == store.ControlModeUplink {
-		s.writeFRPSConfig(w, node, config, generatedToken)
-		return
+		// Without a live WS socket the uplink node applies FRPS via config-sync;
+		// just persist and return. With a socket we fall through to the shared
+		// live apply path below (full gRPC parity).
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			s.writeFRPSConfig(w, node, config, generatedToken)
+			return
+		}
 	}
 
 	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, "frps-v1") {
@@ -207,8 +212,13 @@ func (s *Server) handlePutNodeFRPS(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
 	defer cancel()
-	client, frpsClient, ok := s.dialNodeFRPS(w, ctx, node)
+	client, frpsClient, live, ok := s.dialNodeFRPS(w, ctx, node)
 	if !ok {
+		return
+	}
+	if !live {
+		// Uplink node lost its socket between the check above and now.
+		s.writeFRPSConfig(w, node, config, generatedToken)
 		return
 	}
 	defer client.Close()
@@ -263,8 +273,12 @@ func (s *Server) handleGetNodeFRPSMappings(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusConflict, "节点 Agent 不支持 FRPS 在线映射，请先升级 Agent")
 			return
 		}
-		s.enqueueUplinkCommand(w, node.ID, cmdFRPSMappings, nil)
-		return
+		// Prefer the live WS socket; only enqueue a queued command when the node
+		// has no real-time channel.
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			s.enqueueUplinkCommand(w, node.ID, cmdFRPSMappings, nil)
+			return
+		}
 	}
 	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, "frps-mappings-v1") {
 		writeError(w, http.StatusConflict, "节点 Agent 不支持 FRPS 在线映射，请先升级 Agent")
@@ -272,8 +286,12 @@ func (s *Server) handleGetNodeFRPSMappings(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
 	defer cancel()
-	client, _, ok := s.dialNodeFRPS(w, ctx, node)
+	client, _, live, ok := s.dialNodeFRPS(w, ctx, node)
 	if !ok {
+		return
+	}
+	if !live {
+		s.enqueueUplinkCommand(w, node.ID, cmdFRPSMappings, nil)
 		return
 	}
 	defer client.Close()
@@ -347,14 +365,16 @@ func (s *Server) handleNodeFRPSAction(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 	if node.ControlMode == store.ControlModeUplink && action != "status" {
-		// start/stop are immediate runtime ops; enqueue for the uplink node to
-		// execute locally instead of dialing its (absent) control port.
-		cmdType := cmdFRPSStart
-		if action == "stop" {
-			cmdType = cmdFRPSStop
+		// start/stop are immediate runtime ops. Prefer the live WS socket; only
+		// enqueue a queued command when the node has no real-time channel.
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			cmdType := cmdFRPSStart
+			if action == "stop" {
+				cmdType = cmdFRPSStop
+			}
+			s.enqueueUplinkCommand(w, node.ID, cmdType, nil)
+			return
 		}
-		s.enqueueUplinkCommand(w, node.ID, cmdType, nil)
-		return
 	}
 	config, err := s.Store.GetFRPServerConfig(nodeID)
 	if err != nil {
@@ -366,13 +386,25 @@ func (s *Server) handleNodeFRPSAction(w http.ResponseWriter, r *http.Request, ac
 		return
 	}
 	if node.ControlMode == store.ControlModeUplink {
-		s.writeFRPSConfig(w, node, config, "")
-		return
+		// A "status" read (or an uplink node without a live socket for start/stop)
+		// serves the cached config; live start/stop below runs over the WS socket.
+		if action == "status" {
+			s.writeFRPSConfig(w, node, config, "")
+			return
+		}
+		if _, connected := s.uplinkClient(node.ID); !connected {
+			s.writeFRPSConfig(w, node, config, "")
+			return
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
 	defer cancel()
-	client, frpsClient, ok := s.dialNodeFRPS(w, ctx, node)
+	client, frpsClient, live, ok := s.dialNodeFRPS(w, ctx, node)
 	if !ok {
+		return
+	}
+	if !live {
+		s.writeFRPSConfig(w, node, config, "")
 		return
 	}
 	defer client.Close()
@@ -415,23 +447,31 @@ func (s *Server) handleNodeFRPSAction(w http.ResponseWriter, r *http.Request, ac
 	s.writeFRPSConfig(w, node, config, "")
 }
 
+// dialNodeFRPS resolves a live FRPS-capable client for node. For push nodes it
+// dials the gRPC control port; for uplink nodes with a live WS socket it returns
+// the WS-backed client (full gRPC parity). When the node is uplink WITHOUT a
+// live socket it returns ok=true, live=false so the caller runs its degraded
+// path (persist + config-sync). ok=false means an error response was written.
 func (s *Server) dialNodeFRPS(
 	w http.ResponseWriter,
 	ctx context.Context,
 	node *store.Node,
-) (NodeLive, NodeFRPS, bool) {
-	client, err := s.liveDial(ctx, *node, s.nodeToken(node))
+) (NodeLive, NodeFRPS, bool, bool) {
+	client, live, err := s.liveClientFor(ctx, node)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, fmt.Sprintf("连接节点失败：%v", err))
-		return nil, nil, false
+		return nil, nil, false, false
+	}
+	if !live {
+		return nil, nil, true, false
 	}
 	frpsClient, ok := client.(NodeFRPS)
 	if !ok {
 		_ = client.Close()
 		writeError(w, http.StatusConflict, "节点 Agent 不支持 FRPS 管理，请先升级 Agent")
-		return nil, nil, false
+		return nil, nil, false, false
 	}
-	return client, frpsClient, true
+	return client, frpsClient, true, true
 }
 
 func normalizeFRPSRequest(request frpsConfigRequest) frpsDesiredConfig {

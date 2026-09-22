@@ -128,7 +128,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
               <Info className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
               <div>
                 创建节点并生成一次性注册命令。目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。
-                请先在「设置」填写 HTTPS Public Base URL。push 由 Panel 拨号 gRPC；uplink 由 Agent 复用同一套 Panel HTTP 定时上报并拉配置，无需入站端口。
+                请先在「设置」填写 HTTPS Public Base URL。push 由 Panel 拨号 gRPC；uplink 由 Agent 主动建立 WebSocket 长连接（与 gRPC 能力完全对齐、实时双向下发），断线时自动回退到 HTTP 定时上报并拉配置，无需入站端口。
               </div>
             </div>
 
@@ -160,12 +160,12 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                   </SelectTrigger>
                   <SelectContent className="bg-popover border-border">
                     <SelectItem value="push">push（Panel 拨号 gRPC）</SelectItem>
-                    <SelectItem value="uplink">uplink（Agent HTTP 上报 / 拉配置）</SelectItem>
+                    <SelectItem value="uplink">uplink（Agent WebSocket 长连接）</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {controlMode === 'uplink'
-                    ? '节点主动访问 Panel HTTP（与证书续签同一入口）。下发最多延迟一个拉取周期，默认 60 秒。'
+                    ? '节点主动建立 WebSocket 长连接（复用 HTTPS 入口，无需入站端口），与 gRPC 能力完全对齐、实时双向下发；断线时自动回退到 HTTP 定时上报/拉配置。'
                     : 'Panel 主动拨号 Agent gRPC。NAT 后需要映射或 VPN。'}
                 </p>
               </div>

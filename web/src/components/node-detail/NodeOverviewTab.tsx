@@ -191,7 +191,7 @@ export function NodeOverviewTab({
           <h3 className="text-sm font-semibold text-foreground">Panel 控制面</h3>
           <p className="text-xs text-muted-foreground">
             {editControlMode === 'uplink'
-              ? 'Agent 主动访问 Panel HTTP 上报并拉配置，不必被 Panel 拨到。下发最多延迟一个拉取周期。'
+              ? 'Agent 主动建立 WebSocket 长连接（与 gRPC 能力完全对齐、实时双向下发），无需被 Panel 拨到；断线时自动回退 HTTP 上报/拉配置。'
               : 'Panel 拨号用。NAT 时填映射后的公网/VPN 地址与外部 gRPC 端口。'}
           </p>
         </div>
@@ -210,12 +210,12 @@ export function NodeOverviewTab({
             <SelectContent className="bg-popover border-border">
               <SelectItem value="push">push（Panel 拨号 gRPC）</SelectItem>
               <SelectItem value="uplink" disabled={!canUplink}>
-                uplink（Agent HTTP 上报 / 拉配置）
+                uplink（Agent WebSocket 长连接）
               </SelectItem>
             </SelectContent>
           </Select>
           {!canUplink ? (
-            <p className="text-xs text-muted-foreground">当前 Agent 未上报 uplink-v1，升级后再切换。</p>
+            <p className="text-xs text-muted-foreground">当前 Agent 未上报 uplink 能力，升级后再切换。</p>
           ) : null}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
