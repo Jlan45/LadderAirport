@@ -283,6 +283,12 @@ func (s *Service) preflight(ctx context.Context, chain store.ProxyChain) error {
 		if err != nil {
 			return err
 		}
+		if node.ControlMode == store.ControlModeUplink {
+			if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, Capability) {
+				return fmt.Errorf("第 %d 跳的 Agent 必须升级：缺少能力 %s", i+1, Capability)
+			}
+			continue
+		}
 		client, err := s.Dial(ctx, *node, s.token(*node))
 		if err != nil {
 			return fmt.Errorf("第 %d 跳连接失败：%w", i+1, err)
@@ -306,6 +312,14 @@ func (s *Service) applyOrdered(ctx context.Context, order []string, configs map[
 		node, err := s.Store.GetNode(nodeID)
 		if err != nil {
 			return changed, err
+		}
+		if node.ControlMode == store.ControlModeUplink {
+			if err := s.Store.SaveSnapshot(&store.ConfigSnapshot{
+				NodeID: nodeID, ConfigJSON: cfg.JSON, ConfigHash: cfg.Hash, TaskID: taskID,
+			}); err != nil {
+				return changed, err
+			}
+			continue
 		}
 		client, err := s.Dial(ctx, *node, s.token(*node))
 		if err != nil {
@@ -426,6 +440,9 @@ func (s *Service) probeNode(ctx context.Context, nodeID, tag, targetURL string) 
 	node, err := s.Store.GetNode(nodeID)
 	if err != nil {
 		return nil, err
+	}
+	if node.ControlMode == store.ControlModeUplink {
+		return nil, fmt.Errorf("uplink 节点不支持即时出站探测")
 	}
 	client, err := s.Dial(ctx, *node, s.token(*node))
 	if err != nil {

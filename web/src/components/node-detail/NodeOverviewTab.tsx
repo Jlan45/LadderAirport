@@ -34,6 +34,9 @@ export interface NodeOverviewTabProps {
   setEditEgress: (v: string) => void
   editDDNS: boolean
   setEditDDNS: (v: boolean) => void
+  editControlMode: 'push' | 'uplink'
+  setEditControlMode: (v: 'push' | 'uplink') => void
+  canUplink: boolean
   connectionErrors: ConnectionErrors
   clearConnectionError: (f: keyof ConnectionErrors) => void
   onSaveConnection: () => void
@@ -68,6 +71,9 @@ export function NodeOverviewTab({
   setEditEgress,
   editDDNS,
   setEditDDNS,
+  editControlMode,
+  setEditControlMode,
+  canUplink,
   connectionErrors,
   clearConnectionError,
   onSaveConnection,
@@ -184,8 +190,33 @@ export function NodeOverviewTab({
         <div className="space-y-1">
           <h3 className="text-sm font-semibold text-foreground">Panel 控制面</h3>
           <p className="text-xs text-muted-foreground">
-            Panel 拨号用。NAT 时填映射后的公网/VPN 地址与外部 gRPC 端口。
+            {editControlMode === 'uplink'
+              ? 'Agent 主动访问 Panel HTTP 上报并拉配置，不必被 Panel 拨到。下发最多延迟一个拉取周期。'
+              : 'Panel 拨号用。NAT 时填映射后的公网/VPN 地址与外部 gRPC 端口。'}
           </p>
+        </div>
+        <div className="flex flex-col space-y-1.5">
+          <Label htmlFor="node-edit-control-mode" className="text-muted-foreground">
+            控制模式
+          </Label>
+          <Select
+            value={editControlMode}
+            onValueChange={(value) => setEditControlMode(value as 'push' | 'uplink')}
+            disabled={busy}
+          >
+            <SelectTrigger id="node-edit-control-mode">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover border-border">
+              <SelectItem value="push">push（Panel 拨号 gRPC）</SelectItem>
+              <SelectItem value="uplink" disabled={!canUplink}>
+                uplink（Agent HTTP 上报 / 拉配置）
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {!canUplink ? (
+            <p className="text-xs text-muted-foreground">当前 Agent 未上报 uplink-v1，升级后再切换。</p>
+          ) : null}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex flex-col space-y-1.5">

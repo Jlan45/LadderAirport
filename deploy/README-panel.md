@@ -144,13 +144,28 @@ sudo ufw allow from 10.0.0.0/8 to any port 8080 proto tcp
 
 生产建议用 **Caddy / Nginx** 终结 HTTPS，反代到 `127.0.0.1:8080`，并把 `LADDER_LISTEN` 改为 `127.0.0.1:8080`。
 
-Caddy 示例：
+Caddy 示例（TLS 在 Caddy 终结；Agent 的 keep-alive 复用的是到 Caddy 的 HTTPS 连接）：
 
 ```caddy
+{
+    servers {
+        timeouts {
+            idle 3m
+        }
+    }
+}
+
 panel.example.com {
-    reverse_proxy 127.0.0.1:8080
+    reverse_proxy 127.0.0.1:8080 {
+        transport http {
+            keepalive 3m
+            keepalive_idle_conns 8
+        }
+    }
 }
 ```
+
+`idle` 是 Caddy 对浏览器 / Agent 的 HTTPS 空闲超时，需大于 Agent 上报间隔（默认 15s）和配置探测间隔（默认 60s）。后面的 `keepalive` 只作用于 Caddy → `127.0.0.1:8080` 这一段明文，与 TLS 握手无关。
 
 Nginx 示例：
 

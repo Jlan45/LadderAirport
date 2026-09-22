@@ -109,6 +109,10 @@ export interface Node {
   egress_interface?: string
   /** When false, managed domains with address_source=agent_public pause probing. */
   ddns_enabled?: boolean
+  /** push = Panel dials Agent gRPC; uplink = Agent reports/pulls over Panel HTTP. */
+  control_mode?: 'push' | 'uplink'
+  desired_runtime?: 'running' | 'stopped'
+  uplink_last_seen_unix?: number
   status: string
   last_seen_unix: number
   config_hash: string
@@ -581,6 +585,7 @@ export interface CreateNodeInput {
   public_address?: string
   token?: string
   labels?: string[]
+  control_mode?: 'push' | 'uplink'
 }
 
 export interface UpdateNodeInput {
@@ -593,6 +598,7 @@ export interface UpdateNodeInput {
   egress_interface?: string
   port_mappings?: PortMapping[]
   ddns_enabled?: boolean
+  control_mode?: 'push' | 'uplink'
 }
 
 export interface BootstrapNodeInput {
@@ -603,6 +609,7 @@ export interface BootstrapNodeInput {
   token?: string
   labels?: string[]
   agent_version?: string
+  control_mode?: 'push' | 'uplink'
 }
 
 export interface NodeInstallInfo {

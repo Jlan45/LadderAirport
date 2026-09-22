@@ -1,0 +1,131 @@
+# Agent 上行（uplink）
+
+LadderAirport 默认用 push 模式管控节点：`浏览器 → Panel → mTLS gRPC → Agent`，由 Panel 主动拨号 Agent 的 gRPC 控制口。这要求 Agent 有公网可达地址或端口映射，NAT / 无公网 IP 的节点无法接入。
+
+uplink 模式反过来由 Agent 主动出站访问 Panel HTTP，复用**证书续签已经在走的同一入口**（`panelhttp` 长连接 + 节点 Bearer 令牌），完成数据上报与配置下发。不新开端口，也不要求 Panel 能拨到节点。
+
+```text
+浏览器 ──HTTP──► Panel ──mTLS gRPC──► Agent（push）
+                 ▲
+                 └── HTTP 上报 / 拉配置（uplink，与 PKI 续签同一入口 + 同一 Bearer）
+```
+
+## push 与 uplink 对比
+
+| 维度 | push（默认） | uplink |
+|------|------|------|
+| 发起方 | Panel 拨号 Agent gRPC | Agent 出站访问 Panel HTTP |
+| 网络要求 | Agent 公网可达 / 端口映射 | 仅需 Agent 能出站到 Panel（NAT 友好） |
+| 下发时延 | 即时 | 最长一个拉取周期（默认 60 秒） |
+| 即时操作（探测 / 日志 / 升级 / 出站探测 / 协议证书部署） | 支持 | 拒绝（`409`），改为异步或读最近一次上报 |
+| 认证 | mTLS 客户端证书 + Bearer | 节点 Bearer 令牌（与续签同源） |
+| 控制面 gRPC 端口 | 必填（默认 50051） | 可不填 |
+
+选择原则：能被 Panel 稳定拨到（公网 IP、端口映射、VPN、DNAT）就用 push，拿到即时性；否则用 uplink，牺牲下发实时性换取 NAT 穿透与零入站端口。
+
+## 认证与传输复用
+
+- **传输层**：Agent 侧统一用 `panelhttp.NewClient()`（`RequestTimeout=30s`、`IdleConnTimeout=3m`、HTTP/2、TLS 会话缓存）。`managementpki.Manager`（续签）与 `uplink.Client` 共享同一个 client 实例，周期轮询不重复 TLS 握手。Panel 侧 HTTP server `IdleTimeout` 相应设为 3 分钟，匹配 keep-alive 窗口。
+- **认证层**：uplink 端点用节点长期控制令牌（`Authorization: Bearer <token>`），Panel 侧以常量时间比对，拒绝空令牌。这些端点免 admin 会话，但必须通过节点令牌校验；错误令牌返回 `401`。
+- uplink 复用节点已有的 `-panel-url` / `-node-id` / `LADDER_TOKEN`，与 PKI 续签共用同一份配置，无需额外密钥或第二条通道。
+
+## 数据上报
+
+`POST /api/v1/agent/report`（Agent → Panel，默认每 15 秒一次）。请求体（可选指标字段用指针区分「未上报」与「零值」）：
+
+```json
+{
+  "node_id": "...",
+  "collected_at_unix": 1700000000,
+  "runtime_state": "running",
+  "config_hash": "...",
+  "last_error": "",
+  "agent_version": "...",
+  "singbox_version": "...",
+  "capabilities": ["uplink-v1", "..."],
+  "connections": 12,
+  "uplink_bytes": 0,
+  "downlink_bytes": 0,
+  "cpu_percent": 3.1,
+  "memory_rss_bytes": 0
+}
+```
+
+Panel 侧 `ApplyNodeReport` 的处理要点：
+
+- **单调时间戳防乱序**：仅当 `collected_at_unix >= 已记录的 uplink_last_seen_unix` 才写入，旧样本直接丢弃（响应 `applied=false`）。允许最多 300 秒时钟偏移，超前太多的时间戳拒绝。
+- **部分更新**：用 SQL `CASE WHEN` 只更新本次真正带上来的列（能力、指标、配置哈希、版本各自独立判断），避免一次心跳把其它字段清空。
+- **状态刷新**：接受上报即置节点 `status=online`，刷新 `last_seen_unix` 与 `uplink_last_seen_unix`。
+- **数值校验**：CPU 百分比限定 0–100，连接数 / 流量 / 内存等不得为负，非法值拒绝，防脏数据。
+
+## 配置下发
+
+统一走 `/api/v1/agent/config-sync`，三个方法分工：
+
+- **`HEAD`**（廉价探测）：只返回响应头 `X-Config-Hash` / `X-FRPS-Hash` / `X-Desired-State`。Agent 每周期先 HEAD，哈希未变时只做期望运行态对齐（start/stop），不传输大 JSON。
+- **`GET`**：语义同 HEAD，但以 JSON body 返回哈希与期望态，便于调试与 e2e 校验。
+- **`POST`**（真正拉取）：Agent 带上 `applied_config_hash` / `applied_frps_hash`，Panel 比对后决定：
+  - 两者都未变 → `{ "changed": false, "desired_state": "..." }`
+  - sing-box 配置变了 → 返回 `config_json` + `config_hash` + `replace: true`，并 `SaveSnapshot` 落一份配置快照
+  - FRPS 配置变了 → 返回 `frps { ... }` + `frps_hash`（`auth_token` 由 Panel 用凭据主密钥解密后下发，密文不落快照明文）
+
+请求示例：
+
+```json
+{ "node_id": "...", "applied_config_hash": "...", "applied_frps_hash": "..." }
+```
+
+Agent 侧 `applySync` 收到后依次执行 `ApplyConfig` → `ApplyFRPServerConfig` → 按 `desired_state` 决定 `Start` / `Stop`，成功后本地记住新哈希。
+
+**收敛闭环**：Panel 下发 hash → Agent 应用 → 下次上报带回自身的 `config_hash` → Panel 据此判断是否收敛。这是 uplink 版「配置是否生效」的判据，对应 push 里 gRPC 的即时返回。
+
+## 期望运行态（desired_runtime）
+
+push 的启停是即时 RPC；uplink 没有即时通道，因此引入节点级 `desired_runtime`（`running` | `stopped`）作为期望态：
+
+- 操作员在面板点「启动 / 停止」→ Panel 只更新 `desired_runtime` 并建一条 `success` 状态的任务，提示「已记录，节点将在下次拉取时应用」。单节点操作与批处理各有一份等价实现。
+- Agent 每次 config-sync 用 `X-Desired-State`（或 body 中的 `desired_state`）对齐本地 core 运行态：期望 `stopped` 则 `Stop`，期望 `running` 且当前未运行则 `Start`。
+
+## Panel 侧行为差异
+
+对 uplink 节点，Panel 禁用一切即时拨号型操作，改为异步或读最近一次上报：
+
+- **拒绝即时拨号**：网络接口枚举、日志流、Agent 升级返回 `409`（`uplink 节点不支持即时操作`）。
+- **读最近上报**：探测（probe）返回最近一次上报的 `status` / 版本 / 能力，不发起拨号；节点指标直接回落库的 `connections` / 流量 / CPU / 内存。
+- **落快照代替直连**：代理链下发对 uplink 节点写配置快照而非拨号；出站探测、协议证书部署、DNS 公网探测对 uplink 直接报错（不支持即时）。
+- **fleet 刷新**：不拨号，只看 `uplink_last_seen_unix` 是否超过 45 秒（`uplinkStaleAfter`），超时用带 cutoff 的 `MarkUplinkUnreachable` 置 `unreachable`，cutoff 条件避免并发上报被覆盖。
+- **bootstrap 跳过**：启动时的全量下发只针对 push 节点；uplink 节点自行拉取，不进 bootstrap 队列。
+- **切换保护**：把节点改成 uplink 时，要求它已上报过 `uplink-v1` 能力，否则拒绝并提示先升级 Agent。
+
+## Agent 侧运行时
+
+- 开关：`-uplink` 命令行标志，或环境变量 `LADDER_UPLINK=1`。
+- 间隔：`-uplink-report-interval`（默认 15 秒）、`-uplink-config-interval`（默认 60 秒，带 ±20% 抖动打散并发）。
+- 能力：`Ping` 的能力表包含 `uplink-v1`，供 Panel 判断该节点是否支持 uplink 与是否允许切换。
+- config-sync 连续失败按次数退避：第 1 次 1 分钟，第 2 次 5 分钟，第 3 次起 15 分钟；成功后清零。
+
+### 控制端口监听（gRPC）
+
+uplink 节点通常位于 NAT 后，Panel 拨不进它的 gRPC 控制口，那个监听是死重。因此：
+
+- **默认行为**：uplink 节点**不监听 gRPC 控制端口**，也不构建 mTLS 服务端 TLS 配置（`RequireAndVerifyClientCert`），只保留 HTTP 上报 / 拉配置。
+- **开关**：`-uplink-serve-grpc` 命令行标志，或环境变量 `LADDER_UPLINK_SERVE_GRPC=1`，令 uplink 节点**仍然监听** gRPC 控制口，保留被 push 拨号的能力（例如节点其实公网可达、或想随时回切 push）。
+- push 节点（未开 `-uplink`）**始终监听**，不受该开关影响。
+- 无论是否监听，**证书续签始终运行**：叶子证书 / 私钥是共享 Bearer 身份的基础，也让节点日后能无缝切回 push。关闭监听不会破坏任何面板功能——Panel 侧对 uplink 本就全面禁用即时拨号（probe/logs/upgrade 返回 `409`）。
+
+判定逻辑：`serveGRPC = 非 uplink || uplink-serve-grpc`。
+
+## 部署
+
+1. **新建 uplink 节点**：在「节点 → 添加节点」把「控制模式」选为 `uplink`，控制面地址与 gRPC 端口可留空。生成的一键安装命令会自动带上 `LADDER_UPLINK=1`。
+2. **已有节点切换**：在节点详情「概览」把控制模式改为 `uplink`（需该节点先上报过 `uplink-v1`）。
+3. **手动配置**：在 `agent.env` 设 `LADDER_UPLINK=1`（安装脚本会透传该变量），重启 `ladder-agent`。默认不再监听 gRPC 控制口；若该节点公网可达且想保留 push 能力，再加 `LADDER_UPLINK_SERVE_GRPC=1`。
+
+其余安装步骤（PKI 注册、证书续签、mTLS）与 push 节点完全一致，见 [部署 · Agent](../deploy/README-agent.md) 与 [管理面 PKI](management-pki.md)。
+
+## 安全考量
+
+- uplink 端点免 admin 会话，但强制节点令牌常量时间校验，错误令牌返回 `401`。
+- 上报数值全部做边界校验（CPU 0–100、指标非负、时间戳窗口），拒绝脏数据。
+- FRPS `auth_token` 由 Panel 用凭据主密钥解密后才下发，配置快照中不落明文。
+- 浏览器仍不直连 Agent；uplink 只是把 Agent → Panel 的方向复用到 HTTP，Panel 仍是唯一控制中心。

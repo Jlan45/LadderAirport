@@ -863,3 +863,118 @@ func TestNodeInboundNATBindings(t *testing.T) {
 		t.Fatalf("ListInboundsForNode: %v %#v", err, ins)
 	}
 }
+
+func TestCreateNodeDefaultsControlMode(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "uplink-edge", Token: "tok", ControlMode: ControlModeUplink}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ControlMode != ControlModeUplink || got.DesiredRuntime != DesiredRuntimeRunning {
+		t.Fatalf("mode=%q runtime=%q", got.ControlMode, got.DesiredRuntime)
+	}
+}
+
+func TestApplyNodeReportWritesAndDropsStale(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "edge", Token: "tok", ControlMode: ControlModeUplink}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	cpu := 12.5
+	applied, err := s.ApplyNodeReport(n.ID, NodeReport{
+		CollectedAtUnix: 1_700_000_100,
+		Status:          "online",
+		RuntimeState:    "running",
+		ConfigHash:      "abc",
+		AgentVersion:    "v1",
+		HasCapabilities: true,
+		Capabilities:    []string{"uplink-v1"},
+		HasMetrics:      true,
+		CPUPercent:      cpu,
+		Connections:     3,
+		UplinkBytes:     10,
+		DownlinkBytes:   20,
+		MemoryRSSBytes:  1024,
+	})
+	if err != nil || !applied {
+		t.Fatalf("first report applied=%v err=%v", applied, err)
+	}
+	got, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "online" || got.RuntimeState != "running" || got.ConfigHash != "abc" {
+		t.Fatalf("node = %+v", got)
+	}
+	if got.UplinkLastSeenUnix != 1_700_000_100 || got.CPUPercent != cpu || got.Connections != 3 {
+		t.Fatalf("metrics = %+v", got)
+	}
+	if len(got.Capabilities) != 1 || got.Capabilities[0] != "uplink-v1" {
+		t.Fatalf("capabilities = %v", got.Capabilities)
+	}
+
+	stale, err := s.ApplyNodeReport(n.ID, NodeReport{
+		CollectedAtUnix: 1_700_000_050,
+		Status:          "online",
+		RuntimeState:    "stopped",
+		ConfigHash:      "old",
+	})
+	if err != nil || stale {
+		t.Fatalf("stale applied=%v err=%v", stale, err)
+	}
+	got, err = s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RuntimeState != "running" || got.ConfigHash != "abc" {
+		t.Fatalf("stale overwrote live state: %+v", got)
+	}
+
+	if _, err := s.ApplyNodeReport(n.ID, NodeReport{CPUPercent: 101}); err == nil {
+		t.Fatal("expected invalid CPU")
+	}
+}
+
+func TestMarkUplinkUnreachableDoesNotClobberNewerReport(t *testing.T) {
+	s := openTestStore(t)
+	n := &Node{Name: "edge", Token: "tok", ControlMode: ControlModeUplink}
+	if err := s.CreateNode(n); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyNodeReport(n.ID, NodeReport{
+		CollectedAtUnix: 1_700_000_200,
+		Status:          "online",
+		RuntimeState:    "running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkUplinkUnreachable(n.ID, "节点超过 45 秒未上报", 1_700_000_199); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "online" || got.RuntimeState != "running" {
+		t.Fatalf("newer report was overwritten: %+v", got)
+	}
+
+	if err := s.MarkUplinkUnreachable(n.ID, "节点超过 45 秒未上报", 1_700_000_201); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.GetNode(n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "unreachable" || got.LastError != "节点超过 45 秒未上报" {
+		t.Fatalf("stale node not marked: %+v", got)
+	}
+	if got.RuntimeState != "running" {
+		t.Fatalf("runtime clobbered: %+v", got)
+	}
+}

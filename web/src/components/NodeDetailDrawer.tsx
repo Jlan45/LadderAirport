@@ -179,6 +179,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
   const [editPublic, setEditPublic] = useState('')
   const [editEgress, setEditEgress] = useState('')
   const [editDDNS, setEditDDNS] = useState(true)
+  const [editControlMode, setEditControlMode] = useState<'push' | 'uplink'>('push')
   const [connectionErrors, setConnectionErrors] = useState<ConnectionErrors>({})
   const [ifaces, setIfaces] = useState<NetworkInterface[]>([])
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
@@ -279,6 +280,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setEditPublic(targetNode.public_address || '')
     setEditEgress(targetNode.egress_interface || '')
     setEditDDNS(targetNode.ddns_enabled ?? true)
+    setEditControlMode(targetNode.control_mode === 'uplink' ? 'uplink' : 'push')
     setConnectionErrors({})
   }, [])
 
@@ -437,7 +439,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     if (addrErr) errors.address = addrErr
     const pubErr = hostValidationError(publicAddress, '默认公网地址')
     if (pubErr) errors.publicAddress = pubErr
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    if (editControlMode !== 'uplink' && (!Number.isInteger(port) || port < 1 || port > 65535)) {
       errors.grpcPort = 'gRPC 端口必须在 1 到 65535 之间'
     }
 
@@ -455,10 +457,13 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         name,
         labels: editLabels,
         address: address || undefined,
-        grpc_port: port,
         public_address: publicAddress || undefined,
         egress_interface: editEgress || undefined,
         ddns_enabled: editDDNS,
+        control_mode: editControlMode,
+      }
+      if (Number.isInteger(port) && port >= 1 && port <= 65535) {
+        input.grpc_port = port
       }
       if (editTokenChanged) input.token = editToken
       const updated = await updateNode(id, input)
@@ -810,6 +815,9 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     {node.runtime_state ? (
                       <Badge variant={runtimeTheme(node.runtime_state)}>{runtimeLabel(node.runtime_state)}</Badge>
                     ) : null}
+                    {node.control_mode === 'uplink' ? (
+                      <Badge variant="outline">HTTP 上行</Badge>
+                    ) : null}
                     {installInfo ? (
                       isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
                         <Badge variant="warning">
@@ -893,6 +901,9 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     setEditEgress={setEditEgress}
                     editDDNS={editDDNS}
                     setEditDDNS={setEditDDNS}
+                    editControlMode={editControlMode}
+                    setEditControlMode={setEditControlMode}
+                    canUplink={(node.capabilities || []).includes('uplink-v1') || node.control_mode === 'uplink'}
                     connectionErrors={connectionErrors}
                     clearConnectionError={clearConnectionError}
                     onSaveConnection={onSaveConnection}

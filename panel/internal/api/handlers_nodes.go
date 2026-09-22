@@ -23,6 +23,7 @@ type nodeBootstrapRequest struct {
 	Labels        []string `json:"labels"`
 	AgentVersion  string   `json:"agent_version"`
 	InstallScript string   `json:"install_script_url"` // optional override
+	ControlMode   string   `json:"control_mode"`
 }
 
 type nodeCreateRequest struct {
@@ -34,6 +35,7 @@ type nodeCreateRequest struct {
 	PublicAddress   string              `json:"public_address"`
 	PortMappings    []store.PortMapping `json:"port_mappings"`
 	EgressInterface string              `json:"egress_interface"`
+	ControlMode     string              `json:"control_mode"`
 }
 
 // nodeInstallResponse is returned after bootstrap or when regenerating the install command.
@@ -71,6 +73,11 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "必须提供名称")
 		return
 	}
+	mode := strings.TrimSpace(req.ControlMode)
+	if mode != "" && mode != store.ControlModePush && mode != store.ControlModeUplink {
+		writeError(w, http.StatusBadRequest, "control_mode 只能是 push 或 uplink")
+		return
+	}
 	n := store.Node{
 		Name:            req.Name,
 		Address:         strings.TrimSpace(req.Address),
@@ -81,9 +88,10 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		PortMappings:    req.PortMappings,
 		EgressInterface: strings.TrimSpace(req.EgressInterface),
 		DDNSEnabled:     true,
+		ControlMode:     mode,
 	}
 	// Address may be empty when the operator will install first and fill IP later.
-	if n.GRPCPort == 0 {
+	if n.GRPCPort == 0 && n.ControlMode != store.ControlModeUplink {
 		n.GRPCPort = 50051
 	}
 	if n.Status == "" {
@@ -134,8 +142,16 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	mode := strings.TrimSpace(req.ControlMode)
+	if mode == "" {
+		mode = store.ControlModePush
+	}
+	if mode != store.ControlModePush && mode != store.ControlModeUplink {
+		writeError(w, http.StatusBadRequest, "control_mode 只能是 push 或 uplink")
+		return
+	}
 	port := req.GRPCPort
-	if port == 0 {
+	if port == 0 && mode != store.ControlModeUplink {
 		port = 50051
 	}
 	addr := strings.TrimSpace(req.Address)
@@ -152,6 +168,7 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		Labels:        req.Labels,
 		Status:        status,
 		DDNSEnabled:   true,
+		ControlMode:   mode,
 	}
 	if err := s.Store.CreateNode(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -178,6 +195,7 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		NodeID:          created.ID,
 		GRPCPort:        port,
 		ReportAddress:   addr,
+		Uplink:          created.ControlMode == store.ControlModeUplink,
 	})
 	rec, _, _ := resolveRecommendedAgentVersion()
 	upgradeVer := agentVer
@@ -244,6 +262,7 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 			NodeID:          n.ID,
 			GRPCPort:        n.GRPCPort,
 			ReportAddress:   n.Address,
+			Uplink:          n.ControlMode == store.ControlModeUplink,
 		})
 	}
 	rec, _, _ := resolveRecommendedAgentVersion()
@@ -309,6 +328,21 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	if body.EgressInterface != nil {
 		egressInterface := strings.TrimSpace(*body.EgressInterface)
 		body.EgressInterface = &egressInterface
+	}
+	if body.ControlMode != nil {
+		mode := strings.TrimSpace(*body.ControlMode)
+		body.ControlMode = &mode
+		if mode == store.ControlModeUplink {
+			current, getErr := s.Store.GetNode(id)
+			if getErr != nil {
+				writeError(w, http.StatusInternalServerError, getErr.Error())
+				return
+			}
+			if !hasCapability(current.Capabilities, "uplink-v1") && current.ControlMode != store.ControlModeUplink {
+				writeError(w, http.StatusBadRequest, "节点未上报 uplink-v1，请先升级 Agent")
+				return
+			}
+		}
 	}
 	if err := s.Store.UpdateNodeOperatorFields(id, body); err != nil {
 		if isNotFound(err) {
@@ -431,6 +465,11 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if node.ControlMode == store.ControlModeUplink {
+		out.DeployMessage = "关联已保存；uplink 节点将在下次拉取时应用"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
 	if strings.TrimSpace(node.Address) == "" {
 		out.DeployMessage = "关联已保存；节点地址未就绪，上线后由 bootstrap 同步"
 		writeJSON(w, http.StatusOK, out)
@@ -537,12 +576,17 @@ func (s *Server) handleNodeStop(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) runSingleNodeTask(w http.ResponseWriter, r *http.Request, taskType string) {
 	id := pathID(r)
-	if _, err := s.Store.GetNode(id); err != nil {
+	node, err := s.Store.GetNode(id)
+	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if node.ControlMode == store.ControlModeUplink {
+		s.finishUplinkIntent(w, id, taskType)
 		return
 	}
 	if s.Runner == nil {
@@ -570,6 +614,40 @@ func (s *Server) runSingleNodeTask(w http.ResponseWriter, r *http.Request, taskT
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (s *Server) finishUplinkIntent(w http.ResponseWriter, nodeID, taskType string) {
+	message := "已记录，节点将在下次拉取时应用"
+	switch taskType {
+	case "start":
+		state := store.DesiredRuntimeRunning
+		if err := s.Store.UpdateNodeOperatorFields(nodeID, store.NodeOperatorUpdate{DesiredRuntime: &state}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case "stop":
+		state := store.DesiredRuntimeStopped
+		if err := s.Store.UpdateNodeOperatorFields(nodeID, store.NodeOperatorUpdate{DesiredRuntime: &state}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	task := &store.Task{
+		Type:    taskType,
+		Status:  "success",
+		NodeIDs: []string{nodeID},
+		Results: []store.TaskNodeResult{{NodeID: nodeID, OK: true, Message: message}},
+	}
+	if err := s.Store.CreateTask(task); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	updated, err := s.Store.GetTask(task.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	node, err := s.Store.GetNode(id)
@@ -579,6 +657,16 @@ func (s *Server) handleProbeNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if node.ControlMode == store.ControlModeUplink {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            node.Status == "online",
+			"status":        node.Status,
+			"agent_version": node.AgentVersion,
+			"capabilities":  node.Capabilities,
+			"message":       "uplink 节点使用最近一次上报，不发起拨号",
+		})
 		return
 	}
 
@@ -646,6 +734,16 @@ func (s *Server) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if node.ControlMode == store.ControlModeUplink {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"connections":      node.Connections,
+			"uplink_bytes":     node.UplinkBytes,
+			"downlink_bytes":   node.DownlinkBytes,
+			"cpu_percent":      node.CPUPercent,
+			"memory_rss_bytes": node.MemoryRSSBytes,
+		})
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())
 	defer cancel()
@@ -680,6 +778,9 @@ func (s *Server) handleNodeInterfaces(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rejectUplinkLive(w, node) {
 		return
 	}
 
@@ -734,6 +835,9 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rejectUplinkLive(w, node) {
 		return
 	}
 
@@ -818,6 +922,9 @@ func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rejectUplinkLive(w, node) {
 		return
 	}
 

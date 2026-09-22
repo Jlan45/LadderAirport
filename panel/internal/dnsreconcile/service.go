@@ -333,6 +333,9 @@ func (s *Service) probeAgentPublic(ctx context.Context, node *store.Node, mode s
 	if token == "" && s.DefaultToken != nil {
 		token = s.DefaultToken()
 	}
+	if node.ControlMode == store.ControlModeUplink {
+		return "", "", fmt.Errorf("uplink 节点不支持即时公网探测")
+	}
 	opCtx, cancel := context.WithTimeout(ctx, s.timeout())
 	defer cancel()
 	client, err := s.DialAgent(opCtx, *node, token)

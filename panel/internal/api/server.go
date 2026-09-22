@@ -166,6 +166,12 @@ func isPublicAPI(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/pki/agent-certificates" {
 		return true
 	}
+	if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/report" || r.URL.Path == "/api/v1/agent/config-sync") {
+		return true
+	}
+	if (r.Method == http.MethodHead || r.Method == http.MethodGet) && r.URL.Path == "/api/v1/agent/config-sync" {
+		return true
+	}
 	if r.Method == http.MethodGet && r.URL.Path == "/api/v1/pki/bundle" {
 		return true
 	}
@@ -184,6 +190,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("POST /api/v1/pki/agent-certificates", s.handleIssueAgentCertificate)
 	mux.HandleFunc("GET /api/v1/pki/bundle", s.handlePKIBundle)
+	mux.HandleFunc("POST /api/v1/agent/report", s.handleAgentReport)
+	mux.HandleFunc("HEAD /api/v1/agent/config-sync", s.handleAgentConfigHead)
+	mux.HandleFunc("GET /api/v1/agent/config-sync", s.handleAgentConfigHead)
+	mux.HandleFunc("POST /api/v1/agent/config-sync", s.handleAgentConfigSync)
 
 	mux.HandleFunc("GET /api/v1/templates", s.handleListTemplates)
 
@@ -294,6 +304,25 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/external-sources/{id}", s.handleDeleteExternalSource)
 	mux.HandleFunc("POST /api/v1/external-sources/{id}/refresh", s.handleRefreshExternalSource)
 	mux.HandleFunc("GET /api/v1/external-sources/{id}/preview", s.handlePreviewExternalSource)
+}
+
+func hasCapability(caps []string, want string) bool {
+	for _, cap := range caps {
+		if cap == want {
+			return true
+		}
+	}
+	return false
+}
+
+const errUplinkNoLiveRPC = "uplink 节点不支持即时操作，请改用 push 或等待下次配置拉取"
+
+func rejectUplinkLive(w http.ResponseWriter, node *store.Node) bool {
+	if node == nil || node.ControlMode != store.ControlModeUplink {
+		return false
+	}
+	writeError(w, http.StatusConflict, errUplinkNoLiveRPC)
+	return true
 }
 
 func (s *Server) liveDial(ctx context.Context, n store.Node, token string) (NodeLive, error) {

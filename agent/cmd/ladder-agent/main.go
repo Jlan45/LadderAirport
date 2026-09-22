@@ -14,11 +14,14 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/ladderairport/agent/internal/control"
 	"github.com/ladderairport/agent/internal/frpsruntime"
 	"github.com/ladderairport/agent/internal/managementpki"
+	"github.com/ladderairport/agent/internal/panelhttp"
 	"github.com/ladderairport/agent/internal/protocolcert"
+	"github.com/ladderairport/agent/internal/uplink"
 	"github.com/ladderairport/agent/internal/version"
 	"github.com/ladderairport/pkg/auth"
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
@@ -37,6 +40,10 @@ func main() {
 	reportAddress := flag.String("report-address", "", "证书续签时上报给 Panel 的地址")
 	tlsSANs := flag.String("tls-sans", "", "续签时保留的逗号分隔 DNS/IP SAN")
 	dataDir := flag.String("data-dir", "", "配置和状态缓存目录（默认 ./data）")
+	uplinkOn := flag.Bool("uplink", false, "向 Panel HTTP 上报并拉取配置（也可用环境变量 LADDER_UPLINK=1）")
+	uplinkReport := flag.Duration("uplink-report-interval", 15*time.Second, "uplink 上报间隔")
+	uplinkConfig := flag.Duration("uplink-config-interval", 60*time.Second, "uplink 配置拉取间隔")
+	uplinkServeGRPC := flag.Bool("uplink-serve-grpc", false, "uplink 模式下仍监听 gRPC 控制端口以保留 push 能力（默认关闭；push 模式始终监听。也可用环境变量 LADDER_UPLINK_SERVE_GRPC=1）")
 	showVersion := flag.Bool("version", false, "显示版本后退出")
 	flag.Parse()
 
@@ -52,6 +59,21 @@ func main() {
 	if *token == "" {
 		*token = os.Getenv("LADDER_TOKEN")
 	}
+	if !*uplinkOn {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("LADDER_UPLINK"))) {
+		case "1", "true", "yes", "on":
+			*uplinkOn = true
+		}
+	}
+	if !*uplinkServeGRPC {
+		switch strings.ToLower(strings.TrimSpace(os.Getenv("LADDER_UPLINK_SERVE_GRPC"))) {
+		case "1", "true", "yes", "on":
+			*uplinkServeGRPC = true
+		}
+	}
+	// serveGRPC decides whether the mTLS gRPC control server is built and listened.
+	// push nodes always serve; uplink nodes skip it unless explicitly opted back in.
+	serveGRPC := !*uplinkOn || *uplinkServeGRPC
 	if *token == "" || *token == "changeme" {
 		log.Fatal("必须提供 -token 或环境变量 LADDER_TOKEN（且不允许使用弱默认值 changeme）")
 	}
@@ -117,47 +139,86 @@ func main() {
 	if *reportAddress != "" {
 		host = *reportAddress
 	}
+	panelHTTP := panelhttp.NewClient()
 	certManager, err := managementpki.New(managementpki.Config{
-		PanelURL: *panelURL,
-		NodeID:   *nodeID,
-		Token:    *token,
-		CertPath: *tlsCert,
-		KeyPath:  *tlsKey,
-		CAPath:   *tlsClientCA,
-		Address:  host,
-		GRPCPort: port,
-		SANs:     strings.Split(*tlsSANs, ","),
+		PanelURL:   *panelURL,
+		NodeID:     *nodeID,
+		Token:      *token,
+		CertPath:   *tlsCert,
+		KeyPath:    *tlsKey,
+		CAPath:     *tlsClientCA,
+		Address:    host,
+		GRPCPort:   port,
+		SANs:       strings.Split(*tlsSANs, ","),
+		HTTPClient: panelHTTP,
 	})
 	if err != nil {
 		log.Fatalf("加载管理面 TLS 失败：%v", err)
 	}
-	tlsConfig := &tls.Config{
-		MinVersion:     tls.VersionTLS12,
-		GetCertificate: certManager.GetCertificate,
-	}
-	// Cache the parsed client CA pool; rebuilt only when the CA file's mtime
-	// changes (renewal rewrites it) instead of on every handshake.
-	caPoolCache := managementpki.NewClientCAPoolCache(*tlsClientCA)
-	pool, err := caPoolCache.Pool()
-	if err != nil {
-		log.Fatalf("加载 Panel 客户端 CA 失败：%v", err)
-	}
-	tlsConfig.ClientCAs = pool
-	tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
-	tlsConfig.VerifyPeerCertificate = managementpki.VerifyPanelIdentity
-	tlsConfig.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
-		currentPool, err := caPoolCache.Pool()
-		if err != nil {
-			return nil, err
+	if serveGRPC {
+		tlsConfig := &tls.Config{
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: certManager.GetCertificate,
 		}
-		current := tlsConfig.Clone()
-		current.GetConfigForClient = nil
-		current.ClientCAs = currentPool
-		return current, nil
+		// Cache the parsed client CA pool; rebuilt only when the CA file's mtime
+		// changes (renewal rewrites it) instead of on every handshake.
+		caPoolCache := managementpki.NewClientCAPoolCache(*tlsClientCA)
+		pool, err := caPoolCache.Pool()
+		if err != nil {
+			log.Fatalf("加载 Panel 客户端 CA 失败：%v", err)
+		}
+		tlsConfig.ClientCAs = pool
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.VerifyPeerCertificate = managementpki.VerifyPanelIdentity
+		tlsConfig.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			currentPool, err := caPoolCache.Pool()
+			if err != nil {
+				return nil, err
+			}
+			current := tlsConfig.Clone()
+			current.GetConfigForClient = nil
+			current.ClientCAs = currentPool
+			return current, nil
+		}
+		log.Printf("mTLS=强制 证书=%s 客户端CA=%s", *tlsCert, *tlsClientCA)
+		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	} else {
+		log.Printf("uplink=仅 HTTP（不监听 gRPC 控制端口；如需保留 push 能力设 LADDER_UPLINK_SERVE_GRPC=1）")
 	}
-	log.Printf("mTLS=强制 证书=%s 客户端CA=%s", *tlsCert, *tlsClientCA)
-	opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	// Certificate renewal keeps running regardless of serveGRPC: the leaf key/cert
+	// underpin the shared Bearer identity and let the node switch back to push later.
 	go certManager.Run(runCtx)
+	if *uplinkOn {
+		uplinkClient, err := uplink.New(uplink.Config{
+			PanelURL:    *panelURL,
+			NodeID:      *nodeID,
+			Token:       *token,
+			ReportEvery: *uplinkReport,
+			ConfigEvery: *uplinkConfig,
+			HTTPClient:  panelHTTP,
+			Control:     srv,
+		})
+		if err != nil {
+			log.Fatalf("初始化 HTTP uplink 失败：%v", err)
+		}
+		go uplinkClient.Run(runCtx)
+		log.Printf("uplink=HTTP 上报间隔=%s 配置拉取间隔=%s", *uplinkReport, *uplinkConfig)
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	if !serveGRPC {
+		// uplink-only: no gRPC listener. Stay alive on the uplink client + renewal
+		// goroutines until a termination signal arrives.
+		sig := <-sigCh
+		log.Printf("收到信号 %v，正在停止", sig)
+		cancelRun()
+		_ = frps.Stop(context.Background())
+		_ = rt.Stop(context.Background())
+		fmt.Fprintln(os.Stderr, "bye")
+		return
+	}
 
 	gs := grpc.NewServer(opts...)
 	agentv1.RegisterAgentControlServer(gs, srv)
@@ -172,9 +233,6 @@ func main() {
 	go func() {
 		errCh <- gs.Serve(lis)
 	}()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
 	case sig := <-sigCh:

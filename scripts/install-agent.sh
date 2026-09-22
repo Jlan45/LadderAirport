@@ -71,6 +71,8 @@ NODE_ID="${LADDER_NODE_ID:-}"
 REPORT_ADDR="${LADDER_REPORT_ADDRESS:-}" # force reported address; else auto-detect
 GRPC_PORT_HINT="${LADDER_GRPC_PORT:-}"
 ALLOW_HTTP="${LADDER_ALLOW_HTTP:-0}"
+UPLINK="${LADDER_UPLINK:-0}"
+UPLINK_SERVE_GRPC="${LADDER_UPLINK_SERVE_GRPC:-0}"
 # 公网 IP 探测端点（用于证书 SAN 与上报地址兜底）。默认 api.ipify.org；
 # 显式设为空（LADDER_IP_ECHO_URL=）可关闭公网探测（例如离线/内网环境）。
 IP_ECHO_URL="${LADDER_IP_ECHO_URL-https://api.ipify.org}"
@@ -770,6 +772,7 @@ do_install() {
   PANEL_CERT="${TLS_CERT_PATH}" PANEL_KEY="${TLS_KEY_PATH}" PANEL_CA="${TLS_CLIENT_CA_PATH}" \
   PANEL_URL_VALUE="${PANEL_URL%/}" PANEL_NODE_VALUE="${NODE_ID}" \
   PANEL_REPORT_VALUE="${REPORT_ADDR}" PANEL_SANS_VALUE="${TLS_EXTRA_SANS}" \
+  PANEL_UPLINK="${UPLINK}" PANEL_UPLINK_SERVE_GRPC="${UPLINK_SERVE_GRPC}" \
     python3 - <<'PY'
 import os
 source = os.environ["PANEL_ENV_SOURCE"]
@@ -785,6 +788,8 @@ updates = {
     "LADDER_NODE_ID": os.environ["PANEL_NODE_VALUE"],
     "LADDER_REPORT_ADDRESS": os.environ.get("PANEL_REPORT_VALUE", ""),
     "LADDER_TLS_EXTRA_SANS": os.environ.get("PANEL_SANS_VALUE", ""),
+    "LADDER_UPLINK": os.environ.get("PANEL_UPLINK", "0"),
+    "LADDER_UPLINK_SERVE_GRPC": os.environ.get("PANEL_UPLINK_SERVE_GRPC", "0"),
 }
 seen, lines = set(), []
 if os.path.exists(source):

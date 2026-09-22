@@ -191,6 +191,10 @@ func (s *Server) handlePutNodeFRPS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if node.ControlMode == store.ControlModeUplink {
+		s.writeFRPSConfig(w, node, config, generatedToken)
+		return
+	}
 
 	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, "frps-v1") {
 		config.LastError = "节点 Agent 不支持 FRPS 管理，请先升级 Agent"
@@ -252,6 +256,9 @@ func (s *Server) handleGetNodeFRPSMappings(w http.ResponseWriter, r *http.Reques
 			status = http.StatusNotFound
 		}
 		writeError(w, status, err.Error())
+		return
+	}
+	if rejectUplinkLive(w, node) {
 		return
 	}
 	if len(node.Capabilities) > 0 && !slices.Contains(node.Capabilities, "frps-mappings-v1") {
@@ -334,6 +341,11 @@ func (s *Server) handleNodeFRPSAction(w http.ResponseWriter, r *http.Request, ac
 		writeError(w, status, err.Error())
 		return
 	}
+	if node.ControlMode == store.ControlModeUplink && action != "status" {
+		if rejectUplinkLive(w, node) {
+			return
+		}
+	}
 	config, err := s.Store.GetFRPServerConfig(nodeID)
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -341,6 +353,10 @@ func (s *Server) handleNodeFRPSAction(w http.ResponseWriter, r *http.Request, ac
 			status = http.StatusNotFound
 		}
 		writeError(w, status, err.Error())
+		return
+	}
+	if node.ControlMode == store.ControlModeUplink {
+		s.writeFRPSConfig(w, node, config, "")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), s.opTimeout())

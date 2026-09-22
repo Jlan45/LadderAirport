@@ -50,6 +50,21 @@ func TestBuildInstallCommandWithEnroll(t *testing.T) {
 	if !strings.Contains(cmd, "LADDER_REPORT_ADDRESS='edge.example.com'") {
 		t.Fatalf("report address: %s", cmd)
 	}
+	if strings.Contains(cmd, "LADDER_UPLINK=") {
+		t.Fatalf("push install must not set LADDER_UPLINK: %s", cmd)
+	}
+}
+
+func TestBuildInstallCommandUplink(t *testing.T) {
+	cmd := buildInstallCommand(installCommandOpts{
+		EnrollmentToken: "abc",
+		PanelBaseURL:    "https://panel.example.com/",
+		NodeID:          "nid-1",
+		Uplink:          true,
+	})
+	if !strings.Contains(cmd, "LADDER_UPLINK=1") {
+		t.Fatalf("missing uplink flag: %s", cmd)
+	}
 }
 
 func TestRandomAgentToken(t *testing.T) {

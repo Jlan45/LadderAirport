@@ -105,6 +105,9 @@ func (r *Runner) nodesNeedingBootstrap() ([]store.Node, error) {
 	}
 	var need []store.Node
 	for _, n := range nodes {
+		if n.ControlMode == store.ControlModeUplink {
+			continue
+		}
 		builder := r.ConfigBuilder
 		if builder == nil {
 			return nil, fmt.Errorf("配置构建器尚未配置")

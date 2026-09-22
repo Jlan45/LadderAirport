@@ -98,6 +98,18 @@ func (s *Server) handleFleetRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) refreshOneNode(parent context.Context, n store.Node) store.Node {
+	if n.ControlMode == store.ControlModeUplink {
+		if n.UplinkLastSeenUnix > 0 && time.Since(time.Unix(n.UplinkLastSeenUnix, 0)) > uplinkStaleAfter() {
+			cutoff := time.Now().Add(-uplinkStaleAfter()).Unix()
+			_ = s.Store.MarkUplinkUnreachable(n.ID, "节点超过 45 秒未上报", cutoff)
+			if latest, err := s.Store.GetNode(n.ID); err == nil {
+				return *latest
+			}
+			n.Status = "unreachable"
+			n.LastError = "节点超过 45 秒未上报"
+		}
+		return n
+	}
 	ctx, cancel := context.WithTimeout(parent, s.opTimeout())
 	defer cancel()
 

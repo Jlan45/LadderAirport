@@ -10,6 +10,14 @@ type PortMapping struct {
 	PublicPort int `json:"public_port"`
 }
 
+const (
+	ControlModePush   = "push"
+	ControlModeUplink = "uplink"
+
+	DesiredRuntimeRunning = "running"
+	DesiredRuntimeStopped = "stopped"
+)
+
 type Node struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
@@ -17,6 +25,13 @@ type Node struct {
 	GRPCPort       int      `json:"grpc_port"` // control dial port (external mapped port if NAT)
 	Token          string   `json:"token,omitempty"`
 	Labels         []string `json:"labels"`
+	// ControlMode selects how the node syncs: push is Panel-dialed gRPC;
+	// uplink is Agent-initiated HTTP report + config pull.
+	ControlMode string `json:"control_mode"`
+	// DesiredRuntime is the operator-intended core state for uplink pull (running|stopped).
+	DesiredRuntime string `json:"desired_runtime,omitempty"`
+	// UplinkLastSeenUnix is the newest accepted HTTP report timestamp.
+	UplinkLastSeenUnix int64 `json:"uplink_last_seen_unix,omitempty"`
 	PKICABundlePEM string   `json:"-"`
 	// PKICertSerial binds Panel dialing to the currently active Panel-issued
 	// Agent server certificate.
@@ -101,6 +116,27 @@ type NodeOperatorUpdate struct {
 	PortMappings    *[]PortMapping `json:"port_mappings"`
 	EgressInterface *string        `json:"egress_interface"`
 	DDNSEnabled     *bool          `json:"ddns_enabled"`
+	ControlMode     *string        `json:"control_mode"`
+	DesiredRuntime  *string        `json:"desired_runtime"`
+}
+
+// NodeReport is a partial live update from an Agent HTTP report.
+type NodeReport struct {
+	CollectedAtUnix int64
+	Status          string
+	RuntimeState    string
+	ConfigHash      string
+	LastError       string
+	AgentVersion    string
+	SingboxVersion  string
+	Capabilities    []string
+	HasCapabilities bool
+	HasMetrics      bool
+	Connections     int64
+	UplinkBytes     int64
+	DownlinkBytes   int64
+	CPUPercent      float64
+	MemoryRSSBytes  int64
 }
 
 // NormalizePortMappings drops invalid/identity rows and keeps the last mapping per listen_port.
