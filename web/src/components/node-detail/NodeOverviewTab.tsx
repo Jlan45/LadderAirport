@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { type ConnectionErrors } from '@/components/NodeDetailDrawer'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -5,8 +6,9 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Eye, EyeOff, X, Copy, Check } from 'lucide-react'
+import { Eye, EyeOff, X, Copy, Check, QrCode } from 'lucide-react'
 import type { NetworkInterface, NodeInstallInfo } from '@/api/client'
+import { NodePairingQRModal } from '@/components/NodePairingQRModal'
 
 /** Radix Select rejects empty-string item values; use a sentinel for "系统默认". */
 const EGRESS_DEFAULT_VALUE = '__default__'
@@ -84,6 +86,8 @@ export function NodeOverviewTab({
   copyInstallCommand,
   copyUpgradeCommand,
 }: NodeOverviewTabProps) {
+  const [showPairingQR, setShowPairingQR] = useState(false)
+
   function egressOptions() {
     const opts = [{ value: EGRESS_DEFAULT_VALUE, label: '系统默认' }]
     for (const iface of ifaces) {
@@ -353,6 +357,10 @@ export function NodeOverviewTab({
               {installInfo.upgrade_command && installInfo.outdated ? '节点一键安装与升级命令' : '节点一键安装命令'}
             </h3>
             <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setShowPairingQR(true)} className="gap-1.5 text-xs">
+                <QrCode className="h-3.5 w-3.5" />
+                扫码配对
+              </Button>
               <Button size="sm" variant="outline" onClick={copyInstallCommand} className="gap-1.5 text-xs">
                 {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? '安装命令已复制' : '复制安装命令'}
@@ -383,6 +391,17 @@ export function NodeOverviewTab({
             )}
           </div>
         </div>
+      )}
+
+      {installInfo && (
+        <NodePairingQRModal
+          open={showPairingQR}
+          onClose={() => setShowPairingQR(false)}
+          nodeName={editName || installInfo.node.name}
+          panelUrl={installInfo.panel_base_url || window.location.origin}
+          nodeId={installInfo.node.id}
+          token={installInfo.token}
+        />
       )}
     </div>
   )

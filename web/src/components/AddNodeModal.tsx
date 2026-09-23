@@ -10,11 +10,12 @@ import { Button } from './ui/button'
 import { Alert, AlertDescription } from './ui/alert'
 import { Input } from './ui/input'
 import { Label } from './ui/label'
-import { Copy, Check, Info } from 'lucide-react'
+import { Copy, Check, Info, QrCode } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { bootstrapNode, type NodeInstallInfo } from '../api/client'
 import { copyText } from '../lib/clipboard'
 import { toast } from '../lib/toast'
+import { NodePairingQRModal } from './NodePairingQRModal'
 
 type Props = {
   open: boolean
@@ -35,6 +36,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
   const [installInfo, setInstallInfo] = useState<NodeInstallInfo | null>(null)
   const [copied, setCopied] = useState(false)
   const [formError, setFormError] = useState('')
+  const [showPairingQR, setShowPairingQR] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -235,11 +237,17 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
             </div>
 
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-foreground">一键安装</span>
-              <Button size="sm" variant="outline" onClick={() => void copyCommand()} className="gap-1.5">
-                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? '已复制' : '复制命令'}
-              </Button>
+              <span className="text-sm font-semibold text-foreground">一键安装与配对</span>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => setShowPairingQR(true)} className="gap-1.5">
+                  <QrCode className="h-3.5 w-3.5" />
+                  扫码配对
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void copyCommand()} className="gap-1.5">
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? '已复制' : '复制命令'}
+                </Button>
+              </div>
             </div>
 
             <pre className="p-4 rounded-lg bg-muted border border-border text-xs font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
@@ -291,6 +299,17 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
           )}
         </DialogFooter>
       </DialogContent>
+
+      {installInfo && (
+        <NodePairingQRModal
+          open={showPairingQR}
+          onClose={() => setShowPairingQR(false)}
+          nodeName={installInfo.node.name}
+          panelUrl={installInfo.panel_base_url || window.location.origin}
+          nodeId={installInfo.node.id}
+          token={installInfo.token}
+        />
+      )}
     </Dialog>
   )
 }
