@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/ladderairport/panel/internal/frpconnection"
 	"github.com/ladderairport/panel/internal/inboundfill"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/templates"
@@ -46,6 +47,13 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 	filled, err := inboundfill.Fill(body.Protocol, body.Params)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, active, err := frpconnection.ParseParams(filled); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	} else if active && (body.Protocol == "hysteria2" || body.Protocol == "tuic") {
+		writeError(w, http.StatusBadRequest, "当前 FRP 直连仅支持 TCP 入站")
 		return
 	}
 	enabled := true
@@ -125,6 +133,13 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Enabled != nil {
 		existing.Enabled = *body.Enabled
+	}
+	if _, active, err := frpconnection.ParseParams(existing.Params); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	} else if active && (existing.Protocol == "hysteria2" || existing.Protocol == "tuic") {
+		writeError(w, http.StatusBadRequest, "当前 FRP 直连仅支持 TCP 入站")
+		return
 	}
 	if err := s.Store.UpdateInbound(existing); err != nil {
 		if isNotFound(err) {

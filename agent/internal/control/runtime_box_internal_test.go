@@ -39,3 +39,20 @@ func TestBoxRuntimeStopStopsTrafficPersistLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestBoxRuntimeFRPInboundStartsWithLoopbackListener(t *testing.T) {
+	r := NewBoxRuntime(t.TempDir())
+	configuration := `{
+		"log": {"level": "error", "disabled": true},
+		"inbounds": [{"type": "shadowsocks", "tag": "ss-frp", "listen": "127.0.0.1", "listen_port": 55001,
+			"method": "aes-256-gcm", "password": "secret"}],
+		"outbounds": [{"type": "direct", "tag": "direct"}],
+		"ladder_frpc": {"ss-frp": "{\"server_addr\":\"127.0.0.1\",\"server_port\":1,\"remote_port\":20001,\"local_port\":55001,\"token\":\"secret\"}"}
+	}`
+	if err := r.Apply(context.Background(), configuration, "frp-test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}

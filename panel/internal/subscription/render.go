@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 
+	"github.com/ladderairport/panel/internal/frpconnection"
 	"github.com/ladderairport/panel/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -99,6 +100,14 @@ func CollectEndpointsFromAttachments(nodes []store.Node, nodeAttachments map[str
 				port = store.MapPublicPort(n.PortMappings, listenPort)
 			}
 			server := clientServerHostForInbound(n, att.PublicAddress)
+			frp, frpEnabled, err := frpconnection.ParseParams(in.Params)
+			if err != nil {
+				return nil, fmt.Errorf("入站 %q：%w", in.Name, err)
+			}
+			if frpEnabled {
+				server = frp.ServerAddr
+				port = frp.RemotePort
+			}
 			if server == "" || server == "0.0.0.0" || server == "::" {
 				continue
 			}
@@ -535,7 +544,9 @@ func clashProxy(ep ProxyEndpoint) (map[string]any, error) {
 		p["type"] = "ss"
 		p["cipher"] = method
 		p["password"] = password
-		if n, _ := paramString(ep.Params, "network"); n != "" {
+		if ep.Params["frp_enabled"] == true {
+			p["udp"] = false
+		} else if n, _ := paramString(ep.Params, "network"); n != "" {
 			p["udp"] = n != "tcp"
 		} else {
 			p["udp"] = true
@@ -701,6 +712,9 @@ func SingboxOutbound(ep ProxyEndpoint) (map[string]any, error) {
 		o["type"] = "shadowsocks"
 		o["method"] = method
 		o["password"] = password
+		if ep.Params["frp_enabled"] == true {
+			o["network"] = "tcp"
+		}
 	case "trojan":
 		password, _ := paramString(ep.Params, "password")
 		if password == "" {

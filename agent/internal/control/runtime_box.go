@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ladderairport/agent/internal/frpcbridge"
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/constant"
@@ -39,6 +40,7 @@ type BoxRuntime struct {
 	mu            sync.Mutex
 	dataDir       string
 	instance      *box.Box
+	frpcRuntime   *frpcbridge.Runtime
 	cancel        context.CancelFunc
 	configJSON    string
 	configHash    string
@@ -138,6 +140,7 @@ func (r *BoxRuntime) applyLocked(ctx context.Context, configJSON string, hash st
 func (r *BoxRuntime) stopInstanceLocked() {
 	r.mu.Lock()
 	old := r.instance
+	oldFRPC := r.frpcRuntime
 	oldCancel := r.cancel
 	oldTracker := r.tracker
 	if oldTracker != nil {
@@ -146,6 +149,7 @@ func (r *BoxRuntime) stopInstanceLocked() {
 		r.prevDownlink += down
 	}
 	r.instance = nil
+	r.frpcRuntime = nil
 	r.cancel = nil
 	r.tracker = nil
 	r.state = StateStopped
@@ -155,11 +159,12 @@ func (r *BoxRuntime) stopInstanceLocked() {
 
 	r.saveTraffic()
 
-	if old != nil {
-		_ = old.Close()
-	}
 	if oldCancel != nil {
 		oldCancel()
+	}
+	oldFRPC.Close()
+	if old != nil {
+		_ = old.Close()
 	}
 }
 
@@ -194,9 +199,22 @@ func (r *BoxRuntime) startInstanceLocked(opts option.Options, configJSON, hash s
 		cancel()
 		return err
 	}
+	_, frpcConfigurations, err := splitFRPCConfig(configJSON)
+	if err != nil {
+		_ = instance.Close()
+		cancel()
+		return err
+	}
+	frpcRuntime, err := frpcbridge.Start(boxCtx, frpcConfigurations)
+	if err != nil {
+		_ = instance.Close()
+		cancel()
+		return err
+	}
 
 	r.mu.Lock()
 	r.instance = instance
+	r.frpcRuntime = frpcRuntime
 	r.cancel = cancel
 	r.tracker = tracker
 	r.configJSON = configJSON
@@ -320,12 +338,35 @@ func (r *BoxRuntime) ConfigJSON() string {
 }
 
 func (r *BoxRuntime) parseOptions(configJSON string) (option.Options, error) {
+	configJSON, _, err := splitFRPCConfig(configJSON)
+	if err != nil {
+		return option.Options{}, err
+	}
 	ctx := include.Context(context.Background())
 	opts, err := json.UnmarshalExtendedContext[option.Options](ctx, []byte(configJSON))
 	if err != nil {
 		return option.Options{}, fmt.Errorf("解析配置失败：%w", err)
 	}
 	return opts, nil
+}
+
+func splitFRPCConfig(configJSON string) (string, map[string]string, error) {
+	var document map[string]stdjson.RawMessage
+	if err := stdjson.Unmarshal([]byte(configJSON), &document); err != nil {
+		return "", nil, fmt.Errorf("解析节点配置失败：%w", err)
+	}
+	var configurations map[string]string
+	if raw, ok := document["ladder_frpc"]; ok {
+		if err := stdjson.Unmarshal(raw, &configurations); err != nil {
+			return "", nil, fmt.Errorf("解析 FRPC 配置失败：%w", err)
+		}
+		delete(document, "ladder_frpc")
+	}
+	clean, err := stdjson.Marshal(document)
+	if err != nil {
+		return "", nil, fmt.Errorf("编码 sing-box 配置失败：%w", err)
+	}
+	return string(clean), configurations, nil
 }
 
 func (r *BoxRuntime) writeCurrent(dataDir, configJSON string) error {

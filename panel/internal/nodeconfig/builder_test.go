@@ -8,6 +8,75 @@ import (
 	"github.com/ladderairport/panel/internal/store"
 )
 
+func TestBuildFRPInboundUsesLoopbackHighPort(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	node := &store.Node{Name: "edge", Address: "192.0.2.10", GRPCPort: 50051, Status: "online"}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	inbound := &store.InboundConfig{
+		Name: "ss-frp", Protocol: "shadowsocks", Enabled: true,
+		Params: map[string]any{
+			"listen": "0.0.0.0", "port": 8388, "method": "aes-256-gcm", "password": "secret",
+			"frp_enabled": true,
+			"frpc_config": `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
+		},
+	}
+	if err := st.CreateInbound(inbound); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(node.ID, []string{inbound.ID}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := (&Builder{Store: st}).Build(node.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(result.JSON), &document); err != nil {
+		t.Fatal(err)
+	}
+	entry := document["inbounds"].([]any)[0].(map[string]any)
+	if entry["listen"] != "127.0.0.1" {
+		t.Fatalf("listen = %v", entry["listen"])
+	}
+	if entry["disable_listen"] != nil {
+		t.Fatalf("unexpected disable_listen = %v", entry["disable_listen"])
+	}
+	localPort := int(entry["listen_port"].(float64))
+	if localPort < 49152 || localPort > 65535 || localPort == 8388 {
+		t.Fatalf("local listen_port = %d", localPort)
+	}
+	tag := entry["tag"].(string)
+	frpc := document["ladder_frpc"].(map[string]any)
+	var connection map[string]any
+	if err := json.Unmarshal([]byte(frpc[tag].(string)), &connection); err != nil {
+		t.Fatal(err)
+	}
+	if int(connection["local_port"].(float64)) != localPort || int(connection["remote_port"].(float64)) != 20001 {
+		t.Fatalf("FRPC mapping = %v", connection)
+	}
+}
+
+func TestAllocateFRPLocalPortStableAndSkipsOccupied(t *testing.T) {
+	first, err := allocateFRPLocalPort("inbound-1", map[int]bool{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := allocateFRPLocalPort("inbound-1", map[int]bool{})
+	if err != nil || second != first {
+		t.Fatalf("port changed from %d to %d: %v", first, second, err)
+	}
+	available, err := allocateFRPLocalPort("inbound-1", map[int]bool{first: true})
+	if err != nil || available == first || available < 49152 || available > 65535 {
+		t.Fatalf("occupied port was selected: %d, %v", available, err)
+	}
+}
+
 func TestBuildOverlaysManagedTLSWithoutMutatingGlobalInbound(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "panel.db"))
 	if err != nil {

@@ -5,10 +5,12 @@ package nodeconfig
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"strings"
 
 	"github.com/ladderairport/panel/internal/converter"
+	"github.com/ladderairport/panel/internal/frpconnection"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/subscription"
 	"github.com/ladderairport/pkg/hashutil"
@@ -109,7 +111,89 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 	if err != nil {
 		return Result{}, err
 	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return Result{}, fmt.Errorf("解析节点配置失败：%w", err)
+	}
+	converted, _ := document["inbounds"].([]any)
+	frpc := map[string]string{}
+	frpcPorts := map[string]string{}
+	usedLocalPorts := map[int]bool{}
+	for _, item := range converted {
+		entry, _ := item.(map[string]any)
+		if port, ok := entry["listen_port"].(float64); ok {
+			usedLocalPorts[int(port)] = true
+		}
+	}
+	convertedIndex := 0
+	for _, inbound := range inbounds {
+		if !inbound.Enabled {
+			continue
+		}
+		if convertedIndex >= len(converted) {
+			return Result{}, fmt.Errorf("FRPC 入站映射数量不一致")
+		}
+		entry, _ := converted[convertedIndex].(map[string]any)
+		convertedIndex++
+		frpConfig, frpEnabled, err := frpconnection.ParseParams(inbound.Params)
+		if err != nil {
+			return Result{}, fmt.Errorf("入站 %q：%w", inbound.Name, err)
+		}
+		if !frpEnabled {
+			continue
+		}
+		if inbound.Protocol == "hysteria2" || inbound.Protocol == "tuic" {
+			return Result{}, fmt.Errorf("入站 %q 是 UDP/QUIC 协议，当前 FRP 直连仅支持 TCP", inbound.Name)
+		}
+		if entry["transport"] != nil || entry["network"] == "udp" {
+			return Result{}, fmt.Errorf("入站 %q 的传输方式暂不支持 FRP TCP 直连", inbound.Name)
+		}
+		portKey := fmt.Sprintf("%s:%d:%d", frpConfig.ServerAddr, frpConfig.ServerPort, frpConfig.RemotePort)
+		if previous, exists := frpcPorts[portKey]; exists {
+			return Result{}, fmt.Errorf("入站 %q 与 %q 使用了同一 FRPS 对外端口", inbound.Name, previous)
+		}
+		frpcPorts[portKey] = inbound.Name
+		tag, _ := entry["tag"].(string)
+		localPort, err := allocateFRPLocalPort(tag, usedLocalPorts)
+		if err != nil {
+			return Result{}, fmt.Errorf("入站 %q：%w", inbound.Name, err)
+		}
+		usedLocalPorts[localPort] = true
+		config := map[string]any{
+			"server_addr": frpConfig.ServerAddr, "server_port": frpConfig.ServerPort,
+			"remote_port": frpConfig.RemotePort, "token": frpConfig.Token,
+			"local_port": localPort,
+		}
+		encoded, err := json.Marshal(config)
+		if err != nil {
+			return Result{}, fmt.Errorf("编码入站 %q 的 FRPC 配置失败：%w", inbound.Name, err)
+		}
+		frpc[tag] = string(encoded)
+		entry["listen"] = "127.0.0.1"
+		entry["listen_port"] = localPort
+	}
+	if len(frpc) != 0 {
+		document["ladder_frpc"] = frpc
+		raw, err = json.Marshal(document)
+		if err != nil {
+			return Result{}, fmt.Errorf("编码 FRPC 配置失败：%w", err)
+		}
+	}
 	return Result{JSON: string(raw), Hash: hashutil.SHA256Hex(raw)}, nil
+}
+
+func allocateFRPLocalPort(tag string, used map[int]bool) (int, error) {
+	const first, count = 49152, 16384
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(tag))
+	start := int(h.Sum32() % count)
+	for offset := 0; offset < count; offset++ {
+		port := first + (start+offset)%count
+		if !used[port] {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("没有可用的本地高位端口")
 }
 
 // globalRouteRules resolves enabled global route plans into converter rules
@@ -391,7 +475,14 @@ func (b *Builder) ResolveHopEndpoint(chain store.ProxyChain, position int) (subs
 		return subscription.ProxyEndpoint{}, err
 	}
 	in = &resolvedInbound
+	frp, frpEnabled, err := frpconnection.ParseParams(in.Params)
+	if err != nil {
+		return subscription.ProxyEndpoint{}, fmt.Errorf("代理链 %q 第 %d 跳：%w", chain.Name, position+1, err)
+	}
 	address := strings.TrimSpace(hop.DialAddress)
+	if address == "" && frpEnabled {
+		address = frp.ServerAddr
+	}
 	if address == "" && managed {
 		address = managedHostname
 	}
@@ -405,6 +496,9 @@ func (b *Builder) ResolveHopEndpoint(chain store.ProxyChain, position int) (subs
 		return subscription.ProxyEndpoint{}, fmt.Errorf("代理链 %q 第 %d 跳没有拨号地址", chain.Name, position+1)
 	}
 	port := hop.DialPort
+	if port == 0 && frpEnabled {
+		port = frp.RemotePort
+	}
 	if port == 0 {
 		listenPort, err := paramInt(in.Params, "port")
 		if err != nil || listenPort < 1 || listenPort > 65535 {

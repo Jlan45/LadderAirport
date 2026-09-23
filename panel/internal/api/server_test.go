@@ -498,6 +498,33 @@ func TestInboundEnabledDefaultsAndPartialUpdate(t *testing.T) {
 	}
 }
 
+func TestInboundFRPSConnectionValidation(t *testing.T) {
+	ts, client, _ := newTestServer(t, nil, nil)
+	resp := login(t, client, ts.URL, "admin")
+	resp.Body.Close()
+	params := map[string]any{
+		"port": 8388, "method": "aes-256-gcm", "frp_enabled": true,
+		"frpc_config": `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
+	}
+	resp, created := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
+		"name": "frp-ss", "protocol": "shadowsocks", "params": params,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("valid FRP inbound status = %d, body = %v", resp.StatusCode, created)
+	}
+	stored := created["params"].(map[string]any)
+	if stored["frpc_config"] != params["frpc_config"] {
+		t.Fatalf("FRPS connection was not persisted: %v", stored)
+	}
+	params["frpc_config"] = `{"server_addr":"frps.example.com","server_port":7000,"remote_port":0,"token":"secret"}`
+	resp, body := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
+		"name": "invalid-frp", "protocol": "shadowsocks", "params": params,
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid FRP inbound status = %d, body = %v", resp.StatusCode, body)
+	}
+}
+
 func TestSubscriptionCanExcludeAllLocalInbounds(t *testing.T) {
 	ts, client, st := newTestServer(t, nil, nil)
 	resp := login(t, client, ts.URL, "admin")

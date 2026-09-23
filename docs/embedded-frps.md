@@ -23,6 +23,16 @@ FRPS 运行后，「FRPS」页签展示在线 FRPC 设备、代理映射、本�
 
 Agent 不会向公网开放上游 FRPS Dashboard。运行时会在 `127.0.0.1` 上创建随机端口和随机管理凭据，Panel 只能通过现有 Agent 安全 gRPC 查询经过整理的只读数据。
 
+## 入站直连 FRP
+
+在「入站配置管理」中勾选「通过 FRP 暴露此入站」，填写 FRPS 的服务端地址、控制端口、Token 和对外端口，再将入站关联到节点并下发。Agent 会在进程内运行 FRPC，为该入站自动注册一条 TCP proxy；sing-box 仅在 `127.0.0.1` 的高位端口监听，FRPC 将工作连接转发到该端口，不对外开放本地入站端口。订阅和代理链默认使用填写的 FRPS 地址及对外端口。
+
+如果已有隧道资料写着 `remote_port = 57115`，就在表单「远端端口 (remote_port)」填写 `57115`。隧道名称由入站自动生成；进程内直连不需要填写 `local_ip` 或 `local_port`。
+
+目前支持 TCP 入站，不支持 Hysteria2、TUIC、UDP-only 或额外的 WebSocket 等传输层。Shadowsocks 的订阅会关闭原生 UDP。每个映射的对外端口必须在 FRPS 允许范围内，且同一 FRPS 上不能与其他映射冲突。FRPS 控制端口和对外端口仍需对客户端可达。
+
+入站表单中填写的 Token 副本随其他入站参数保存在 Panel 数据库中，并随节点配置下发给 Agent；它不使用「FRPS」页签的加密字段。请将 Panel 数据库、配置快照及管理员访问权限视为敏感凭据。
+
 ## 安全边界
 
 - FRPS 认证令牌使用 Panel 的 `secrets/credentials.key` 加密后写入 SQLite，HTTP API 和页面不会回显明文。
