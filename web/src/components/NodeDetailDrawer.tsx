@@ -131,6 +131,29 @@ function supportsManagedTLS(inbound: InboundConfig): boolean {
   return false
 }
 
+function frpcDraft(raw: string): string {
+  if (!raw.trimStart().startsWith('{')) return raw
+  try {
+    const config = JSON.parse(raw) as Record<string, unknown>
+    const lines = [
+      `user = ${JSON.stringify(String(config.user ?? ''))}`,
+      `auth.token = ${JSON.stringify(String(config.token ?? ''))}`,
+      `serverAddr = ${JSON.stringify(String(config.server_addr ?? ''))}`,
+      `serverPort = ${Number(config.server_port) || 7000}`,
+    ]
+    if (typeof config.tls_enable === 'boolean') lines.push(`transport.tls.enable = ${config.tls_enable}`)
+    if (typeof config.tls_disable_custom_tls_first_byte === 'boolean') {
+      lines.push(`transport.tls.disableCustomTLSFirstByte = ${config.tls_disable_custom_tls_first_byte}`)
+    }
+    lines.push('', '[[proxies]]')
+    if (config.proxy_name) lines.push(`name = ${JSON.stringify(String(config.proxy_name))}`)
+    lines.push('type = "tcp"', `remotePort = ${Number(config.remote_port) || 0}`)
+    return lines.join('\n')
+  } catch {
+    return raw
+  }
+}
+
 export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) {
   const open = !!nodeId
   const id = nodeId ?? ''
@@ -309,7 +332,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
           public_address: item.public_address || '',
           public_port: item.public_port || 0,
           frp_enabled: item.frp_enabled || false,
-          frpc_config: item.frpc_config || '',
+          frpc_config: frpcDraft(item.frpc_config || ''),
         }
       }
       const tlsResults = await Promise.all(
@@ -525,11 +548,8 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     if (busy || inboundsLoading || !node) return
     for (const [inboundId, binding] of Object.entries(inboundNAT)) {
       if (!binding.frp_enabled) continue
-      let config: Record<string, unknown>
-      try { config = JSON.parse(binding.frpc_config) as Record<string, unknown> } catch { config = {} }
-      const validPort = (value: unknown) => /^\d+$/.test(String(value ?? '')) && Number(value) >= 1 && Number(value) <= 65535
-      if (!String(config.server_addr ?? '').trim() || !String(config.token ?? '').trim() || !validPort(config.server_port) || !validPort(config.remote_port)) {
-        toast.warning(`入站「${allInbounds.find((item) => item.id === inboundId)?.name ?? inboundId}」的 FRPS 地址、控制端口、远端端口和 Token 必须填写完整`)
+      if (!binding.frpc_config.trim()) {
+        toast.warning(`入站「${allInbounds.find((item) => item.id === inboundId)?.name ?? inboundId}」需要填写完整 FRPC TOML 配置`)
         return
       }
     }
@@ -537,17 +557,12 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     const currentGen = generationRef.current
     const bindings: NodeInboundBinding[] = Object.entries(inboundNAT).map(
       ([inboundId, nat]) => {
-        const frpc = nat.frp_enabled ? JSON.parse(nat.frpc_config) as Record<string, unknown> : null
         return {
           inbound_id: inboundId,
           public_address: nat.public_address.trim() || undefined,
           public_port: Number(nat.public_port) || undefined,
           frp_enabled: nat.frp_enabled,
-          frpc_config: frpc ? JSON.stringify({
-            ...frpc,
-            server_port: Number(frpc.server_port),
-            remote_port: Number(frpc.remote_port),
-          }) : '',
+          frpc_config: nat.frp_enabled ? nat.frpc_config.trim() : '',
         }
       },
     )

@@ -25,13 +25,13 @@ Agent 不会向公网开放上游 FRPS Dashboard。运行时会在 `127.0.0.1` �
 
 ## 入站直连 FRP
 
-先在「入站配置管理」创建可复用的协议入站，再到 Agent 管理页面打开目标节点的「入站」页签。关联入站时勾选「通过 FRP 暴露此入站」，填写该节点使用的 FRPS 地址、控制端口、Token 和对外端口，然后保存并下发。同一个入站在不同 Agent 上可分别配置 FRP。Agent 会在进程内运行 FRPC，为该入站自动注册一条 TCP proxy；sing-box 仅在 `127.0.0.1` 的高位端口监听，FRPC 将工作连接转发到该端口，不对外开放本地入站端口。订阅使用该节点填写的 FRPS 地址及对外端口。
+先在「入站配置管理」创建可复用的协议入站，再到 Agent 管理页面打开目标节点的「入站」页签。关联入站时勾选「通过 FRP 暴露此入站」，直接粘贴服务商给出的完整 FRPC TOML 配置，然后保存并下发。每个入站只接受一条 `type = "tcp"` 的 `[[proxies]]`。同一个入站在不同 Agent 上可分别配置 FRP。Agent 会在进程内运行 FRPC，为该入站自动注册一条 TCP proxy；sing-box 仅在 `127.0.0.1` 的高位端口监听，FRPC 将工作连接转发到该端口，不对外开放本地入站端口。订阅使用配置中的 `serverAddr` 及 `remotePort`。
 
-如果已有隧道资料写着 `remote_port = 57115`，就在表单「远端端口 (remote_port)」填写 `57115`。隧道名称由入站自动生成；进程内直连不需要填写 `local_ip` 或 `local_port`。
+服务商配置中的 `user`、`auth.token`、`serverAddr/serverPort`、`transport.tls.*`、`[[proxies]].name` 和 `remotePort` 会被提取使用。`localIP/localPort` 可以保留在粘贴内容里，但 Ladder 会覆盖为 `127.0.0.1` 和自动分配的高位端口；无需把服务商示例中的内网 IP 调整为 Agent 地址。`# id` 是注释，不参与解析。其他暂不支持的字段会在保存时明确报错，不会被静默忽略。旧版逐项配置保存的 JSON 仍能解析，打开编辑时会转换为 TOML 草稿。
 
 目前支持 TCP 入站，不支持 Hysteria2、TUIC、UDP-only 或额外的 WebSocket 等传输层。Shadowsocks 的订阅会关闭原生 UDP。每个映射的对外端口必须在 FRPS 允许范围内，且同一 FRPS 上不能与其他映射冲突。FRPS 控制端口和对外端口仍需对客户端可达。
 
-入站表单中填写的 Token 副本随其他入站参数保存在 Panel 数据库中，并随节点配置下发给 Agent；它不使用「FRPS」页签的加密字段。请将 Panel 数据库、配置快照及管理员访问权限视为敏感凭据。
+Agent 入站关联中填写的 Token 副本保存在 Panel 数据库中，并随节点配置下发给 Agent；它不使用「FRPS」页签的加密字段。请将 Panel 数据库、配置快照及管理员访问权限视为敏感凭据。
 
 ## 安全边界
 

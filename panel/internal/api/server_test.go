@@ -512,7 +512,18 @@ func TestInboundFRPSConnectionValidation(t *testing.T) {
 	if err := st.CreateNode(node); err != nil {
 		t.Fatal(err)
 	}
-	config := `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`
+	config := `user = "s-account"
+auth.token = "secret"
+serverAddr = "frps.example.com"
+serverPort = 7000
+transport.tls.enable = false
+transport.tls.disableCustomTLSFirstByte = false
+[[proxies]]
+name = "LadderPro"
+type = "tcp"
+localIP = "192.168.123.141"
+localPort = 64192
+remotePort = 20001`
 	url := ts.URL + "/api/v1/nodes/" + node.ID + "/inbounds"
 	resp, body := doJSON(t, client, http.MethodPut, url, map[string]any{
 		"bindings":    []map[string]any{{"inbound_id": created["id"], "frp_enabled": true, "frpc_config": config}},
@@ -527,7 +538,12 @@ func TestInboundFRPSConnectionValidation(t *testing.T) {
 	}
 	resp, body = doJSON(t, client, http.MethodPut, url, map[string]any{
 		"bindings": []map[string]any{{"inbound_id": created["id"], "frp_enabled": true,
-			"frpc_config": `{"server_addr":"frps.example.com","server_port":7000,"remote_port":0,"token":"secret"}`}},
+			"frpc_config": `serverAddr = "frps.example.com"
+serverPort = 7000
+auth.token = "secret"
+[[proxies]]
+type = "tcp"
+remotePort = 0`}},
 		"skip_deploy": true,
 	})
 	if resp.StatusCode != http.StatusBadRequest {

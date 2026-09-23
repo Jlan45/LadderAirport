@@ -29,7 +29,18 @@ func TestBuildFRPInboundUsesLoopbackHighPort(t *testing.T) {
 	}
 	if err := st.SetNodeInboundBindings(node.ID, []store.NodeInboundBinding{{
 		InboundID: inbound.ID, FRPEnabled: true,
-		FRPCConfig: `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
+		FRPCConfig: `user = "s-account"
+auth.token = "secret"
+serverAddr = "frps.example.com"
+serverPort = 7000
+transport.tls.enable = false
+transport.tls.disableCustomTLSFirstByte = false
+[[proxies]]
+name = "LadderPro"
+type = "tcp"
+localIP = "192.168.123.141"
+localPort = 64192
+remotePort = 20001`,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +71,10 @@ func TestBuildFRPInboundUsesLoopbackHighPort(t *testing.T) {
 	}
 	if int(connection["local_port"].(float64)) != localPort || int(connection["remote_port"].(float64)) != 20001 {
 		t.Fatalf("FRPC mapping = %v", connection)
+	}
+	if connection["user"] != "s-account" || connection["proxy_name"] != "LadderPro" ||
+		connection["tls_enable"] != false || connection["tls_disable_custom_tls_first_byte"] != false {
+		t.Fatalf("FRPC service fields lost: %v", connection)
 	}
 	otherNode := &store.Node{Name: "direct", Address: "192.0.2.11", GRPCPort: 50051, Status: "online"}
 	if err := st.CreateNode(otherNode); err != nil {

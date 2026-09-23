@@ -14,11 +14,15 @@ import (
 )
 
 type ConnectionConfig struct {
-	ServerAddr string `json:"server_addr"`
-	ServerPort int    `json:"server_port"`
-	RemotePort int    `json:"remote_port"`
-	LocalPort  int    `json:"local_port"`
-	Token      string `json:"token"`
+	User                         string `json:"user"`
+	ServerAddr                   string `json:"server_addr"`
+	ServerPort                   int    `json:"server_port"`
+	RemotePort                   int    `json:"remote_port"`
+	LocalPort                    int    `json:"local_port"`
+	Token                        string `json:"token"`
+	ProxyName                    string `json:"proxy_name"`
+	TLSEnable                    *bool  `json:"tls_enable"`
+	TLSDisableCustomTLSFirstByte *bool  `json:"tls_disable_custom_tls_first_byte"`
 }
 
 type Runtime struct {
@@ -43,25 +47,10 @@ func Start(ctx context.Context, configurations map[string]string) (*Runtime, err
 		if err := json.Unmarshal([]byte(raw), &connection); err != nil {
 			return nil, fmt.Errorf("入站 %q 的 FRPS 连接信息无效：%w", tag, err)
 		}
-		if strings.TrimSpace(connection.ServerAddr) == "" || connection.ServerPort < 1 || connection.ServerPort > 65535 ||
-			strings.TrimSpace(connection.Token) == "" || connection.RemotePort < 1 || connection.RemotePort > 65535 ||
-			connection.LocalPort < 49152 || connection.LocalPort > 65535 {
-			return nil, fmt.Errorf("入站 %q 的 FRPS 连接信息必须包含地址、控制端口、Token、对外端口和本地高位端口", tag)
+		common, proxy, err := buildConfigs(tag, connection)
+		if err != nil {
+			return nil, err
 		}
-		loginFailExit := false
-		common := &v1.ClientCommonConfig{
-			ServerAddr:    connection.ServerAddr,
-			ServerPort:    connection.ServerPort,
-			ClientID:      "ladder-" + tag,
-			LoginFailExit: &loginFailExit,
-			Auth:          v1.AuthClientConfig{Token: connection.Token},
-		}
-		if err := common.Complete(); err != nil {
-			return nil, fmt.Errorf("入站 %q 的 FRPC 公共配置无效：%w", tag, err)
-		}
-		proxy := &v1.TCPProxyConfig{ProxyBaseConfig: v1.ProxyBaseConfig{
-			Name: tag, Type: "tcp", ProxyBackend: v1.ProxyBackend{LocalIP: "127.0.0.1", LocalPort: connection.LocalPort},
-		}, RemotePort: connection.RemotePort}
 		configurationSource := source.NewConfigSource()
 		if err := configurationSource.ReplaceAll([]v1.ProxyConfigurer{proxy}, nil); err != nil {
 			return nil, err
@@ -89,4 +78,36 @@ func Start(ctx context.Context, configurations map[string]string) (*Runtime, err
 	}
 	go func() { workers.Wait(); close(runtime.done) }()
 	return runtime, nil
+}
+
+func buildConfigs(tag string, connection ConnectionConfig) (*v1.ClientCommonConfig, *v1.TCPProxyConfig, error) {
+	if strings.TrimSpace(connection.ServerAddr) == "" || connection.ServerPort < 1 || connection.ServerPort > 65535 ||
+		strings.TrimSpace(connection.Token) == "" || connection.RemotePort < 1 || connection.RemotePort > 65535 ||
+		connection.LocalPort < 49152 || connection.LocalPort > 65535 {
+		return nil, nil, fmt.Errorf("入站 %q 的 FRPS 连接信息必须包含地址、控制端口、Token、对外端口和本地高位端口", tag)
+	}
+	loginFailExit := false
+	common := &v1.ClientCommonConfig{
+		ServerAddr:    connection.ServerAddr,
+		ServerPort:    connection.ServerPort,
+		User:          connection.User,
+		ClientID:      "ladder-" + tag,
+		LoginFailExit: &loginFailExit,
+		Auth:          v1.AuthClientConfig{Token: connection.Token},
+		Transport: v1.ClientTransportConfig{TLS: v1.TLSClientConfig{
+			Enable:                    connection.TLSEnable,
+			DisableCustomTLSFirstByte: connection.TLSDisableCustomTLSFirstByte,
+		}},
+	}
+	if err := common.Complete(); err != nil {
+		return nil, nil, fmt.Errorf("入站 %q 的 FRPC 公共配置无效：%w", tag, err)
+	}
+	proxyName := strings.TrimSpace(connection.ProxyName)
+	if proxyName == "" {
+		proxyName = tag
+	}
+	proxy := &v1.TCPProxyConfig{ProxyBaseConfig: v1.ProxyBaseConfig{
+		Name: proxyName, Type: "tcp", ProxyBackend: v1.ProxyBackend{LocalIP: "127.0.0.1", LocalPort: connection.LocalPort},
+	}, RemotePort: connection.RemotePort}
+	return common, proxy, nil
 }

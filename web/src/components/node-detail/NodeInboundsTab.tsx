@@ -21,21 +21,6 @@ export interface InboundNATEdit {
   frpc_config: string
 }
 
-type FRPSField = 'server_addr' | 'server_port' | 'remote_port' | 'token'
-function frpcFields(raw: string): Record<FRPSField, string> {
-  try {
-    const value = JSON.parse(raw) as Record<string, unknown>
-    return {
-      server_addr: String(value.server_addr ?? ''),
-      server_port: String(value.server_port ?? '7000'),
-      remote_port: String(value.remote_port ?? ''),
-      token: String(value.token ?? ''),
-    }
-  } catch {
-    return { server_addr: '', server_port: '7000', remote_port: '', token: '' }
-  }
-}
-
 export interface NodeInboundsTabProps {
   nodeId: string
   busy: boolean
@@ -125,7 +110,6 @@ export function NodeInboundsTab({
               const listenPort = Number(inb.params?.port) || 0
               const checked = !!inboundNAT[inb.id]
               const nat = inboundNAT[inb.id]
-              const frpc = frpcFields(nat?.frpc_config ?? '')
               const frpSupported = inb.protocol !== 'hysteria2' && inb.protocol !== 'tuic'
               const attached = !!savedInboundNAT[inb.id]
               const tlsBinding = tlsBindings[inb.id] ?? {
@@ -186,25 +170,19 @@ export function NodeInboundsTab({
                         </div>
                         {!frpSupported && <p className="text-xs text-muted-foreground">此协议使用 UDP/QUIC，当前仅支持 TCP 入站。</p>}
                         {nat?.frp_enabled && (
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            {([
-                              ['server_addr', 'FRPS 地址', 'frps.example.com'],
-                              ['server_port', '控制端口', '7000'],
-                              ['remote_port', '远端端口 (remote_port)', '57115'],
-                              ['token', '认证 Token', 'FRPS Token'],
-                            ] as const).map(([key, label, placeholder]) => (
-                              <div key={key} className="space-y-1.5">
-                                <Label htmlFor={`inb-frp-${inb.id}-${key}`}>{label}</Label>
-                                <Input id={`inb-frp-${inb.id}-${key}`} type={key === 'token' ? 'password' : key.endsWith('port') ? 'number' : 'text'} value={frpc[key]} disabled={busy} placeholder={placeholder} onChange={(event) => {
-                                  const next = { ...frpc, [key]: event.target.value }
-                                  updateInboundNAT(inb.id, { frpc_config: JSON.stringify(next) })
-                                }} />
-                              </div>
-                            ))}
-                            <p className="sm:col-span-2 text-xs text-muted-foreground">Agent 内嵌 FRPC 转发到本机回环高位端口；对外使用指定的远端端口。</p>
-                            {frpc.server_addr && frpc.remote_port && <p className="sm:col-span-2 text-xs text-muted-foreground">
-                              订阅入口：<code className="text-foreground">{frpc.server_addr}:{frpc.remote_port}</code>
-                            </p>}
+                          <div className="space-y-2 sm:col-span-2">
+                            <Label htmlFor={`inb-frp-${inb.id}-config`}>完整 FRPC TOML 配置</Label>
+                            <textarea
+                              id={`inb-frp-${inb.id}-config`}
+                              value={nat.frpc_config}
+                              disabled={busy}
+                              onChange={(event) => updateInboundNAT(inb.id, { frpc_config: event.target.value })}
+                              rows={14}
+                              spellCheck={false}
+                              placeholder={'user = "s-account"\nauth.token = "..."\nserverAddr = "frp.example.com"\nserverPort = 8088\ntransport.tls.enable = false\ntransport.tls.disableCustomTLSFirstByte = false\n\n[[proxies]]\nname = "LadderPro"\ntype = "tcp"\nlocalIP = "192.168.1.10"\nlocalPort = 64192\nremotePort = 57115'}
+                              className="w-full rounded-md bg-background border border-input p-3 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                            />
+                            <p className="text-xs text-muted-foreground">直接粘贴服务商给出的配置。每个入站只接受一条 TCP proxy；Ladder 会校验字段，并把 localIP/localPort 替换为 Agent 本机回环地址和自动分配的高位端口。暂不支持的字段会提示错误，不会被静默忽略。</p>
                           </div>
                         )}
                       </div>

@@ -118,6 +118,7 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 	converted, _ := document["inbounds"].([]any)
 	frpc := map[string]string{}
 	frpcPorts := map[string]string{}
+	frpcNames := map[string]string{}
 	usedLocalPorts := map[int]bool{}
 	for _, item := range converted {
 		entry, _ := item.(map[string]any)
@@ -154,6 +155,15 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 		}
 		frpcPorts[portKey] = inbound.Name
 		tag, _ := entry["tag"].(string)
+		proxyName := strings.TrimSpace(frpConfig.ProxyName)
+		if proxyName == "" {
+			proxyName = tag
+		}
+		nameKey := fmt.Sprintf("%s:%d:%s:%s", frpConfig.ServerAddr, frpConfig.ServerPort, frpConfig.User, proxyName)
+		if previous, exists := frpcNames[nameKey]; exists {
+			return Result{}, fmt.Errorf("入站 %q 与 %q 使用了同一 FRPS 代理名称", inbound.Name, previous)
+		}
+		frpcNames[nameKey] = inbound.Name
 		localPort, err := allocateFRPLocalPort(tag, usedLocalPorts)
 		if err != nil {
 			return Result{}, fmt.Errorf("入站 %q：%w", inbound.Name, err)
@@ -162,7 +172,10 @@ func (b *Builder) BuildWithChains(nodeID string, chains []store.ProxyChain) (Res
 		config := map[string]any{
 			"server_addr": frpConfig.ServerAddr, "server_port": frpConfig.ServerPort,
 			"remote_port": frpConfig.RemotePort, "token": frpConfig.Token,
-			"local_port": localPort,
+			"user": frpConfig.User, "proxy_name": frpConfig.ProxyName,
+			"tls_enable":                        frpConfig.TLSEnable,
+			"tls_disable_custom_tls_first_byte": frpConfig.TLSDisableCustomTLSFirstByte,
+			"local_port":                        localPort,
 		}
 		encoded, err := json.Marshal(config)
 		if err != nil {
