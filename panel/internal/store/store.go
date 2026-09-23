@@ -501,6 +501,30 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("数据库迁移失败：%w", err)
 		}
 	}
+	frpColumnsPresent := false
+	frpColumns, err := s.db.Query(`PRAGMA table_info(node_inbounds)`)
+	if err != nil {
+		return fmt.Errorf("检查节点入站表失败：%w", err)
+	}
+	for frpColumns.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := frpColumns.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			_ = frpColumns.Close()
+			return err
+		}
+		if name == "frp_enabled" {
+			frpColumnsPresent = true
+		}
+	}
+	if err := frpColumns.Err(); err != nil {
+		_ = frpColumns.Close()
+		return err
+	}
+	if err := frpColumns.Close(); err != nil {
+		return err
+	}
 	// Additive columns for fleet monitoring (safe to re-run).
 	alters := []string{
 		`ALTER TABLE nodes ADD COLUMN runtime_state TEXT NOT NULL DEFAULT ''`,
@@ -527,6 +551,8 @@ func (s *Store) migrate() error {
 		`ALTER TABLE node_frps_configs ADD COLUMN managed_domain_id TEXT REFERENCES managed_domains(id) ON DELETE SET NULL`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE node_inbounds ADD COLUMN frp_enabled INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE node_inbounds ADD COLUMN frpc_config TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE settings ADD COLUMN public_base_url TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE settings ADD COLUMN chain_probe_url TEXT NOT NULL DEFAULT 'https://www.gstatic.com/generate_204'`,
 		`ALTER TABLE settings ADD COLUMN chain_probe_interval_sec INTEGER NOT NULL DEFAULT 60`,
@@ -550,6 +576,25 @@ func (s *Store) migrate() error {
 	}
 	for _, stmt := range alters {
 		_, _ = s.db.Exec(stmt) // ignore "duplicate column" on existing DBs
+	}
+	// v0.15.3 stored FRP on the reusable inbound template. Migrate once;
+	// retain unattached and chain-hop templates to avoid discarding settings.
+	if !frpColumnsPresent {
+		if _, err := s.db.Exec(`
+		UPDATE node_inbounds SET frp_enabled = 1,
+			frpc_config = COALESCE((SELECT json_extract(params_json, '$.frpc_config') FROM inbounds WHERE id = node_inbounds.inbound_id), '')
+		WHERE frp_enabled = 0 AND inbound_id IN (
+			SELECT id FROM inbounds WHERE json_valid(params_json) AND json_extract(params_json, '$.frp_enabled') = 1
+		)`); err != nil {
+			return fmt.Errorf("迁移节点 FRP 关联失败：%w", err)
+		}
+		if _, err := s.db.Exec(`
+		UPDATE inbounds SET params_json = json_remove(params_json, '$.frp_enabled', '$.frpc_config')
+		WHERE json_valid(params_json) AND id IN (SELECT inbound_id FROM node_inbounds)
+			AND id NOT IN (SELECT inbound_id FROM proxy_chain_hops)
+			AND (json_type(params_json, '$.frp_enabled') IS NOT NULL OR json_type(params_json, '$.frpc_config') IS NOT NULL)`); err != nil {
+			return fmt.Errorf("清理旧入站 FRP 参数失败：%w", err)
+		}
 	}
 	// v0.10.0 stored the provider zone in each managed domain and exposed a
 	// temporary test_zone setting. Preserve accounts that already manage one
@@ -1469,8 +1514,8 @@ func (s *Store) SetNodeInboundBindings(nodeID string, bindings []NodeInboundBind
 			return fmt.Errorf("入站 %s 的公网端口超出有效范围：%d", iid, pubPort)
 		}
 		if _, err := tx.Exec(
-			`INSERT INTO node_inbounds (node_id, inbound_id, public_address, public_port) VALUES (?, ?, ?, ?)`,
-			nodeID, iid, pubAddr, pubPort,
+			`INSERT INTO node_inbounds (node_id, inbound_id, public_address, public_port, frp_enabled, frpc_config) VALUES (?, ?, ?, ?, ?, ?)`,
+			nodeID, iid, pubAddr, pubPort, b.FRPEnabled, b.FRPCConfig,
 		); err != nil {
 			return fmt.Errorf("关联入站失败：%w", err)
 		}
@@ -1487,7 +1532,7 @@ func (s *Store) ListInboundsForNode(nodeID string) ([]InboundConfig, error) {
 	}
 	out := make([]InboundConfig, 0, len(atts))
 	for _, a := range atts {
-		out = append(out, a.InboundConfig)
+		out = append(out, a.EffectiveInbound())
 	}
 	return out, nil
 }
@@ -1496,7 +1541,7 @@ func (s *Store) ListInboundsForNode(nodeID string) ([]InboundConfig, error) {
 func (s *Store) ListNodeInboundAttachments(nodeID string) ([]NodeInboundAttachment, error) {
 	rows, err := s.db.Query(`
 		SELECT i.id, i.name, i.protocol, i.params_json, i.enabled, i.created_at_unix, i.updated_at_unix,
-			COALESCE(ni.public_address, ''), COALESCE(ni.public_port, 0)
+			COALESCE(ni.public_address, ''), COALESCE(ni.public_port, 0), ni.frp_enabled, ni.frpc_config
 		FROM inbounds i
 		INNER JOIN node_inbounds ni ON ni.inbound_id = i.id
 		WHERE ni.node_id = ?
@@ -1514,7 +1559,7 @@ func (s *Store) ListNodeInboundAttachments(nodeID string) ([]NodeInboundAttachme
 func (s *Store) ListAllNodeInboundAttachments() (map[string][]NodeInboundAttachment, error) {
 	rows, err := s.db.Query(`
 		SELECT ni.node_id, i.id, i.name, i.protocol, i.params_json, i.enabled, i.created_at_unix, i.updated_at_unix,
-			COALESCE(ni.public_address, ''), COALESCE(ni.public_port, 0)
+			COALESCE(ni.public_address, ''), COALESCE(ni.public_port, 0), ni.frp_enabled, ni.frpc_config
 		FROM inbounds i
 		INNER JOIN node_inbounds ni ON ni.inbound_id = i.id
 		ORDER BY ni.node_id, i.created_at_unix ASC`)
@@ -1527,14 +1572,15 @@ func (s *Store) ListAllNodeInboundAttachments() (map[string][]NodeInboundAttachm
 		var nodeID string
 		var a NodeInboundAttachment
 		var paramsJSON string
-		var enabled int
+		var enabled, frpEnabled int
 		if err := rows.Scan(
 			&nodeID, &a.ID, &a.Name, &a.Protocol, &paramsJSON, &enabled, &a.CreatedAtUnix, &a.UpdatedAtUnix,
-			&a.PublicAddress, &a.PublicPort,
+			&a.PublicAddress, &a.PublicPort, &frpEnabled, &a.FRPCConfig,
 		); err != nil {
 			return nil, fmt.Errorf("读取节点入站关联失败：%w", err)
 		}
 		a.Enabled = enabled != 0
+		a.FRPEnabled = frpEnabled != 0
 		a.Params = map[string]any{}
 		if err := unmarshalJSON(paramsJSON, &a.Params); err != nil {
 			return nil, fmt.Errorf("解析入站参数失败：%w", err)
@@ -1552,15 +1598,16 @@ func scanNodeInboundAttachments(rows *sql.Rows) ([]NodeInboundAttachment, error)
 	for rows.Next() {
 		var a NodeInboundAttachment
 		var paramsJSON string
-		var enabled int
+		var enabled, frpEnabled int
 		err := rows.Scan(
 			&a.ID, &a.Name, &a.Protocol, &paramsJSON, &enabled, &a.CreatedAtUnix, &a.UpdatedAtUnix,
-			&a.PublicAddress, &a.PublicPort,
+			&a.PublicAddress, &a.PublicPort, &frpEnabled, &a.FRPCConfig,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("读取节点入站关联失败：%w", err)
 		}
 		a.Enabled = enabled != 0
+		a.FRPEnabled = frpEnabled != 0
 		a.Params = map[string]any{}
 		if err := unmarshalJSON(paramsJSON, &a.Params); err != nil {
 			return nil, fmt.Errorf("解析入站参数失败：%w", err)
@@ -1634,7 +1681,7 @@ func (s *Store) NodeConfigFingerprint(nodeID string) (string, error) {
 			(SELECT COALESCE(MAX(updated_at_unix), 0) FROM protocol_certificates WHERE node_id = ?),
 			(SELECT COALESCE(GROUP_CONCAT(member, ','), '') FROM (
 				SELECT ni.inbound_id || ':' || COALESCE(ni.public_address, '') || ':' ||
-					COALESCE(ni.public_port, 0) AS member
+					COALESCE(ni.public_port, 0) || ':' || ni.frp_enabled || ':' || ni.frpc_config AS member
 				FROM node_inbounds ni WHERE ni.node_id = ? ORDER BY ni.inbound_id
 			))`,
 		nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID, nodeID,

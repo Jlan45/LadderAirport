@@ -88,14 +88,13 @@ func TestCollectEndpoints(t *testing.T) {
 
 func TestCollectEndpointsUsesFRPSAddressAndPort(t *testing.T) {
 	nodes := []store.Node{{ID: "n1", Name: "edge", Address: "10.0.0.1"}}
-	inbounds := map[string][]store.InboundConfig{"n1": {{
-		ID: "i1", Name: "ss", Protocol: "shadowsocks", Enabled: true,
-		Params: map[string]any{
-			"port": 8388, "method": "aes-256-gcm", "password": "secret", "frp_enabled": true,
-			"frpc_config": `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
-		},
+	attachments := map[string][]store.NodeInboundAttachment{"n1": {{
+		InboundConfig: store.InboundConfig{ID: "i1", Name: "ss", Protocol: "shadowsocks", Enabled: true,
+			Params: map[string]any{"port": 8388, "method": "aes-256-gcm", "password": "secret"}},
+		FRPEnabled: true,
+		FRPCConfig: `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
 	}}}
-	endpoints, err := CollectEndpoints(nodes, inbounds, nil)
+	endpoints, err := CollectEndpointsFromAttachments(nodes, attachments, nil)
 	if err != nil || len(endpoints) != 1 {
 		t.Fatalf("endpoints = %+v, err = %v", endpoints, err)
 	}

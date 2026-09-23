@@ -326,12 +326,16 @@ export interface NodeInboundAttachment extends InboundConfig {
   public_address?: string
   /** Client-facing NAT port; 0/empty uses inbound listen port (and legacy node port_mappings). */
   public_port?: number
+  frp_enabled: boolean
+  frpc_config: string
 }
 
 export interface NodeInboundBinding {
   inbound_id: string
   public_address?: string
   public_port?: number
+  frp_enabled?: boolean
+  frpc_config?: string
 }
 
 export interface Field {

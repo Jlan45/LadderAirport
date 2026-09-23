@@ -499,29 +499,47 @@ func TestInboundEnabledDefaultsAndPartialUpdate(t *testing.T) {
 }
 
 func TestInboundFRPSConnectionValidation(t *testing.T) {
-	ts, client, _ := newTestServer(t, nil, nil)
+	ts, client, st := newTestServer(t, nil, nil)
 	resp := login(t, client, ts.URL, "admin")
 	resp.Body.Close()
-	params := map[string]any{
-		"port": 8388, "method": "aes-256-gcm", "frp_enabled": true,
-		"frpc_config": `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
-	}
 	resp, created := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
-		"name": "frp-ss", "protocol": "shadowsocks", "params": params,
+		"name": "frp-ss", "protocol": "shadowsocks", "params": map[string]any{"port": 8388, "method": "aes-256-gcm"},
 	})
 	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("valid FRP inbound status = %d, body = %v", resp.StatusCode, created)
+		t.Fatalf("create inbound status = %d, body = %v", resp.StatusCode, created)
 	}
-	stored := created["params"].(map[string]any)
-	if stored["frpc_config"] != params["frpc_config"] {
-		t.Fatalf("FRPS connection was not persisted: %v", stored)
+	node := &store.Node{Name: "edge", Address: "192.0.2.10", GRPCPort: 50051, Status: "online"}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
 	}
-	params["frpc_config"] = `{"server_addr":"frps.example.com","server_port":7000,"remote_port":0,"token":"secret"}`
-	resp, body := doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
-		"name": "invalid-frp", "protocol": "shadowsocks", "params": params,
+	config := `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`
+	url := ts.URL + "/api/v1/nodes/" + node.ID + "/inbounds"
+	resp, body := doJSON(t, client, http.MethodPut, url, map[string]any{
+		"bindings":    []map[string]any{{"inbound_id": created["id"], "frp_enabled": true, "frpc_config": config}},
+		"skip_deploy": true,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("valid FRP node binding status = %d, body = %v", resp.StatusCode, body)
+	}
+	attachments, err := st.ListNodeInboundAttachments(node.ID)
+	if err != nil || len(attachments) != 1 || !attachments[0].FRPEnabled || attachments[0].FRPCConfig != config {
+		t.Fatalf("FRP binding not persisted: %+v, %v", attachments, err)
+	}
+	resp, body = doJSON(t, client, http.MethodPut, url, map[string]any{
+		"bindings": []map[string]any{{"inbound_id": created["id"], "frp_enabled": true,
+			"frpc_config": `{"server_addr":"frps.example.com","server_port":7000,"remote_port":0,"token":"secret"}`}},
+		"skip_deploy": true,
 	})
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("invalid FRP inbound status = %d, body = %v", resp.StatusCode, body)
+		t.Fatalf("invalid FRP node binding status = %d, body = %v", resp.StatusCode, body)
+	}
+	resp, body = doJSON(t, client, http.MethodPost, ts.URL+"/api/v1/inbounds", map[string]any{
+		"name": "global-frp", "protocol": "shadowsocks", "params": map[string]any{
+			"port": 8389, "method": "aes-256-gcm", "frp_enabled": true, "frpc_config": config,
+		},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("global FRP settings must be rejected: status = %d, body = %v", resp.StatusCode, body)
 	}
 }
 

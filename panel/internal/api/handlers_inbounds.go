@@ -2,8 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
-	"github.com/ladderairport/panel/internal/frpconnection"
 	"github.com/ladderairport/panel/internal/inboundfill"
 	"github.com/ladderairport/panel/internal/store"
 	"github.com/ladderairport/panel/internal/templates"
@@ -49,13 +49,12 @@ func (s *Server) handleCreateInbound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, active, err := frpconnection.ParseParams(filled); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	} else if active && (body.Protocol == "hysteria2" || body.Protocol == "tuic") {
-		writeError(w, http.StatusBadRequest, "当前 FRP 直连仅支持 TCP 入站")
+	if hasTemplateFRP(filled) {
+		writeError(w, http.StatusBadRequest, "请在 Agent 管理页面的入站关联中配置 FRP")
 		return
 	}
+	delete(filled, "frp_enabled")
+	delete(filled, "frpc_config")
 	enabled := true
 	if body.Enabled != nil {
 		enabled = *body.Enabled
@@ -134,13 +133,12 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 	if body.Enabled != nil {
 		existing.Enabled = *body.Enabled
 	}
-	if _, active, err := frpconnection.ParseParams(existing.Params); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	} else if active && (existing.Protocol == "hysteria2" || existing.Protocol == "tuic") {
-		writeError(w, http.StatusBadRequest, "当前 FRP 直连仅支持 TCP 入站")
+	if hasTemplateFRP(existing.Params) {
+		writeError(w, http.StatusBadRequest, "请在 Agent 管理页面的入站关联中配置 FRP")
 		return
 	}
+	delete(existing.Params, "frp_enabled")
+	delete(existing.Params, "frpc_config")
 	if err := s.Store.UpdateInbound(existing); err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -155,6 +153,14 @@ func (s *Server) handleUpdateInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+func hasTemplateFRP(params map[string]any) bool {
+	if params["frp_enabled"] == true {
+		return true
+	}
+	config, _ := params["frpc_config"].(string)
+	return strings.TrimSpace(config) != ""
 }
 
 func (s *Server) handleDeleteInbound(w http.ResponseWriter, r *http.Request) {

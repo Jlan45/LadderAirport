@@ -85,6 +85,50 @@ func TestRemovedNodeTLSColumnsAreDropped(t *testing.T) {
 	}
 }
 
+func TestLegacyGlobalFRPMigratesToNodeAttachments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frp.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := &Node{Name: "edge", Address: "192.0.2.1", GRPCPort: 50051}
+	if err := st.CreateNode(node); err != nil {
+		t.Fatal(err)
+	}
+	config := `{"server_addr":"frps.example.com","server_port":7000,"remote_port":57115,"token":"secret"}`
+	inbound := &InboundConfig{Name: "ss", Protocol: "shadowsocks", Enabled: true, Params: map[string]any{
+		"port": 8388, "method": "aes-256-gcm", "password": "secret", "frp_enabled": true, "frpc_config": config,
+	}}
+	if err := st.CreateInbound(inbound); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(node.ID, []string{inbound.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`ALTER TABLE node_inbounds DROP COLUMN frp_enabled`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.Exec(`ALTER TABLE node_inbounds DROP COLUMN frpc_config`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	attachments, err := st.ListNodeInboundAttachments(node.ID)
+	if err != nil || len(attachments) != 1 || !attachments[0].FRPEnabled || attachments[0].FRPCConfig != config {
+		t.Fatalf("attachments = %+v, %v", attachments, err)
+	}
+	global, err := st.GetInbound(inbound.ID)
+	if err != nil || global.Params["frp_enabled"] != nil || global.Params["frpc_config"] != nil {
+		t.Fatalf("global inbound still has FRP: %+v, %v", global, err)
+	}
+}
+
 func TestSubscriptionInboundModeMigration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite", path)

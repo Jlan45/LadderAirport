@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ladderairport/panel/internal/frpconnection"
 	"github.com/ladderairport/panel/internal/nodeconfig"
 	"github.com/ladderairport/panel/internal/store"
 )
@@ -434,6 +435,24 @@ func (s *Server) handleSetNodeInbounds(w http.ResponseWriter, r *http.Request) {
 		bindings = make([]store.NodeInboundBinding, 0, len(body.InboundIDs))
 		for _, iid := range body.InboundIDs {
 			bindings = append(bindings, store.NodeInboundBinding{InboundID: iid})
+		}
+	}
+	for _, binding := range bindings {
+		inbound, err := s.Store.GetInbound(binding.InboundID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		_, active, err := frpconnection.ParseParams(map[string]any{
+			"frp_enabled": binding.FRPEnabled, "frpc_config": binding.FRPCConfig,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if active && (inbound.Protocol == "hysteria2" || inbound.Protocol == "tuic") {
+			writeError(w, http.StatusBadRequest, "当前 FRP 仅支持 TCP 入站")
+			return
 		}
 	}
 	if err := s.Store.SetNodeInboundBindings(id, bindings); err != nil {

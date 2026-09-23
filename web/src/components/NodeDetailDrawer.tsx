@@ -308,6 +308,8 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
         natMap[item.id] = {
           public_address: item.public_address || '',
           public_port: item.public_port || 0,
+          frp_enabled: item.frp_enabled || false,
+          frpc_config: item.frpc_config || '',
         }
       }
       const tlsResults = await Promise.all(
@@ -485,7 +487,7 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     setInboundNAT((current) => {
       const next = { ...current }
       if (next[inboundId]) delete next[inboundId]
-      else next[inboundId] = { public_address: '', public_port: 0 }
+      else next[inboundId] = { public_address: '', public_port: 0, frp_enabled: false, frpc_config: '' }
       return next
     })
   }
@@ -521,14 +523,33 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
 
   const onSaveInbounds = async () => {
     if (busy || inboundsLoading || !node) return
+    for (const [inboundId, binding] of Object.entries(inboundNAT)) {
+      if (!binding.frp_enabled) continue
+      let config: Record<string, unknown>
+      try { config = JSON.parse(binding.frpc_config) as Record<string, unknown> } catch { config = {} }
+      const validPort = (value: unknown) => /^\d+$/.test(String(value ?? '')) && Number(value) >= 1 && Number(value) <= 65535
+      if (!String(config.server_addr ?? '').trim() || !String(config.token ?? '').trim() || !validPort(config.server_port) || !validPort(config.remote_port)) {
+        toast.warning(`入站「${allInbounds.find((item) => item.id === inboundId)?.name ?? inboundId}」的 FRPS 地址、控制端口、远端端口和 Token 必须填写完整`)
+        return
+      }
+    }
     setBusyAction('save-inbounds')
     const currentGen = generationRef.current
     const bindings: NodeInboundBinding[] = Object.entries(inboundNAT).map(
-      ([inboundId, nat]) => ({
-        inbound_id: inboundId,
-        public_address: nat.public_address.trim() || undefined,
-        public_port: Number(nat.public_port) || undefined,
-      }),
+      ([inboundId, nat]) => {
+        const frpc = nat.frp_enabled ? JSON.parse(nat.frpc_config) as Record<string, unknown> : null
+        return {
+          inbound_id: inboundId,
+          public_address: nat.public_address.trim() || undefined,
+          public_port: Number(nat.public_port) || undefined,
+          frp_enabled: nat.frp_enabled,
+          frpc_config: frpc ? JSON.stringify({
+            ...frpc,
+            server_port: Number(frpc.server_port),
+            remote_port: Number(frpc.remote_port),
+          }) : '',
+        }
+      },
     )
     try {
       const res = await setNodeInboundBindings(id, bindings)

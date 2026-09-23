@@ -17,6 +17,23 @@ import type {
 export interface InboundNATEdit {
   public_address: string
   public_port: number
+  frp_enabled: boolean
+  frpc_config: string
+}
+
+type FRPSField = 'server_addr' | 'server_port' | 'remote_port' | 'token'
+function frpcFields(raw: string): Record<FRPSField, string> {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>
+    return {
+      server_addr: String(value.server_addr ?? ''),
+      server_port: String(value.server_port ?? '7000'),
+      remote_port: String(value.remote_port ?? ''),
+      token: String(value.token ?? ''),
+    }
+  } catch {
+    return { server_addr: '', server_port: '7000', remote_port: '', token: '' }
+  }
 }
 
 export interface NodeInboundsTabProps {
@@ -69,13 +86,13 @@ export function NodeInboundsTab({
       <div className="space-y-4 rounded-lg border border-border bg-card/40 p-5">
         <div className="space-y-1">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-foreground">关联入站 + NAT 映射</h3>
+            <h3 className="text-sm font-semibold text-foreground">关联入站 + 对外暴露方式</h3>
             <Badge variant="success" className="text-[10px] px-2 py-0.5 font-medium">
               保存后自动下发并启动核心
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground">
-            勾选入站后可填写该入站的公网 IP/域名 和公网端口（仅订阅用）。保存后会自动下发 sing-box 配置并<strong>自动启动核心服务</strong>。
+            勾选入站后可选择直接暴露（可设置订阅用公网地址和端口），或通过 FRP 暴露。保存后会自动下发 sing-box 配置并<strong>自动启动核心服务</strong>。
           </p>
         </div>
 
@@ -108,6 +125,8 @@ export function NodeInboundsTab({
               const listenPort = Number(inb.params?.port) || 0
               const checked = !!inboundNAT[inb.id]
               const nat = inboundNAT[inb.id]
+              const frpc = frpcFields(nat?.frpc_config ?? '')
+              const frpSupported = inb.protocol !== 'hysteria2' && inb.protocol !== 'tuic'
               const attached = !!savedInboundNAT[inb.id]
               const tlsBinding = tlsBindings[inb.id] ?? {
                 node_id: nodeId,
@@ -152,7 +171,7 @@ export function NodeInboundsTab({
                         </Label>
                         <span className="text-xs text-muted-foreground font-mono">
                           {inb.protocol}
-                          {listenPort ? ` · 监听 ${listenPort}` : ''}
+                          {listenPort ? ` · 协议端口 ${listenPort}` : ''}
                         </span>
                       </div>
                     </div>
@@ -160,7 +179,36 @@ export function NodeInboundsTab({
 
                   {checked && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-7 pt-2 border-t border-border">
-                      <div className="flex flex-col space-y-1.5">
+                      <div className="col-span-1 sm:col-span-2 space-y-3 rounded-md border border-border bg-background p-3">
+                        <div className="flex items-center gap-2">
+                          <Checkbox id={`inb-frp-${inb.id}`} checked={!!nat?.frp_enabled} disabled={busy || !frpSupported} onCheckedChange={(value) => updateInboundNAT(inb.id, { frp_enabled: Boolean(value) })} />
+                          <Label htmlFor={`inb-frp-${inb.id}`}>通过 FRP 暴露此入站</Label>
+                        </div>
+                        {!frpSupported && <p className="text-xs text-muted-foreground">此协议使用 UDP/QUIC，当前仅支持 TCP 入站。</p>}
+                        {nat?.frp_enabled && (
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            {([
+                              ['server_addr', 'FRPS 地址', 'frps.example.com'],
+                              ['server_port', '控制端口', '7000'],
+                              ['remote_port', '远端端口 (remote_port)', '57115'],
+                              ['token', '认证 Token', 'FRPS Token'],
+                            ] as const).map(([key, label, placeholder]) => (
+                              <div key={key} className="space-y-1.5">
+                                <Label htmlFor={`inb-frp-${inb.id}-${key}`}>{label}</Label>
+                                <Input id={`inb-frp-${inb.id}-${key}`} type={key === 'token' ? 'password' : key.endsWith('port') ? 'number' : 'text'} value={frpc[key]} disabled={busy} placeholder={placeholder} onChange={(event) => {
+                                  const next = { ...frpc, [key]: event.target.value }
+                                  updateInboundNAT(inb.id, { frpc_config: JSON.stringify(next) })
+                                }} />
+                              </div>
+                            ))}
+                            <p className="sm:col-span-2 text-xs text-muted-foreground">Agent 内嵌 FRPC 转发到本机回环高位端口；对外使用指定的远端端口。</p>
+                            {frpc.server_addr && frpc.remote_port && <p className="sm:col-span-2 text-xs text-muted-foreground">
+                              订阅入口：<code className="text-foreground">{frpc.server_addr}:{frpc.remote_port}</code>
+                            </p>}
+                          </div>
+                        )}
+                      </div>
+                      {!nat?.frp_enabled && <div className="flex flex-col space-y-1.5">
                         <span className="text-xs text-muted-foreground">公网 IP / 域名</span>
                         <Input
                           disabled={busy || inboundsLoading}
@@ -171,8 +219,8 @@ export function NodeInboundsTab({
                           }
                           className="h-8"
                         />
-                      </div>
-                      <div className="flex flex-col space-y-1.5">
+                      </div>}
+                      {!nat?.frp_enabled && <div className="flex flex-col space-y-1.5">
                         <span className="text-xs text-muted-foreground">公网端口</span>
                         <Input
                           type="number"
@@ -186,8 +234,8 @@ export function NodeInboundsTab({
                           }
                           className="h-8"
                         />
-                      </div>
-                      <div className="col-span-1 sm:col-span-2 text-xs text-muted-foreground font-mono mt-1">
+                      </div>}
+                      {!nat?.frp_enabled && <div className="col-span-1 sm:col-span-2 text-xs text-muted-foreground font-mono mt-1">
                         订阅解析入口：
                         <code className="text-foreground bg-muted px-1 py-0.5 rounded font-mono">
                           {(nat?.public_address || editPublic || nodeAddress || '—') +
@@ -198,7 +246,7 @@ export function NodeInboundsTab({
                                 : listenPort || '—',
                             )}
                         </code>
-                      </div>
+                      </div>}
 
                       {supportsManagedTLS(inb) && (
                         <div className="col-span-1 sm:col-span-2 space-y-3 rounded-md border border-border bg-background p-3">

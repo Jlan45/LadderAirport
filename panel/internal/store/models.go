@@ -195,8 +195,8 @@ func MapPublicPort(mappings []PortMapping, listenPort int) int {
 	return listenPort
 }
 
-// NodeInboundAttachment is an inbound linked to a node, with optional client-facing NAT overrides.
-// Agent still listens on inbound params.port; PublicAddress/PublicPort only affect subscriptions.
+// NodeInboundAttachment is an inbound linked to a node, with per-node exposure settings.
+// PublicAddress/PublicPort only affect subscriptions for directly exposed inbounds.
 type NodeInboundAttachment struct {
 	InboundConfig
 	// PublicAddress overrides node.public_address / address for this inbound in subscriptions.
@@ -204,7 +204,21 @@ type NodeInboundAttachment struct {
 	PublicAddress string `json:"public_address"`
 	// PublicPort is the external NAT-mapped port clients dial.
 	// 0 means use inbound listen port (params.port), then node port_mappings if any.
-	PublicPort int `json:"public_port"`
+	PublicPort int    `json:"public_port"`
+	FRPEnabled bool   `json:"frp_enabled"`
+	FRPCConfig string `json:"frpc_config"`
+}
+
+// EffectiveInbound overlays node-specific FRP settings without changing the reusable template.
+func (a NodeInboundAttachment) EffectiveInbound() InboundConfig {
+	in := a.InboundConfig
+	in.Params = make(map[string]any, len(a.Params)+2)
+	for key, value := range a.Params {
+		in.Params[key] = value
+	}
+	in.Params["frp_enabled"] = a.FRPEnabled
+	in.Params["frpc_config"] = a.FRPCConfig
+	return in
 }
 
 // NodeInboundBinding is the write payload for attaching an inbound with NAT overrides.
@@ -212,6 +226,8 @@ type NodeInboundBinding struct {
 	InboundID     string `json:"inbound_id"`
 	PublicAddress string `json:"public_address"`
 	PublicPort    int    `json:"public_port"`
+	FRPEnabled    bool   `json:"frp_enabled"`
+	FRPCConfig    string `json:"frpc_config"`
 }
 
 type InboundConfig struct {
@@ -443,37 +459,37 @@ type DNSAccount struct {
 
 // ManagedDomain describes the desired DNS endpoint for one node.
 type ManagedDomain struct {
-	ID                   string   `json:"id"`
-	NodeID               string   `json:"node_id"`
-	DNSAccountID         string   `json:"dns_account_id"`
-	Zone                 string   `json:"zone"`
-	FQDN                 string   `json:"fqdn"`
-	RecordMode           string   `json:"record_mode"`    // a | aaaa | dual | cname
-	AddressSource        string   `json:"address_source"` // manual | node_address | agent_public
-	ManualIPv4           string   `json:"manual_ipv4,omitempty"`
-	ManualIPv6           string   `json:"manual_ipv6,omitempty"`
-	ManualCNAME          string   `json:"manual_cname,omitempty"`
-	TTL                  int      `json:"ttl"`
-	Enabled              bool     `json:"enabled"`
-	State                string   `json:"state"`
-	DesiredIPv4          string   `json:"desired_ipv4,omitempty"`
-	DesiredIPv6          string   `json:"desired_ipv6,omitempty"`
-	DesiredCNAME         string   `json:"desired_cname,omitempty"`
-	ObservedIPv4         []string `json:"observed_ipv4"`
-	ObservedIPv6         []string `json:"observed_ipv6"`
-	ObservedCNAME        []string `json:"observed_cname"`
-	ProviderRecordAID    string   `json:"provider_record_a_id,omitempty"`
-	ProviderRecordAAAAID string   `json:"provider_record_aaaa_id,omitempty"`
-	ProviderRecordCNAMEID string  `json:"provider_record_cname_id,omitempty"`
-	CreatedAByPanel      bool     `json:"created_a_by_panel"`
-	CreatedAAAAByPanel   bool     `json:"created_aaaa_by_panel"`
-	CreatedCNAMEByPanel  bool     `json:"created_cname_by_panel"`
-	LastReconcileUnix    int64    `json:"last_reconcile_unix"`
-	NextReconcileUnix    int64    `json:"next_reconcile_unix"`
-	RetryCount           int      `json:"retry_count"`
-	LastError            string   `json:"last_error,omitempty"`
-	CreatedAtUnix        int64    `json:"created_at_unix"`
-	UpdatedAtUnix        int64    `json:"updated_at_unix"`
+	ID                    string   `json:"id"`
+	NodeID                string   `json:"node_id"`
+	DNSAccountID          string   `json:"dns_account_id"`
+	Zone                  string   `json:"zone"`
+	FQDN                  string   `json:"fqdn"`
+	RecordMode            string   `json:"record_mode"`    // a | aaaa | dual | cname
+	AddressSource         string   `json:"address_source"` // manual | node_address | agent_public
+	ManualIPv4            string   `json:"manual_ipv4,omitempty"`
+	ManualIPv6            string   `json:"manual_ipv6,omitempty"`
+	ManualCNAME           string   `json:"manual_cname,omitempty"`
+	TTL                   int      `json:"ttl"`
+	Enabled               bool     `json:"enabled"`
+	State                 string   `json:"state"`
+	DesiredIPv4           string   `json:"desired_ipv4,omitempty"`
+	DesiredIPv6           string   `json:"desired_ipv6,omitempty"`
+	DesiredCNAME          string   `json:"desired_cname,omitempty"`
+	ObservedIPv4          []string `json:"observed_ipv4"`
+	ObservedIPv6          []string `json:"observed_ipv6"`
+	ObservedCNAME         []string `json:"observed_cname"`
+	ProviderRecordAID     string   `json:"provider_record_a_id,omitempty"`
+	ProviderRecordAAAAID  string   `json:"provider_record_aaaa_id,omitempty"`
+	ProviderRecordCNAMEID string   `json:"provider_record_cname_id,omitempty"`
+	CreatedAByPanel       bool     `json:"created_a_by_panel"`
+	CreatedAAAAByPanel    bool     `json:"created_aaaa_by_panel"`
+	CreatedCNAMEByPanel   bool     `json:"created_cname_by_panel"`
+	LastReconcileUnix     int64    `json:"last_reconcile_unix"`
+	NextReconcileUnix     int64    `json:"next_reconcile_unix"`
+	RetryCount            int      `json:"retry_count"`
+	LastError             string   `json:"last_error,omitempty"`
+	CreatedAtUnix         int64    `json:"created_at_unix"`
+	UpdatedAtUnix         int64    `json:"updated_at_unix"`
 }
 
 // ACMEAccount stores public registration metadata and encrypted account/EAB keys.

@@ -44,24 +44,6 @@ import DynamicForm, {
 import { copyText } from '../lib/clipboard'
 import { toast } from '../lib/toast'
 
-type FRPSConnection = { server_addr: string; server_port: string; remote_port: string; token: string }
-const emptyFRPSConnection = (): FRPSConnection => ({ server_addr: '', server_port: '7000', remote_port: '', token: '' })
-
-function readFRPSConnection(value: unknown): FRPSConnection {
-  if (typeof value !== 'string') return emptyFRPSConnection()
-  try {
-    const parsed = JSON.parse(value) as Record<string, unknown>
-    return {
-      server_addr: String(parsed.server_addr ?? ''),
-      server_port: String(parsed.server_port ?? '7000'),
-      remote_port: String(parsed.remote_port ?? ''),
-      token: String(parsed.token ?? ''),
-    }
-  } catch {
-    return emptyFRPSConnection()
-  }
-}
-
 export default function Inbounds() {
   const [inbounds, setInbounds] = useState<InboundConfig[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
@@ -78,8 +60,6 @@ export default function Inbounds() {
   const [protocol, setProtocol] = useState('')
   const [enabled, setEnabled] = useState(true)
   const [params, setParams] = useState<Record<string, unknown>>({})
-  const [frpEnabled, setFrpEnabled] = useState(false)
-  const [frpcConfig, setFrpcConfig] = useState<FRPSConnection>(emptyFRPSConnection)
   const [nameError, setNameError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [lastCreated, setLastCreated] = useState<InboundConfig | null>(null)
@@ -90,7 +70,6 @@ export default function Inbounds() {
     () => templates.find((t) => t.protocol === protocol),
     [templates, protocol],
   )
-  const frpSupported = protocol !== 'hysteria2' && protocol !== 'tuic'
 
   const load = useCallback(async () => {
     const version = ++loadVersionRef.current
@@ -135,8 +114,6 @@ export default function Inbounds() {
     setFieldErrors({})
     const template = templates.find((item) => item.protocol === nextProtocol)
     setParams(template ? defaultsFromFields(template.fields) : {})
-    setFrpEnabled(false)
-    setFrpcConfig(emptyFRPSConnection())
   }
 
   function resetEditor(preferredProtocol = protocol) {
@@ -149,8 +126,6 @@ export default function Inbounds() {
     setEnabled(true)
     setProtocol(template?.protocol ?? '')
     setParams(template ? defaultsFromFields(template.fields) : {})
-    setFrpEnabled(false)
-    setFrpcConfig(emptyFRPSConnection())
   }
 
   function startEdit(inbound: InboundConfig) {
@@ -164,8 +139,6 @@ export default function Inbounds() {
     setProtocol(inbound.protocol)
     setEnabled(inbound.enabled)
     setParams(valuesFromFields(template.fields, inbound.params))
-    setFrpEnabled(inbound.params.frp_enabled === true)
-    setFrpcConfig(readFRPSConnection(inbound.params.frpc_config))
     setNameError('')
     setFieldErrors({})
     setLastCreated(null)
@@ -185,11 +158,6 @@ export default function Inbounds() {
       return false
     }
     const nextFieldErrors = validateDynamicFields(selectedTemplate.fields, params)
-    if (frpEnabled && (!frpcConfig.server_addr.trim() || !frpcConfig.token.trim() ||
-      !Number.isInteger(Number(frpcConfig.server_port)) || Number(frpcConfig.server_port) < 1 || Number(frpcConfig.server_port) > 65535 ||
-      !Number.isInteger(Number(frpcConfig.remote_port)) || Number(frpcConfig.remote_port) < 1 || Number(frpcConfig.remote_port) > 65535)) {
-      nextFieldErrors.frpc_config = '请填写有效的地址、控制端口、对外端口和 Token'
-    }
     setFieldErrors(nextFieldErrors)
     if (nextNameError || Object.keys(nextFieldErrors).length > 0) {
       toast.warning('请修正表单中的错误后再保存')
@@ -208,8 +176,6 @@ export default function Inbounds() {
       }
       out[field.name] = normalized ?? ''
     }
-    out.frp_enabled = frpEnabled
-    out.frpc_config = frpEnabled ? JSON.stringify({ ...frpcConfig, server_port: Number(frpcConfig.server_port), remote_port: Number(frpcConfig.remote_port) }) : ''
     return out
   }
 
@@ -469,37 +435,6 @@ export default function Inbounds() {
                 </Alert>
               ) : null}
 
-              <div className="space-y-3 pt-4 border-t border-border">
-                <div className="flex items-center gap-2">
-                  <Checkbox id="inbound-frp-enabled" checked={frpEnabled} disabled={busy || !frpSupported} onCheckedChange={(value) => setFrpEnabled(Boolean(value))} />
-                  <Label htmlFor="inbound-frp-enabled" className="cursor-pointer">通过 FRP 暴露此入站</Label>
-                </div>
-                {!frpSupported && <p className="text-xs text-muted-foreground">此协议使用 UDP/QUIC，当前 FRP 直连仅支持 TCP 入站。</p>}
-                {frpEnabled && (
-                  <div className="space-y-1.5">
-                    <Label>FRPS 连接信息 <span className="text-destructive">*</span></Label>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {([
-                        ['server_addr', '服务端地址', 'frps.example.com'],
-                        ['server_port', '控制端口', '7000'],
-                        ['remote_port', '远端端口 (remote_port)', '57115'],
-                        ['token', '认证 Token', 'FRPS Token'],
-                      ] as const).map(([key, label, placeholder]) => (
-                        <div key={key} className="space-y-1.5">
-                          <Label htmlFor={`frps-${key}`}>{label}</Label>
-                          <Input id={`frps-${key}`} type={key === 'token' ? 'password' : key.endsWith('port') ? 'number' : 'text'} value={frpcConfig[key]} disabled={busy} placeholder={placeholder} onChange={(event) => {
-                            setFrpcConfig((current) => ({ ...current, [key]: event.target.value }))
-                            setFieldErrors((current) => ({ ...current, frpc_config: '' }))
-                          }} />
-                        </div>
-                      ))}
-                    </div>
-                    {fieldErrors.frpc_config && <p className="text-xs text-destructive">{fieldErrors.frpc_config}</p>}
-                    <p className="text-xs text-muted-foreground">填写 FRPS 地址、控制端口、Token 和对外端口。系统自动生成 TCP 映射；上方入站端口只保留为协议配置值，不会创建监听。</p>
-                  </div>
-                )}
-              </div>
-
               <div className="flex gap-2 pt-2 border-t border-border">
                 <Button
                   type="submit"
@@ -601,7 +536,6 @@ export default function Inbounds() {
                             <Badge variant={row.enabled ? 'success' : 'secondary'}>
                               {row.enabled ? '已启用' : '已禁用'}
                             </Badge>
-                            {row.params.frp_enabled === true && <Badge variant="secondary">FRP</Badge>}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -691,6 +625,7 @@ const SECRET_KEYS = new Set([
   'tls_cert_path',
   'tls_key_path',
   'frpc_config',
+  'frp_enabled',
 ])
 
 function summarizeParams(params: Record<string, unknown> | null | undefined): string {

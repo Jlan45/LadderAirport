@@ -22,14 +22,15 @@ func TestBuildFRPInboundUsesLoopbackHighPort(t *testing.T) {
 		Name: "ss-frp", Protocol: "shadowsocks", Enabled: true,
 		Params: map[string]any{
 			"listen": "0.0.0.0", "port": 8388, "method": "aes-256-gcm", "password": "secret",
-			"frp_enabled": true,
-			"frpc_config": `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
 		},
 	}
 	if err := st.CreateInbound(inbound); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetNodeInbounds(node.ID, []string{inbound.ID}); err != nil {
+	if err := st.SetNodeInboundBindings(node.ID, []store.NodeInboundBinding{{
+		InboundID: inbound.ID, FRPEnabled: true,
+		FRPCConfig: `{"server_addr":"frps.example.com","server_port":7000,"remote_port":20001,"token":"secret"}`,
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := (&Builder{Store: st}).Build(node.ID)
@@ -59,6 +60,24 @@ func TestBuildFRPInboundUsesLoopbackHighPort(t *testing.T) {
 	}
 	if int(connection["local_port"].(float64)) != localPort || int(connection["remote_port"].(float64)) != 20001 {
 		t.Fatalf("FRPC mapping = %v", connection)
+	}
+	otherNode := &store.Node{Name: "direct", Address: "192.0.2.11", GRPCPort: 50051, Status: "online"}
+	if err := st.CreateNode(otherNode); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetNodeInbounds(otherNode.ID, []string{inbound.ID}); err != nil {
+		t.Fatal(err)
+	}
+	other, err := (&Builder{Store: st}).Build(otherNode.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document = nil
+	if err := json.Unmarshal([]byte(other.JSON), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document["ladder_frpc"] != nil || document["inbounds"].([]any)[0].(map[string]any)["listen"] != "0.0.0.0" {
+		t.Fatalf("FRP setting leaked to other node: %s", other.JSON)
 	}
 }
 

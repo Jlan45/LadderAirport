@@ -82,7 +82,7 @@ func CollectEndpointsFromAttachments(nodes []store.Node, nodeAttachments map[str
 	for _, n := range nodes {
 		atts := nodeAttachments[n.ID]
 		for _, att := range atts {
-			in := att.InboundConfig
+			in := att.EffectiveInbound()
 			if !in.Enabled {
 				continue
 			}
