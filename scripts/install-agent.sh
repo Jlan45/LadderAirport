@@ -71,6 +71,18 @@ NODE_ID="${LADDER_NODE_ID:-}"
 REPORT_ADDR="${LADDER_REPORT_ADDRESS:-}" # force reported address; else auto-detect
 GRPC_PORT_HINT="${LADDER_GRPC_PORT:-}"
 ALLOW_HTTP="${LADDER_ALLOW_HTTP:-0}"
+# Distinguish "operator passed the variable" from the default, so an upgrade
+# can read LADDER_UPLINK out of an existing agent.env.
+if [[ -n "${LADDER_UPLINK+x}" ]]; then
+  UPLINK_EXPLICIT=1
+else
+  UPLINK_EXPLICIT=0
+fi
+if [[ -n "${LADDER_UPLINK_SERVE_GRPC+x}" ]]; then
+  UPLINK_SERVE_GRPC_EXPLICIT=1
+else
+  UPLINK_SERVE_GRPC_EXPLICIT=0
+fi
 UPLINK="${LADDER_UPLINK:-0}"
 UPLINK_SERVE_GRPC="${LADDER_UPLINK_SERVE_GRPC:-0}"
 # 公网 IP 探测端点（用于证书 SAN 与上报地址兜底）。默认 api.ipify.org；
@@ -302,6 +314,81 @@ build_san_list() {
   echo "${joined}"
 }
 
+is_truthy() {
+  local value
+  value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "${value}" in
+    1|true|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# HTTP report + WebSocket uplink does not serve mTLS, so it skips management TLS
+# unless the operator explicitly keeps the gRPC listener.
+skip_management_tls() {
+  is_truthy "${UPLINK}" && ! is_truthy "${UPLINK_SERVE_GRPC}"
+}
+
+load_saved_uplink_mode() {
+  [[ -f "${ENV_FILE}" ]] || return 0
+  local saved
+  if [[ "${UPLINK_EXPLICIT}" -eq 0 ]]; then
+    saved="$(grep -E '^LADDER_UPLINK=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    [[ -n "${saved}" ]] && UPLINK="${saved}"
+  fi
+  if [[ "${UPLINK_SERVE_GRPC_EXPLICIT}" -eq 0 ]]; then
+    saved="$(grep -E '^LADDER_UPLINK_SERVE_GRPC=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
+    [[ -n "${saved}" ]] && UPLINK_SERVE_GRPC="${saved}"
+  fi
+}
+
+# Exchange the one-time enrollment token for the long-lived control token.
+# Uplink nodes call this instead of the certificate endpoint.
+exchange_control_token() {
+  need_cmd curl
+  need_cmd python3
+  local _saved_umask
+  _saved_umask="$(umask)"
+  umask 077
+  mkdir -p "${CONF_DIR}"
+  chmod 700 "${CONF_DIR}"
+  local response_file="${CONF_DIR}/enroll-response.tmp"
+  local payload_file="${CONF_DIR}/enroll-request.tmp"
+  local token_file="${CONF_DIR}/control-token.tmp"
+
+  echo "==> uplink 节点跳过管理面 TLS，只交换控制令牌"
+  echo "    Panel=${PANEL_URL%/} Node=${NODE_ID}"
+  PANEL_NODE_ID="${NODE_ID}" python3 - <<'PY' >"${payload_file}"
+import json, os
+print(json.dumps({"node_id": os.environ["PANEL_NODE_ID"]}))
+PY
+
+  local code
+  code="$(curl -sS --max-time 30 --retry 3 -o "${response_file}" -w '%{http_code}' \
+    -X POST "${PANEL_URL%/}/api/v1/agent/enroll" \
+    -H "Authorization: Bearer ${ENROLL_TOKEN:-${ACTIVE_TOKEN:-${TOKEN}}}" \
+    -H "Content-Type: application/json" \
+    --data-binary "@${payload_file}")" || die "Panel 注册请求失败"
+  if [[ "${code}" != "200" ]]; then
+    die "Panel 注册失败 (HTTP ${code}): $(head -c 500 "${response_file}")"
+  fi
+  PANEL_RESPONSE="${response_file}" PANEL_TOKEN_FILE="${token_file}" python3 - <<'PY'
+import json, os
+with open(os.environ["PANEL_RESPONSE"], "r", encoding="utf-8") as f:
+    data = json.load(f)
+token = data.get("control_token", "")
+if not token:
+    raise SystemExit("Panel 响应缺少 control_token")
+with open(os.environ["PANEL_TOKEN_FILE"], "w", encoding="utf-8") as f:
+    f.write(token)
+PY
+  TOKEN="$(cat "${token_file}")"
+  ACTIVE_TOKEN="${TOKEN}"
+  rm -f "${response_file}" "${payload_file}" "${token_file}"
+  umask "${_saved_umask}"
+  [[ -n "${TOKEN}" ]] || die "Panel 未返回 Agent 控制令牌"
+}
+
 # Request a Panel-issued Agent certificate. The private key is generated on the
 # Agent and never sent to Panel.
 ensure_tls_material() {
@@ -472,10 +559,14 @@ install_binary() {
 }
 
 write_unit() {
+  local unit_desc="LadderAirport Agent (Panel-managed mTLS)"
+  if skip_management_tls; then
+    unit_desc="LadderAirport Agent (uplink HTTP+WS)"
+  fi
   echo "==> 写入 systemd: ${SERVICE_DST}"
   cat >"${SERVICE_DST}" <<EOF
 [Unit]
-Description=LadderAirport Agent (Panel-managed mTLS)
+Description=${unit_desc}
 After=network-online.target
 Wants=network-online.target
 
@@ -729,21 +820,31 @@ require_installed() {
 
 # ---------- install ----------
 do_install() {
-  [[ -n "${PANEL_URL}" ]] || die "缺少 LADDER_PANEL；Agent 只支持 Panel 管理 PKI"
+  load_saved_uplink_mode
+  [[ -n "${PANEL_URL}" ]] || die "缺少 LADDER_PANEL"
   [[ -n "${NODE_ID}" ]] || die "缺少 LADDER_NODE_ID"
   if [[ "${PANEL_URL}" != https://* && "${ALLOW_HTTP}" != "1" ]]; then
     die "LADDER_PANEL 必须使用 HTTPS；仅隔离测试环境可设置 LADDER_ALLOW_HTTP=1"
   fi
   if [[ -f "${ENV_FILE}" || -f "${SERVICE_DST}" ]]; then
     load_tls_from_env
-    if [[ -f "${TLS_DIR}/ca.key" || -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" ||
-      -z "${TLS_CLIENT_CA_PATH}" ]]; then
+    if [[ -f "${TLS_DIR}/ca.key" ]]; then
       die "检测到不兼容的旧 Agent；请先用 LADDER_ACTION=uninstall LADDER_PURGE=1 全清卸载，再在 Panel 新建节点并执行新的安装命令"
+    fi
+    if ! skip_management_tls; then
+      if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" ]]; then
+        die "检测到不兼容的旧 Agent；请先用 LADDER_ACTION=uninstall LADDER_PURGE=1 全清卸载，再在 Panel 新建节点并执行新的安装命令"
+      fi
     fi
   fi
   if [[ -z "${ENROLL_TOKEN}" ]]; then
-    if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" || -f "${TLS_DIR}/ca.key" ]]; then
+    if [[ -f "${TLS_DIR}/ca.key" ]]; then
       die "检测到不兼容的旧 Agent；请先全清卸载，再在 Panel 新建节点并执行新的安装命令"
+    fi
+    if ! skip_management_tls; then
+      if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" ]]; then
+        die "检测到不兼容的旧 Agent；请先全清卸载，再在 Panel 新建节点并执行新的安装命令"
+      fi
     fi
     if [[ -z "${TOKEN}" && -f "${ENV_FILE}" ]]; then
       TOKEN="$(grep -E '^LADDER_TOKEN=' "${ENV_FILE}" | head -1 | cut -d= -f2- || true)"
@@ -760,10 +861,19 @@ do_install() {
   src="$(resolve_binary)"
   install_binary "${src}"
 
-  ensure_tls_material
-  TLS_CERT_PATH="${TLS_DIR}/server.crt"
-  TLS_KEY_PATH="${TLS_DIR}/server.key"
-  TLS_CLIENT_CA_PATH="${TLS_DIR}/ca.crt"
+  if skip_management_tls; then
+    if [[ -n "${ENROLL_TOKEN}" || -z "${TOKEN}" ]]; then
+      exchange_control_token
+    fi
+    TLS_CERT_PATH=""
+    TLS_KEY_PATH=""
+    TLS_CLIENT_CA_PATH=""
+  else
+    ensure_tls_material
+    TLS_CERT_PATH="${TLS_DIR}/server.crt"
+    TLS_KEY_PATH="${TLS_DIR}/server.key"
+    TLS_CLIENT_CA_PATH="${TLS_DIR}/ca.crt"
+  fi
   rm -f "${TLS_DIR}/ca.key" "${TLS_DIR}/ca.srl" "${CONF_DIR}/panel-import.txt"
 
   echo "==> 配置 ${ENV_FILE}"
@@ -823,14 +933,20 @@ PY
   echo "  服务:    ${SERVICE_NAME} (已 enable + start)"
   echo "  BBR:     ladder-agent-bbr.path (已 enable + start；Panel 节点详情「系统状态」页签开关)"
   echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
-  echo "  TLS:     Panel CA + strict mTLS"
+  if skip_management_tls; then
+    echo "  TLS:     未初始化（HTTP 上报 + WebSocket）"
+  else
+    echo "  TLS:     Panel CA + strict mTLS"
+  fi
   echo "  Panel:   ${PANEL_URL%/}"
   echo "  请在 Panel 刷新节点 → 探测"
   echo
   echo "运维: systemctl status|restart ladder-agent ; journalctl -u ladder-agent -f"
   echo "升级: curl -fsSL .../install-agent.sh | sudo env LADDER_ACTION=upgrade [LADDER_VERSION=vX.Y.Z] bash"
   echo "卸载: curl -fsSL .../install-agent.sh | sudo env LADDER_ACTION=uninstall bash"
-  echo "证书会由 Agent 自动续签；不要删除 ${TLS_DIR}/server.key"
+  if ! skip_management_tls; then
+    echo "证书会由 Agent 自动续签；不要删除 ${TLS_DIR}/server.key"
+  fi
 }
 
 # ---------- upgrade ----------
@@ -840,13 +956,23 @@ do_upgrade() {
   if [[ ! -f "${ENV_FILE}" ]]; then
     die "缺少 ${ENV_FILE}"
   fi
+  load_saved_uplink_mode
   load_tls_from_env
-  if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" || -z "${PANEL_URL}" || -z "${NODE_ID}" ]]; then
-    die "检测到不兼容的旧 Agent TLS；请先用 LADDER_ACTION=uninstall LADDER_PURGE=1 全清卸载，再重新安装"
-  fi
   [[ ! -f "${TLS_DIR}/ca.key" ]] || die "检测到旧节点 CA 私钥；请先全清卸载，再重新安装"
+  if [[ -z "${PANEL_URL}" || -z "${NODE_ID}" ]]; then
+    die "缺少 Panel URL 或节点 ID；请先用 LADDER_ACTION=uninstall LADDER_PURGE=1 全清卸载，再重新安装"
+  fi
+  if ! skip_management_tls; then
+    if [[ -z "${TLS_CERT_PATH}" || -z "${TLS_KEY_PATH}" || -z "${TLS_CLIENT_CA_PATH}" ]]; then
+      die "检测到不兼容的旧 Agent TLS；请先用 LADDER_ACTION=uninstall LADDER_PURGE=1 全清卸载，再重新安装"
+    fi
+  fi
 
-  echo "==> 升级 ladder-agent（保留 Panel PKI 身份）"
+  if skip_management_tls; then
+    echo "==> 升级 ladder-agent（uplink，不要求管理面 TLS）"
+  else
+    echo "==> 升级 ladder-agent（保留 Panel PKI 身份）"
+  fi
   ensure_user_and_dirs
 
   local src
@@ -866,7 +992,11 @@ do_upgrade() {
   echo "  配置:    ${ENV_FILE}（未改 Token）"
   echo "  服务:    ${SERVICE_NAME} (已 restart)"
   echo "  来源:    FROM=${FROM} VERSION=${VERSION}"
-  echo "  TLS:     Panel CA + strict mTLS"
+  if skip_management_tls; then
+    echo "  TLS:     未要求（HTTP 上报 + WebSocket）"
+  else
+    echo "  TLS:     Panel CA + strict mTLS"
+  fi
   echo
   echo "运维: systemctl status ladder-agent ; journalctl -u ladder-agent -f"
   echo "在 Panel 刷新/探测节点以确认 agent_version"

@@ -54,31 +54,10 @@ func (s *Server) handleIssueAgentCertificate(w http.ResponseWriter, r *http.Requ
 	if token == "" {
 		token = bearerToken(r)
 	}
-	want := strings.TrimSpace(n.Token)
-	nodeTokenValid := want != "" && token != "" && subtle.ConstantTimeCompare([]byte(want), []byte(token)) == 1
-	enrollmentTokenValid := false
-	if !nodeTokenValid && n.PKICertSerial == "" && token != "" {
-		enrollmentTokenValid, err = s.Store.ConsumePKIEnrollmentToken(n.ID, token)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if !nodeTokenValid && !enrollmentTokenValid {
-		writeError(w, http.StatusUnauthorized, "节点令牌无效或已过期")
+	want, status, msg := s.acceptNodeCredential(n, token)
+	if status != 0 {
+		writeError(w, status, msg)
 		return
-	}
-	if enrollmentTokenValid && want == "" {
-		want, err = randomAgentToken()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "生成控制令牌失败："+err.Error())
-			return
-		}
-		n.Token = want
-		if err := s.Store.UpdateNode(n); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 	}
 	issued, err := s.PKI.SignAgentCSR(n.ID, []byte(req.CSRPEM), time.Now())
 	if err != nil {
@@ -138,6 +117,38 @@ func (s *Server) handleIssueAgentCertificate(w http.ResponseWriter, r *http.Requ
 		ManagementID: firstURI(cert),
 		ControlToken: want,
 	})
+}
+
+// acceptNodeCredential checks the long-lived node token, or burns a one-time
+// enrollment token when the node has not yet bound a management certificate.
+// On success it returns the control token. A non-zero status is an HTTP error.
+func (s *Server) acceptNodeCredential(n *store.Node, token string) (string, int, string) {
+	token = strings.TrimSpace(token)
+	want := strings.TrimSpace(n.Token)
+	nodeTokenValid := want != "" && token != "" && subtle.ConstantTimeCompare([]byte(want), []byte(token)) == 1
+	enrollmentTokenValid := false
+	if !nodeTokenValid && n.PKICertSerial == "" && token != "" {
+		var err error
+		enrollmentTokenValid, err = s.Store.ConsumePKIEnrollmentToken(n.ID, token)
+		if err != nil {
+			return "", http.StatusInternalServerError, err.Error()
+		}
+	}
+	if !nodeTokenValid && !enrollmentTokenValid {
+		return "", http.StatusUnauthorized, "节点令牌无效或已过期"
+	}
+	if enrollmentTokenValid && want == "" {
+		var err error
+		want, err = randomAgentToken()
+		if err != nil {
+			return "", http.StatusInternalServerError, "生成控制令牌失败：" + err.Error()
+		}
+		n.Token = want
+		if err := s.Store.UpdateNode(n); err != nil {
+			return "", http.StatusInternalServerError, err.Error()
+		}
+	}
+	return want, 0, ""
 }
 
 func (s *Server) handlePKIBundle(w http.ResponseWriter, _ *http.Request) {

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -51,6 +52,41 @@ func (s *Store) ConsumePKIEnrollmentToken(nodeID, token string) (bool, error) {
 	}
 	n, _ := res.RowsAffected()
 	return n == 1, nil
+}
+
+// MarkAgentEnrolled records that an uplink node finished token registration
+// without a management certificate.
+func (s *Store) MarkAgentEnrolled(nodeID string) error {
+	if strings.TrimSpace(nodeID) == "" {
+		return fmt.Errorf("必须提供节点 ID")
+	}
+	res, err := s.db.Exec(
+		`UPDATE nodes SET agent_enrolled = 1, updated_at_unix = ? WHERE id = ?`,
+		nowUnix(), nodeID,
+	)
+	if err != nil {
+		return fmt.Errorf("记录节点注册状态失败：%w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("节点不存在：%s", nodeID)
+	}
+	return nil
+}
+
+// IsAgentEnrolled reports whether the node completed token registration.
+// Push nodes stay false until they bind a management certificate; the install
+// command uses the certificate serial for that case.
+func (s *Store) IsAgentEnrolled(nodeID string) (bool, error) {
+	var enrolled int
+	err := s.db.QueryRow(`SELECT agent_enrolled FROM nodes WHERE id = ?`, nodeID).Scan(&enrolled)
+	if err == sql.ErrNoRows {
+		return false, fmt.Errorf("节点不存在：%s", nodeID)
+	}
+	if err != nil {
+		return false, fmt.Errorf("读取节点注册状态失败：%w", err)
+	}
+	return enrolled != 0, nil
 }
 
 // ReplaceActivePKICertificate atomically records a newly issued certificate,

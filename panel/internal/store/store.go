@@ -548,6 +548,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE nodes ADD COLUMN control_mode TEXT NOT NULL DEFAULT 'push'`,
 		`ALTER TABLE nodes ADD COLUMN desired_runtime TEXT NOT NULL DEFAULT 'running'`,
 		`ALTER TABLE nodes ADD COLUMN uplink_last_seen_unix INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE nodes ADD COLUMN agent_enrolled INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE node_frps_configs ADD COLUMN managed_domain_id TEXT REFERENCES managed_domains(id) ON DELETE SET NULL`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_address TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE node_inbounds ADD COLUMN public_port INTEGER NOT NULL DEFAULT 0`,

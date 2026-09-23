@@ -127,7 +127,15 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "必须提供名称")
 		return
 	}
-	if s.PKI == nil {
+	mode := strings.TrimSpace(req.ControlMode)
+	if mode == "" {
+		mode = store.ControlModePush
+	}
+	if mode != store.ControlModePush && mode != store.ControlModeUplink {
+		writeError(w, http.StatusBadRequest, "control_mode 只能是 push 或 uplink")
+		return
+	}
+	if mode != store.ControlModeUplink && s.PKI == nil {
 		writeError(w, http.StatusServiceUnavailable, "管理 PKI 不可用")
 		return
 	}
@@ -147,14 +155,6 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "生成令牌失败："+err.Error())
 			return
 		}
-	}
-	mode := strings.TrimSpace(req.ControlMode)
-	if mode == "" {
-		mode = store.ControlModePush
-	}
-	if mode != store.ControlModePush && mode != store.ControlModeUplink {
-		writeError(w, http.StatusBadRequest, "control_mode 只能是 push 或 uplink")
-		return
 	}
 	port := req.GRPCPort
 	if port == 0 && mode != store.ControlModeUplink {
@@ -214,7 +214,7 @@ func (s *Server) handleBootstrapNode(w http.ResponseWriter, r *http.Request) {
 		InstallCommand:          cmd,
 		UpgradeCommand:          buildUpgradeCommand(installCommandOpts{ScriptURL: req.InstallScript, AgentVersion: upgradeVer}),
 		UninstallCommand:        buildUninstallCommand(installCommandOpts{ScriptURL: req.InstallScript}, false),
-		Steps:                   installSteps(addr, port),
+		Steps:                   installSteps(addr, port, created.ControlMode == store.ControlModeUplink),
 		PanelBaseURL:            panelBase,
 		RecommendedAgentVersion: rec,
 		Outdated:                isAgentVersionOutdated(created.AgentVersion, rec),
@@ -235,7 +235,12 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if s.PKI == nil {
+	enrolled, enrolledErr := s.Store.IsAgentEnrolled(n.ID)
+	if enrolledErr != nil {
+		writeError(w, http.StatusInternalServerError, enrolledErr.Error())
+		return
+	}
+	if nodeAwaitingRegistration(*n, enrolled) && n.ControlMode != store.ControlModeUplink && s.PKI == nil {
 		writeError(w, http.StatusServiceUnavailable, "管理 PKI 不可用")
 		return
 	}
@@ -254,7 +259,7 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 	}
 	scriptURL := q.Get("script_url")
 	cmd := ""
-	if n.PKICertSerial == "" {
+	if nodeAwaitingRegistration(*n, enrolled) {
 		enrollmentToken, tokenErr := s.Store.CreatePKIEnrollmentToken(n.ID, 15*time.Minute)
 		if tokenErr != nil {
 			writeError(w, http.StatusInternalServerError, tokenErr.Error())
@@ -282,7 +287,7 @@ func (s *Server) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request
 		InstallCommand:          cmd,
 		UpgradeCommand:          buildUpgradeCommand(installCommandOpts{ScriptURL: scriptURL, AgentVersion: upgradeVer}),
 		UninstallCommand:        buildUninstallCommand(installCommandOpts{ScriptURL: scriptURL}, false),
-		Steps:                   installSteps(n.Address, n.GRPCPort),
+		Steps:                   installSteps(n.Address, n.GRPCPort, n.ControlMode == store.ControlModeUplink),
 		PanelBaseURL:            panelBase,
 		RecommendedAgentVersion: rec,
 		Outdated:                isAgentVersionOutdated(n.AgentVersion, rec),
@@ -338,14 +343,28 @@ func (s *Server) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	if body.ControlMode != nil {
 		mode := strings.TrimSpace(*body.ControlMode)
 		body.ControlMode = &mode
+		current, getErr := s.Store.GetNode(id)
+		if getErr != nil {
+			writeError(w, http.StatusInternalServerError, getErr.Error())
+			return
+		}
 		if mode == store.ControlModeUplink {
-			current, getErr := s.Store.GetNode(id)
-			if getErr != nil {
-				writeError(w, http.StatusInternalServerError, getErr.Error())
-				return
-			}
 			if !hasCapability(current.Capabilities, "uplink-v1") && current.ControlMode != store.ControlModeUplink {
 				writeError(w, http.StatusBadRequest, "节点未上报 uplink-v1，请先升级 Agent")
+				return
+			}
+		}
+		if mode == store.ControlModePush && current.ControlMode == store.ControlModeUplink && current.PKICertSerial == "" {
+			enrolled, enrolledErr := s.Store.IsAgentEnrolled(current.ID)
+			if enrolledErr != nil {
+				writeError(w, http.StatusInternalServerError, enrolledErr.Error())
+				return
+			}
+			// A node that has not registered yet can still switch; the next
+			// install command will include PKI. One that already enrolled
+			// without a certificate cannot serve mTLS.
+			if enrolled {
+				writeError(w, http.StatusBadRequest, "该节点没有管理面证书，不能直接切回 push")
 				return
 			}
 		}

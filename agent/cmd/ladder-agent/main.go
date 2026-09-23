@@ -85,8 +85,17 @@ func main() {
 	if *token == "" || *token == "changeme" {
 		log.Fatal("必须提供 -token 或环境变量 LADDER_TOKEN（且不允许使用弱默认值 changeme）")
 	}
-	if *tlsCert == "" || *tlsKey == "" || *tlsClientCA == "" || *panelURL == "" || *nodeID == "" {
-		log.Fatal("必须同时提供 -tls-cert、-tls-key、-tls-client-ca、-panel-url 和 -node-id")
+	if *panelURL == "" || *nodeID == "" {
+		log.Fatal("必须提供 -panel-url 和 -node-id")
+	}
+	// Uplink nodes that only report over HTTP and take commands over the
+	// WebSocket do not serve mTLS. They skip management TLS entirely unless
+	// certificate files are still present from an older install.
+	hasTLS := *tlsCert != "" || *tlsKey != "" || *tlsClientCA != ""
+	if serveGRPC || hasTLS {
+		if *tlsCert == "" || *tlsKey == "" || *tlsClientCA == "" {
+			log.Fatal("监听 gRPC 或续签已有证书时，必须同时提供 -tls-cert、-tls-key 和 -tls-client-ca")
+		}
 	}
 	if err := managementpki.ParsePanelURL(*panelURL); err != nil {
 		log.Fatal(err)
@@ -148,20 +157,23 @@ func main() {
 		host = *reportAddress
 	}
 	panelHTTP := panelhttp.NewClient()
-	certManager, err := managementpki.New(managementpki.Config{
-		PanelURL:   *panelURL,
-		NodeID:     *nodeID,
-		Token:      *token,
-		CertPath:   *tlsCert,
-		KeyPath:    *tlsKey,
-		CAPath:     *tlsClientCA,
-		Address:    host,
-		GRPCPort:   port,
-		SANs:       strings.Split(*tlsSANs, ","),
-		HTTPClient: panelHTTP,
-	})
-	if err != nil {
-		log.Fatalf("加载管理面 TLS 失败：%v", err)
+	var certManager *managementpki.Manager
+	if serveGRPC || hasTLS {
+		certManager, err = managementpki.New(managementpki.Config{
+			PanelURL:   *panelURL,
+			NodeID:     *nodeID,
+			Token:      *token,
+			CertPath:   *tlsCert,
+			KeyPath:    *tlsKey,
+			CAPath:     *tlsClientCA,
+			Address:    host,
+			GRPCPort:   port,
+			SANs:       strings.Split(*tlsSANs, ","),
+			HTTPClient: panelHTTP,
+		})
+		if err != nil {
+			log.Fatalf("加载管理面 TLS 失败：%v", err)
+		}
 	}
 	if serveGRPC {
 		tlsConfig := &tls.Config{
@@ -190,12 +202,14 @@ func main() {
 		}
 		log.Printf("mTLS=强制 证书=%s 客户端CA=%s", *tlsCert, *tlsClientCA)
 		opts = append(opts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	} else if certManager != nil {
+		log.Printf("uplink=不监听 gRPC；仍续签已有管理证书（如需保留 push 能力设 LADDER_UPLINK_SERVE_GRPC=1）")
 	} else {
-		log.Printf("uplink=仅 HTTP（不监听 gRPC 控制端口；如需保留 push 能力设 LADDER_UPLINK_SERVE_GRPC=1）")
+		log.Printf("uplink=HTTP 上报 + WebSocket（不初始化管理面 TLS，不监听 gRPC）")
 	}
-	// Certificate renewal keeps running regardless of serveGRPC: the leaf key/cert
-	// underpin the shared Bearer identity and let the node switch back to push later.
-	go certManager.Run(runCtx)
+	if certManager != nil {
+		go certManager.Run(runCtx)
+	}
 	if *uplinkOn {
 		uplinkClient, err := uplink.New(uplink.Config{
 			PanelURL:    *panelURL,

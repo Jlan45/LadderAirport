@@ -178,6 +178,9 @@ func isPublicAPI(r *http.Request) bool {
 	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/pki/agent-certificates" {
 		return true
 	}
+	if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/enroll" {
+		return true
+	}
 	if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/agent/report" || r.URL.Path == "/api/v1/agent/config-sync") {
 		return true
 	}
@@ -214,6 +217,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("POST /api/v1/pki/agent-certificates", s.handleIssueAgentCertificate)
+	mux.HandleFunc("POST /api/v1/agent/enroll", s.handleAgentEnroll)
 	mux.HandleFunc("GET /api/v1/pki/bundle", s.handlePKIBundle)
 	mux.HandleFunc("POST /api/v1/agent/report", s.handleAgentReport)
 	mux.HandleFunc("HEAD /api/v1/agent/config-sync", s.handleAgentConfigHead)

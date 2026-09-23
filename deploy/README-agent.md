@@ -34,9 +34,9 @@ Web 端开关即可，无需登录节点操作。原理：Agent 以非特权用�
 
 ## HTTP 上行（uplink）
 
-节点无法被 Panel 拨到时，创建或切换为 `control_mode=uplink`。安装命令会写入 `LADDER_UPLINK=1`，Agent 用已有的 `-panel-url` / `-node-id` / `LADDER_TOKEN` 访问 `POST /api/v1/agent/report`，并用 `HEAD /api/v1/agent/config-sync` 比对版本哈希后再按需 `POST` 拉配置，与证书续签同一套 HTTP + Bearer。不新开端口，也不要求即时推送；下发最多延迟一个拉取周期（默认 60 秒）。
+节点无法被 Panel 拨到时，创建或切换为 `control_mode=uplink`。安装命令会写入 `LADDER_UPLINK=1`。这类节点不初始化管理面 TLS：安装脚本调用 `POST /api/v1/agent/enroll` 换取控制令牌，之后用 HTTP 上报，并用 WebSocket 长连接收配置。不新开端口。
 
-uplink 节点默认**不监听 gRPC 控制端口**（Panel 拨不进 NAT 后的节点，监听是死重），只保留 HTTP 上报 / 拉配置与证书续签。若该节点其实公网可达、或想保留被 push 拨号的能力，设 `LADDER_UPLINK_SERVE_GRPC=1` 让它继续监听。详见 [Agent 上行](../docs/agent-uplink.md)。
+uplink 节点默认**不监听 gRPC 控制端口**。若该节点其实公网可达、或想保留被 push 拨号的能力，设 `LADDER_UPLINK_SERVE_GRPC=1`，安装会改回完整 PKI / mTLS。详见 [Agent 上行](../docs/agent-uplink.md)。
 
 ## NAT / 端口转发
 
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
   | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.9.0 bash
 ```
 
-普通升级只替换二进制并保留 Panel PKI 身份。若检测到节点自签 CA 或缺少 mTLS 参数，升级会拒绝执行；请先全清卸载该 Agent，再在 Panel 新建节点并执行新的安装命令。
+普通升级只替换二进制。push 节点以及打开了 `LADDER_UPLINK_SERVE_GRPC` 的节点仍保留 Panel PKI 身份；检测到自签 CA 或缺少 mTLS 材料时升级会拒绝。默认 uplink（HTTP + WebSocket、不监听 gRPC）不要求管理面证书，升级不会因为没有 TLS 文件而失败。
 
 ## 常用命令
 

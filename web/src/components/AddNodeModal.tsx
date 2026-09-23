@@ -129,7 +129,10 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
             <div className="flex gap-2.5 p-3 rounded-lg bg-muted/60 border border-border text-xs text-muted-foreground leading-relaxed">
               <Info className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
               <div>
-                创建节点并生成一次性注册命令。目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。
+                创建节点并生成一次性注册命令。
+                {controlMode === 'uplink'
+                  ? 'uplink 不申请管理面证书：安装只交换一次性注册令牌，之后用 HTTP 上报，并用 WebSocket 长连接收配置。'
+                  : '目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。'}
                 请先在「设置」填写 HTTPS Public Base URL。push 由 Panel 拨号 gRPC；uplink 由 Agent 主动建立 WebSocket 长连接（与 gRPC 能力完全对齐、实时双向下发），断线时自动回退到 HTTP 定时上报并拉配置，无需入站端口。
               </div>
             </div>
@@ -232,8 +235,10 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
         ) : (
           <div className="space-y-4 my-2">
             <div className="text-sm text-muted-foreground leading-relaxed">
-              命令只包含 15 分钟有效的一次性注册令牌；长期控制 Token 不会写入安装命令，由证书接口返回给 Agent。
-              安装后将使用 {installInfo.panel_base_url || 'Panel'} 管理的 mTLS。
+              命令只包含 15 分钟有效的一次性注册令牌；长期控制 Token 不会写入安装命令。
+              {installInfo.node.control_mode === 'uplink'
+                ? '该节点不初始化管理面 TLS，注册接口只返回控制令牌。'
+                : `安装后将使用 ${installInfo.panel_base_url || 'Panel'} 管理的 mTLS，控制令牌由证书接口返回。`}
             </div>
 
             <div className="flex items-center justify-between">

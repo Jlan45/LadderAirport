@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/ladderairport/panel/internal/store"
 )
 
 const releaseDownloadBaseURL = "https://github.com/Jlan45/LadderAirport/releases"
@@ -129,18 +131,39 @@ func panelBaseFromSettings(publicBaseURL string) string {
 	return strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
 }
 
-func installSteps(address string, grpcPort int) []string {
-	steps := []string{
-		"在目标服务器（Linux amd64/arm64）以 root 执行上方一键安装命令。",
-		"安装脚本会在节点本地生成私钥与 CSR，由 Panel 管理 CA 签发 30 天证书，并强制启用 mTLS。",
-		"安装时会调用 Panel 证书接口完成身份注册；私钥始终留在节点，证书到期前由 Agent 自动续签。",
-		"回到 Panel 刷新节点列表，确认管理证书已绑定后点「探测」。",
+func nodeAwaitingRegistration(n store.Node, enrolled bool) bool {
+	if n.ControlMode == store.ControlModeUplink {
+		return n.PKICertSerial == "" && !enrolled
 	}
-	if strings.TrimSpace(address) != "" {
+	return n.PKICertSerial == ""
+}
+
+func installSteps(address string, grpcPort int, uplink bool) []string {
+	var steps []string
+	if uplink {
+		steps = []string{
+			"在目标服务器（Linux amd64/arm64）以 root 执行上方一键安装命令。",
+			"uplink 节点不生成管理面私钥，也不向 Panel 申请 TLS 证书。安装只交换一次性注册令牌。",
+			"安装后 Agent 用 HTTP 上报状态，并用 WebSocket 长连接接收配置和即时操作。",
+			"回到 Panel 刷新节点列表，确认节点在线。",
+		}
+	} else {
+		steps = []string{
+			"在目标服务器（Linux amd64/arm64）以 root 执行上方一键安装命令。",
+			"安装脚本会在节点本地生成私钥与 CSR，由 Panel 管理 CA 签发 30 天证书，并强制启用 mTLS。",
+			"安装时会调用 Panel 证书接口完成身份注册；私钥始终留在节点，证书到期前由 Agent 自动续签。",
+			"回到 Panel 刷新节点列表，确认管理证书已绑定后点「探测」。",
+		}
+	}
+	if uplink {
+		if strings.TrimSpace(address) == "" {
+			steps = append(steps, "控制面地址可以留空。客户端入口与节点出口不同时，再在节点详情填写公网地址。")
+		}
+	} else if strings.TrimSpace(address) != "" {
 		steps = append(steps, fmt.Sprintf("控制面地址已预填时注册不会改写；端口转发请确认 gRPC 端口为外部映射端口（当前 %d）。", grpcPort))
 	} else {
 		steps = append(steps, "NAT/端口转发：在节点详情填写 Panel 可达的控制面地址与映射端口；客户端入口不同时再填「公网地址」。")
 	}
-	steps = append(steps, "探测成功后即可关联入站并下发配置。")
+	steps = append(steps, "节点在线后即可关联入站并下发配置。")
 	return steps
 }

@@ -2,12 +2,12 @@
 
 LadderAirport 默认用 push 模式管控节点：`浏览器 → Panel → mTLS gRPC → Agent`，由 Panel 主动拨号 Agent 的 gRPC 控制口。这要求 Agent 有公网可达地址或端口映射，NAT / 无公网 IP 的节点无法接入。
 
-uplink 模式反过来由 Agent 主动出站访问 Panel HTTP，复用**证书续签已经在走的同一入口**（`panelhttp` 长连接 + 节点 Bearer 令牌），完成数据上报与配置下发。不新开端口，也不要求 Panel 能拨到节点。
+uplink 模式反过来由 Agent 主动出站访问 Panel：HTTP 上报，再用 WebSocket 长连接收配置和即时操作。认证是节点 Bearer 令牌，默认不初始化管理面 TLS。不新开端口，也不要求 Panel 能拨到节点。
 
 ```text
 浏览器 ──HTTP──► Panel ──mTLS gRPC──► Agent（push）
                  ▲
-                 └── HTTP 上报 / 拉配置（uplink，与 PKI 续签同一入口 + 同一 Bearer）
+                 └── HTTP 上报 + WebSocket（uplink，Bearer，无管理面 TLS）
 ```
 
 ## push 与 uplink 对比
@@ -21,16 +21,16 @@ uplink 模式反过来由 Agent 主动出站访问 Panel HTTP，复用**证书�
 | 探测（probe） | 拨号即时 | 读最近一次上报快照 |
 | 日志流 | 支持 | 暂不支持（无即时通道；`409`） |
 | 出站探测 / 协议证书部署 / DNS 公网探测 | 支持 | 暂不支持（`409`） |
-| 认证 | mTLS 客户端证书 + Bearer | 节点 Bearer 令牌（与续签同源） |
+| 认证 | mTLS 客户端证书 + Bearer | 节点 Bearer 令牌（不初始化管理面 TLS） |
 | 控制面 gRPC 端口 | 必填（默认 50051） | 可不填 |
 
 选择原则：能被 Panel 稳定拨到（公网 IP、端口映射、VPN、DNAT）就用 push，拿到即时性；否则用 uplink，牺牲下发实时性换取 NAT 穿透与零入站端口。
 
 ## 认证与传输复用
 
-- **传输层**：Agent 侧统一用 `panelhttp.NewClient()`（`RequestTimeout=30s`、`IdleConnTimeout=3m`、HTTP/2、TLS 会话缓存）。`managementpki.Manager`（续签）与 `uplink.Client` 共享同一个 client 实例，周期轮询不重复 TLS 握手。Panel 侧 HTTP server `IdleTimeout` 相应设为 3 分钟，匹配 keep-alive 窗口。
+- **传输层**：Agent 侧用 `panelhttp.NewClient()`（`RequestTimeout=30s`、`IdleConnTimeout=3m`、HTTP/2、TLS 会话缓存）访问 Panel。Panel 侧 HTTP server `IdleTimeout` 相应设为 3 分钟，匹配 keep-alive 窗口。这里的 TLS 是访问 Panel HTTPS 的普通传输，不是节点管理面证书。
 - **认证层**：uplink 端点用节点长期控制令牌（`Authorization: Bearer <token>`），Panel 侧以常量时间比对，拒绝空令牌。这些端点免 admin 会话，但必须通过节点令牌校验；错误令牌返回 `401`。
-- uplink 复用节点已有的 `-panel-url` / `-node-id` / `LADDER_TOKEN`，与 PKI 续签共用同一份配置，无需额外密钥或第二条通道。
+- 默认 uplink 只需要 `-panel-url` / `-node-id` / `LADDER_TOKEN`。管理面证书只在 push，或显式打开 `LADDER_UPLINK_SERVE_GRPC` 时才初始化。
 
 ## 数据上报
 
@@ -132,10 +132,10 @@ Agent ──执行本地操作──► 回传结果  POST /api/v1/agent/command
 
 uplink 节点通常位于 NAT 后，Panel 拨不进它的 gRPC 控制口，那个监听是死重。因此：
 
-- **默认行为**：uplink 节点**不监听 gRPC 控制端口**，也不构建 mTLS 服务端 TLS 配置（`RequireAndVerifyClientCert`），只保留 HTTP 上报 / 拉配置。
-- **开关**：`-uplink-serve-grpc` 命令行标志，或环境变量 `LADDER_UPLINK_SERVE_GRPC=1`，令 uplink 节点**仍然监听** gRPC 控制口，保留被 push 拨号的能力（例如节点其实公网可达、或想随时回切 push）。
-- push 节点（未开 `-uplink`）**始终监听**，不受该开关影响。
-- 无论是否监听，**证书续签始终运行**：叶子证书 / 私钥是共享 Bearer 身份的基础，也让节点日后能无缝切回 push。关闭监听不会破坏面板功能——即时操作走命令队列（接口枚举 / 升级 / 系统指标 / BBR / FRPS），少数无即时通道的操作（日志流 / 出站探测 / 协议证书部署）返回 `409`。
+- **默认行为**：uplink 节点**不监听 gRPC 控制端口**，也不初始化管理面 TLS。安装只把一次性注册令牌换成长期控制令牌（`POST /api/v1/agent/enroll`），不生成私钥、不申请证书。控制面认证就是节点 Bearer。
+- **开关**：`-uplink-serve-grpc` 命令行标志，或环境变量 `LADDER_UPLINK_SERVE_GRPC=1`，令 uplink 节点**仍然监听** gRPC 控制口并走完整 PKI / mTLS（例如节点其实公网可达、或想随时回切 push）。
+- push 节点（未开 `-uplink`）**始终监听**，并始终初始化管理面 TLS。
+- 已经带着证书跑起来的旧 uplink 节点会继续续签，直到安装时清掉 TLS 路径。没有管理面证书的 uplink 节点不能直接改成 push。
 
 判定逻辑：`serveGRPC = 非 uplink || uplink-serve-grpc`。
 
@@ -145,7 +145,7 @@ uplink 节点通常位于 NAT 后，Panel 拨不进它的 gRPC 控制口，那�
 2. **已有节点切换**：在节点详情「概览」把控制模式改为 `uplink`（需该节点先上报过 `uplink-v1`）。
 3. **手动配置**：在 `agent.env` 设 `LADDER_UPLINK=1`（安装脚本会透传该变量），重启 `ladder-agent`。默认不再监听 gRPC 控制口；若该节点公网可达且想保留 push 能力，再加 `LADDER_UPLINK_SERVE_GRPC=1`。
 
-其余安装步骤（PKI 注册、证书续签、mTLS）与 push 节点完全一致，见 [部署 · Agent](../deploy/README-agent.md) 与 [管理面 PKI](management-pki.md)。
+push 节点仍走 PKI 注册、证书续签和 mTLS，见 [部署 · Agent](../deploy/README-agent.md) 与 [管理面 PKI](management-pki.md)。默认 uplink 安装不走这些步骤。
 
 ## 安全考量
 

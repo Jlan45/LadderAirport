@@ -65,6 +65,11 @@ func TestBuildInstallCommandUplink(t *testing.T) {
 	if !strings.Contains(cmd, "LADDER_UPLINK=1") {
 		t.Fatalf("missing uplink flag: %s", cmd)
 	}
+	steps := installSteps("", 0, true)
+	joined := strings.Join(steps, "\n")
+	if strings.Contains(joined, "mTLS") || !strings.Contains(joined, "不生成管理面私钥") {
+		t.Fatalf("uplink steps = %q", joined)
+	}
 }
 
 func TestRandomAgentToken(t *testing.T) {
