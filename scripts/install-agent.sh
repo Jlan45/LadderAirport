@@ -564,6 +564,11 @@ write_unit() {
     unit_desc="LadderAirport Agent (uplink HTTP+WS)"
   fi
   echo "==> 写入 systemd: ${SERVICE_DST}"
+  # uplink 不创建 TLS 目录。ReadWritePaths 指向不存在的路径时，systemd 建命名空间会失败（226/NAMESPACE）。
+  local rw_paths="${DATA_DIR}"
+  if [[ -d "${TLS_DIR}" ]]; then
+    rw_paths="${rw_paths} ${TLS_DIR}"
+  fi
   cat >"${SERVICE_DST}" <<EOF
 [Unit]
 Description=${unit_desc}
@@ -587,7 +592,7 @@ NoNewPrivileges=true
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${DATA_DIR} ${TLS_DIR}
+ReadWritePaths=${rw_paths}
 ReadOnlyPaths=${CONF_DIR}
 PrivateTmp=true
 
@@ -748,7 +753,9 @@ EOF
 Description=Watch LadderAirport agent BBR request file
 
 [Path]
-PathExistsModified=${DATA_DIR}/bbr.request
+# PathExistsModified= 只在较新的 systemd 里存在；拆开后旧版本也能监视文件出现和改写。
+PathExists=${DATA_DIR}/bbr.request
+PathModified=${DATA_DIR}/bbr.request
 Unit=ladder-agent-bbr.service
 
 [Install]
