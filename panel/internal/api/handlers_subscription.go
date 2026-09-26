@@ -584,7 +584,8 @@ func subFilename(sub *store.Subscription, format string) string {
 	}
 	switch format {
 	case "clash":
-		return base + ".yaml"
+		// Clash 把 Content-Disposition 文件名当作配置名展示，不要带 .yaml。
+		return base
 	case "singbox":
 		return base + ".json"
 	case "v2ray":

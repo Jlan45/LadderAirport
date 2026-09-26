@@ -25,7 +25,6 @@ import {
   Square,
   List,
   Grid,
-  Info,
   Server,
   ArrowUp,
   ArrowDown,
@@ -55,11 +54,13 @@ import AddNodeModal from '../components/AddNodeModal'
 import NodeDetailDrawer from '../components/NodeDetailDrawer'
 import StatsBar from '../components/StatsBar'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
+import { StatusBadge } from '@/components/ui/status-badge'
 import {
   formatBytes,
   formatTime,
   isAgentOutdated,
   isOnlineStatus,
+  nodeEndpointLabel,
   runtimeLabel,
   runtimeTheme,
   statusLabel,
@@ -542,9 +543,9 @@ export default function Fleet() {
                 <span className="text-muted-foreground">•</span>
                 <span>推荐 Agent <code className="font-mono text-muted-foreground">{recommended}</code></span>
                 {outdatedNodes.length > 0 ? (
-                  <Badge variant="warning">{outdatedNodes.length} 个节点可升级</Badge>
+                  <StatusBadge value="outdated" label={`${outdatedNodes.length} 个节点可升级`} />
                 ) : (
-                  <Badge variant="success">版本均已对齐</Badge>
+                  <StatusBadge value="success" label="版本均已对齐" />
                 )}
               </>
             )}
@@ -609,41 +610,6 @@ export default function Fleet() {
       ) : null}
 
       <StatsBar ov={ov} loading={loading} unavailable={!ov && Boolean(loadError)} />
-
-      {/* Version alerts */}
-      {outdatedNodes.length > 0 && recommended && (
-        <Card className="border-border bg-card">
-          <CardHeader className="p-5 pb-3">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <Info className="h-4 w-4 text-warning" />
-              版本提醒 (推荐 Agent {recommended})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-5 pb-5 space-y-3">
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              以下节点版本落后或未知。优先点击节点触发远程升级，如果远程方式不支持，可复制命令手动执行：
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {outdatedNodes.map((n) => (
-                <button
-                  type="button"
-                  key={n.id}
-                  disabled={batchBusy || Boolean(activeActions[n.id])}
-                  onClick={() => void showUpgrade(n.id)}
-                  className="px-2.5 py-1 rounded bg-secondary border border-border text-xs font-mono text-foreground hover:bg-muted disabled:opacity-50 cursor-pointer"
-                >
-                  {n.name} ({n.agent_version || '未知'})
-                </button>
-              ))}
-            </div>
-            {meta?.agent_upgrade_command && (
-              <pre className="p-3 bg-muted border border-border rounded-md overflow-x-auto text-[10px] font-mono text-foreground">
-                {meta.agent_upgrade_command}
-              </pre>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Manual upgrade command banner */}
       {upgradeBanner && (
@@ -914,9 +880,9 @@ export default function Fleet() {
                         </TableCell>
                         <TableCell className="space-y-1">
                           <code className="text-xs font-mono text-foreground block">
-                            {n.address || '（待填）'}:{n.grpc_port}
+                            {nodeEndpointLabel(n)}
                           </code>
-                          {n.public_address && n.public_address !== n.address && (
+                          {n.control_mode !== 'uplink' && n.public_address && n.public_address !== n.address && (
                             <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
                               订阅: <code className="text-[10px] text-muted-foreground">{n.public_address}</code>
                             </span>
@@ -964,9 +930,9 @@ export default function Fleet() {
                         <TableCell className="space-y-0.5">
                           <code className="text-xs font-mono text-foreground block">{n.agent_version || '—'}</code>
                           {outdated ? (
-                            <Badge variant="warning" className="text-[9px] px-1 py-0 scale-95 origin-left">可升级</Badge>
+                            <StatusBadge value="outdated" />
                           ) : n.agent_version ? (
-                            <Badge variant="outline" className="text-[9px] px-1 py-0 scale-95 origin-left border-emerald-500/30 text-emerald-500">已最新</Badge>
+                            <StatusBadge value="success" label="已最新" />
                           ) : null}
                         </TableCell>
                         <TableCell className="text-right">
@@ -1184,9 +1150,9 @@ function NodeCard({
         {/* Address and metadata */}
         <div className="space-y-1 text-xs">
           <code className="font-mono text-zinc-300 block">
-            {n.address || '（待填）'}:{n.grpc_port}
+            {nodeEndpointLabel(n)}
           </code>
-          {n.public_address && n.public_address !== n.address && (
+          {n.control_mode !== 'uplink' && n.public_address && n.public_address !== n.address && (
             <div className="text-[10px] text-zinc-500 font-mono">
               订阅: <code className="text-zinc-400">{n.public_address}</code>
             </div>
@@ -1235,9 +1201,7 @@ function NodeCard({
         <div className="text-[10px] text-zinc-500 flex flex-wrap justify-between items-center gap-2 pt-1">
           <div className="flex items-center gap-1">
             <span>Agent {n.agent_version || '—'}</span>
-            {outdated && (
-              <Badge variant="warning" className="text-[9px] px-1 py-0 scale-90 origin-left">可升级</Badge>
-            )}
+            {outdated && <StatusBadge value="outdated" />}
           </div>
           <span>探测 {formatTime(n.last_seen_unix || n.metrics_at_unix)}</span>
         </div>

@@ -26,6 +26,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/ui/status-badge'
 import { ConfirmModal } from '@/components/ui/confirm-modal'
 import {
   Tabs,
@@ -668,12 +669,12 @@ export default function Subscriptions() {
     <div className="space-y-6">
       {/* Header Title Section */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
-            <Rss className="h-6 w-6 text-primary" />
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight leading-snug text-foreground flex items-center gap-2.5">
+            <Rss className="h-6 w-6 shrink-0 text-primary" />
             订阅配置管理
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 leading-normal">
+          <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
             发布面向客户端的代理订阅分发链接 · 聚合与解析第三方外部订阅源
           </p>
         </div>
@@ -720,10 +721,10 @@ export default function Subscriptions() {
 
         {/* Tab 1: Publish Subscriptions */}
         <TabsContent value="publish" className="space-y-6 mt-0">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <h2 className="text-sm font-semibold text-zinc-200">面向客户端的公网订阅分发</h2>
-              <p className="text-xs text-zinc-500">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <h2 className="text-sm font-semibold leading-snug text-foreground">面向客户端的公网订阅分发</h2>
+              <p className="text-xs leading-relaxed text-muted-foreground">
                 支持编译出标准的 Clash (YAML) 与 sing-box (JSON) 订阅。客户端发起请求时动态包含在线节点。
               </p>
             </div>
@@ -763,26 +764,22 @@ export default function Subscriptions() {
                 return (
                   <Card
                     key={sub.id}
-                    className="relative overflow-hidden transition-all duration-300 hover:translate-y-[-2px] border-border bg-card shadow-sm"
+                    className="relative transition-all duration-300 hover:translate-y-[-2px] border-border bg-card shadow-sm"
                   >
                     <CardHeader className="p-5 pb-3">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2.5">
-                            <CardTitle className="text-base font-bold text-foreground">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <CardTitle className="text-base font-bold leading-snug text-foreground">
                               {sub.name}
                             </CardTitle>
                             <Badge
                               variant="outline"
-                              className="border-primary/30 bg-primary/10 text-primary font-mono text-[11px]"
+                              className="h-auto whitespace-normal leading-snug border-primary/30 bg-primary/10 text-primary font-mono text-[11px]"
                             >
                               通用分发 (Clash / sing-box / V2Ray)
                             </Badge>
-                            {sub.disabled && (
-                              <Badge variant="destructive" className="text-[11px]">
-                                已停用
-                              </Badge>
-                            )}
+                            {sub.disabled && <StatusBadge value="disabled" />}
                           </div>
                         </div>
 
@@ -957,10 +954,10 @@ export default function Subscriptions() {
 
         {/* Tab 2: External Sources */}
         <TabsContent value="sources" className="space-y-6 mt-0">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <h2 className="text-sm font-semibold text-foreground">第三方外部订阅源聚合</h2>
-              <p className="text-xs text-muted-foreground">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0 space-y-1">
+              <h2 className="text-sm font-semibold leading-snug text-foreground">第三方外部订阅源聚合</h2>
+              <p className="text-xs leading-relaxed text-muted-foreground">
                 配置外部机场或提供者的订阅 URL，系统后台会定时抓取并解析节点，合并下发给指定订阅。
               </p>
             </div>
@@ -1001,7 +998,7 @@ export default function Subscriptions() {
                         <TableHead className="w-24 text-center">解析节点数</TableHead>
                         <TableHead className="w-28 text-center">刷新间隔</TableHead>
                         <TableHead className="w-32">最后更新</TableHead>
-                        <TableHead className="w-20">状态</TableHead>
+                        <TableHead className="min-w-[5.5rem]">状态</TableHead>
                         <TableHead className="w-[200px] text-right">操作</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1033,12 +1030,7 @@ export default function Subscriptions() {
                               {formatTime(src.updated_at_unix)}
                             </TableCell>
                             <TableCell>
-                              <Badge
-                                variant={src.enabled ? 'success' : 'secondary'}
-                                className="text-[10px]"
-                              >
-                                {src.enabled ? '已启用' : '已禁用'}
-                              </Badge>
+                              <StatusBadge value={src.enabled ? 'enabled' : 'disabled'} />
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">

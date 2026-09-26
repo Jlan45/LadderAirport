@@ -48,6 +48,19 @@ export function isOnlineStatus(s?: string): boolean {
   return s === 'online' || s === 'running'
 }
 
+/** Host shown in the fleet. Uplink nodes have no Panel-dialed gRPC port. */
+export function nodeEndpointLabel(node: {
+  control_mode?: string
+  address?: string
+  grpc_port?: number
+  public_address?: string
+}): string {
+  if (node.control_mode === 'uplink') {
+    return node.public_address || node.address || '—'
+  }
+  return `${node.address || '（待填）'}:${node.grpc_port || ''}`
+}
+
 export function runtimeLabel(s?: string): string {
   switch (s) {
     case 'running':

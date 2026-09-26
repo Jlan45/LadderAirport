@@ -59,9 +59,10 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
       setFormError('请填写节点名称')
       return
     }
-    const controlHost = normalizeHost(address)
+    const uplink = controlMode === 'uplink'
+    const controlHost = uplink ? '' : normalizeHost(address)
     const clientHost = normalizeHost(publicAddress)
-    if (address.trim() && !controlHost) {
+    if (!uplink && address.trim() && !controlHost) {
       setFormError('控制面地址只填写主机名或 IP，不要包含协议、端口或路径')
       return
     }
@@ -69,7 +70,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
       setFormError('公网地址只填写主机名或 IP，不要包含协议、端口或路径')
       return
     }
-    if (controlMode !== 'uplink' && (!Number.isInteger(grpcPort) || grpcPort < 1 || grpcPort > 65535)) {
+    if (!uplink && (!Number.isInteger(grpcPort) || grpcPort < 1 || grpcPort > 65535)) {
       setFormError('gRPC 端口必须在 1 到 65535 之间')
       return
     }
@@ -79,8 +80,8 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
     try {
       const info = await bootstrapNode({
         name: name.trim(),
-        address: controlHost || undefined,
-        grpc_port: grpcPort,
+        address: uplink ? undefined : controlHost || undefined,
+        grpc_port: uplink ? undefined : grpcPort,
         public_address: clientHost || undefined,
         labels: Array.from(
           new Set(
@@ -129,11 +130,10 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
             <div className="flex gap-2.5 p-3 rounded-lg bg-muted/60 border border-border text-xs text-muted-foreground leading-relaxed">
               <Info className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
               <div>
-                创建节点并生成一次性注册命令。
+                创建节点并生成一次性注册命令。请先在「设置」填写 HTTPS Public Base URL。
                 {controlMode === 'uplink'
                   ? 'uplink 不申请管理面证书：安装只交换一次性注册令牌，之后用 HTTP 上报，并用 WebSocket 长连接收配置。'
-                  : '目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。'}
-                请先在「设置」填写 HTTPS Public Base URL。push 由 Panel 拨号 gRPC；uplink 由 Agent 主动建立 WebSocket 长连接（与 gRPC 能力完全对齐、实时双向下发），断线时自动回退到 HTTP 定时上报并拉配置，无需入站端口。
+                  : '目标机执行后会生成本地私钥，由 Panel CA 签发证书并强制启用 mTLS。Panel 主动拨号 Agent gRPC。'}
               </div>
             </div>
 
@@ -170,36 +170,36 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {controlMode === 'uplink'
-                    ? '节点主动建立 WebSocket 长连接（复用 HTTPS 入口，无需入站端口），与 gRPC 能力完全对齐、实时双向下发；断线时自动回退到 HTTP 定时上报/拉配置。'
+                    ? '节点主动建立 WebSocket 长连接，断线时回退到 HTTP 上报和拉配置。'
                     : 'Panel 主动拨号 Agent gRPC。NAT 后需要映射或 VPN。'}
                 </p>
               </div>
 
-              <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-address">
-                  控制面地址{controlMode === 'uplink' ? '（可选）' : '（可选，Panel 拨号）'}
-                </Label>
-                <Input
-                  id="add-node-address"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="可先留空；已填则注册不会覆盖"
-                />
-              </div>
+              {controlMode !== 'uplink' ? (
+                <>
+                  <div className="flex flex-col space-y-1.5">
+                    <Label htmlFor="add-node-address">控制面地址（可选，Panel 拨号）</Label>
+                    <Input
+                      id="add-node-address"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="可先留空；已填则注册不会覆盖"
+                    />
+                  </div>
 
-              <div className="flex flex-col space-y-1.5">
-                <Label htmlFor="add-node-grpc-port">
-                  控制面 gRPC 端口{controlMode === 'uplink' ? '（uplink 可不填）' : ''}
-                </Label>
-                <Input
-                  id="add-node-grpc-port"
-                  type="number"
-                  value={grpcPort}
-                  min={1}
-                  max={65535}
-                  onChange={(e) => setGrpcPort(Number(e.target.value) || 0)}
-                />
-              </div>
+                  <div className="flex flex-col space-y-1.5">
+                    <Label htmlFor="add-node-grpc-port">控制面 gRPC 端口</Label>
+                    <Input
+                      id="add-node-grpc-port"
+                      type="number"
+                      value={grpcPort}
+                      min={1}
+                      max={65535}
+                      onChange={(e) => setGrpcPort(Number(e.target.value) || 0)}
+                    />
+                  </div>
+                </>
+              ) : null}
 
               <div className="flex flex-col space-y-1.5">
                 <Label htmlFor="add-node-public-address">公网地址（可选，订阅用）</Label>
@@ -207,7 +207,7 @@ export default function AddNodeModal({ open, onClose, onCreated, onOpenDetail }:
                   id="add-node-public-address"
                   value={publicAddress}
                   onChange={(e) => setPublicAddress(e.target.value)}
-                  placeholder="客户端入口；空则回退控制面地址"
+                  placeholder={controlMode === 'uplink' ? '客户端入口' : '客户端入口；空则回退控制面地址'}
                 />
               </div>
 

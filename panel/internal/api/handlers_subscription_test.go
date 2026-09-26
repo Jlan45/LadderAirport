@@ -11,11 +11,11 @@ func TestSubFilenameUsesSubscriptionName(t *testing.T) {
 	cases := []struct {
 		name, format, want string
 	}{
-		{"香港主力", "clash", "香港主力.yaml"},
+		{"香港主力", "clash", "香港主力"},
 		{"My Sub", "singbox", "My-Sub.json"},
 		{"V2Ray Sub", "v2ray", "V2Ray-Sub.txt"},
-		{"a/b:c", "clash", "abc.yaml"},
-		{"", "clash", "subscription.yaml"},
+		{"a/b:c", "clash", "abc"},
+		{"", "clash", "subscription"},
 		{"  spaced  name  ", "singbox", "spaced-name.json"},
 	}
 	for _, tc := range cases {

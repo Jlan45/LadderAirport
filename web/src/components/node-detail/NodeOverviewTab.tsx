@@ -87,6 +87,12 @@ export function NodeOverviewTab({
   copyUpgradeCommand,
 }: NodeOverviewTabProps) {
   const [showPairingQR, setShowPairingQR] = useState(false)
+  const reported = installInfo?.node
+  const installed = Boolean(
+    reported && (reported.agent_version || reported.last_seen_unix || reported.uplink_last_seen_unix || reported.pki_cert_serial),
+  )
+  const showInstall = Boolean(installInfo?.install_command) && !installed
+  const showUpgrade = installed && Boolean(installInfo?.upgrade_command && installInfo.outdated)
 
   function egressOptions() {
     const opts = [{ value: EGRESS_DEFAULT_VALUE, label: '系统默认' }]
@@ -192,10 +198,12 @@ export function NodeOverviewTab({
       {/* Panel Controller Section */}
       <div className="space-y-4 rounded-lg border border-border bg-card/40 p-5">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold text-foreground">Panel 控制面</h3>
+          <h3 className="text-sm font-semibold text-foreground">
+            {editControlMode === 'uplink' ? '控制模式' : 'Panel 控制面'}
+          </h3>
           <p className="text-xs text-muted-foreground">
             {editControlMode === 'uplink'
-              ? 'Agent 主动建立 WebSocket 长连接（与 gRPC 能力完全对齐、实时双向下发），无需被 Panel 拨到；断线时自动回退 HTTP 上报/拉配置。'
+              ? '节点主动建立 WebSocket 长连接，断线时回退到 HTTP 上报和拉配置。'
               : 'Panel 拨号用。NAT 时填映射后的公网/VPN 地址与外部 gRPC 端口。'}
           </p>
         </div>
@@ -222,6 +230,7 @@ export function NodeOverviewTab({
             <p className="text-xs text-muted-foreground">当前 Agent 未上报 uplink 能力，升级后再切换。</p>
           ) : null}
         </div>
+        {editControlMode === 'uplink' ? null : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex flex-col space-y-1.5">
             <Label htmlFor="node-edit-address" className="text-muted-foreground">
@@ -263,6 +272,7 @@ export function NodeOverviewTab({
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* DDNS Auto-resolve */}
@@ -303,7 +313,7 @@ export function NodeOverviewTab({
               setEditPublic(e.target.value)
               clearConnectionError('publicAddress')
             }}
-            placeholder="与控制面相同或特定接入 IP/域名"
+            placeholder={editControlMode === 'uplink' ? '客户端入口' : '与控制面相同或特定接入 IP/域名'}
           />
           {connectionErrors.publicAddress && (
             <p className="text-xs text-destructive font-medium">{connectionErrors.publicAddress}</p>
@@ -349,51 +359,39 @@ export function NodeOverviewTab({
         </Button>
       </div>
 
-      {/* Install commands info */}
-      {installInfo && (
+      {(showInstall || showUpgrade) && installInfo && (
         <div className="space-y-4 rounded-lg border border-border bg-card/40 p-5 pt-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-foreground">
-              {installInfo.upgrade_command && installInfo.outdated ? '节点一键安装与升级命令' : '节点一键安装命令'}
+              {showInstall ? '一键安装' : '一键升级'}
             </h3>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => setShowPairingQR(true)} className="gap-1.5 text-xs">
-                <QrCode className="h-3.5 w-3.5" />
-                扫码配对
-              </Button>
-              <Button size="sm" variant="outline" onClick={copyInstallCommand} className="gap-1.5 text-xs">
-                {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? '安装命令已复制' : '复制安装命令'}
-              </Button>
-              {installInfo.upgrade_command && installInfo.outdated && (
-                <Button size="sm" variant="outline" onClick={copyUpgradeCommand} className="gap-1.5 text-xs">
-                  {copiedUpgrade ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copiedUpgrade ? '升级命令已复制' : '复制升级命令'}
+              {showInstall ? (
+                <Button size="sm" variant="outline" onClick={() => setShowPairingQR(true)} className="gap-1.5 text-xs">
+                  <QrCode className="h-3.5 w-3.5" />
+                  扫码配对
                 </Button>
-              )}
+              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={showInstall ? copyInstallCommand : copyUpgradeCommand}
+                className="gap-1.5 text-xs"
+              >
+                {(showInstall ? copied : copiedUpgrade)
+                  ? <Check className="h-3.5 w-3.5 text-success" />
+                  : <Copy className="h-3.5 w-3.5" />}
+                {(showInstall ? copied : copiedUpgrade) ? '已复制' : '复制命令'}
+              </Button>
             </div>
           </div>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <span className="text-xs text-muted-foreground">一键安装命令：</span>
-              <pre className="p-3 bg-muted border border-border rounded-md text-[11px] font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
-                {installInfo.install_command}
-              </pre>
-            </div>
-
-            {installInfo.upgrade_command && installInfo.outdated && (
-              <div className="space-y-1 pt-2 border-t border-border">
-                <span className="text-xs text-muted-foreground">一键升级命令：</span>
-                <pre className="p-3 bg-muted border border-border rounded-md text-[11px] font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
-                  {installInfo.upgrade_command}
-                </pre>
-              </div>
-            )}
-          </div>
+          <pre className="p-3 bg-muted border border-border rounded-md text-[11px] font-mono text-foreground leading-relaxed whitespace-pre-wrap break-all max-h-[160px] overflow-y-auto">
+            {showInstall ? installInfo.install_command : installInfo.upgrade_command}
+          </pre>
         </div>
       )}
 
-      {installInfo && (
+      {showInstall && installInfo && (
         <NodePairingQRModal
           open={showPairingQR}
           onClose={() => setShowPairingQR(false)}

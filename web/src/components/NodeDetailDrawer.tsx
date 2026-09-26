@@ -7,6 +7,7 @@ import {
 import { Button } from './ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Badge } from './ui/badge'
+import { StatusBadge } from './ui/status-badge'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { RefreshCw } from 'lucide-react'
 import {
@@ -52,6 +53,7 @@ import {
 } from '../api/client'
 import {
   isAgentOutdated,
+  nodeEndpointLabel,
   runtimeLabel,
   runtimeTheme,
   statusLabel,
@@ -460,8 +462,10 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
     if (!name) errors.name = '请填写节点名称'
     const nameErr = hostValidationError(name, '节点名称')
     if (nameErr) errors.name = nameErr
-    const addrErr = hostValidationError(address, '控制面地址')
-    if (addrErr) errors.address = addrErr
+    if (editControlMode !== 'uplink') {
+      const addrErr = hostValidationError(address, '控制面地址')
+      if (addrErr) errors.address = addrErr
+    }
     const pubErr = hostValidationError(publicAddress, '默认公网地址')
     if (pubErr) errors.publicAddress = pubErr
     if (editControlMode !== 'uplink' && (!Number.isInteger(port) || port < 1 || port > 65535)) {
@@ -481,14 +485,16 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
       const input: UpdateNodeInput = {
         name,
         labels: editLabels,
-        address: address || undefined,
         public_address: publicAddress || undefined,
         egress_interface: editEgress || undefined,
         ddns_enabled: editDDNS,
         control_mode: editControlMode,
       }
-      if (Number.isInteger(port) && port >= 1 && port <= 65535) {
-        input.grpc_port = port
+      if (editControlMode !== 'uplink') {
+        input.address = address || undefined
+        if (Number.isInteger(port) && port >= 1 && port <= 65535) {
+          input.grpc_port = port
+        }
       }
       if (editTokenChanged) input.token = editToken
       const updated = await updateNode(id, input)
@@ -864,29 +870,31 @@ export default function NodeDetailDrawer({ nodeId, onClose, onChanged }: Props) 
                     ) : null}
                     {installInfo ? (
                       isAgentOutdated(node.agent_version, installInfo.recommended_agent_version) ? (
-                        <Badge variant="warning">
-                          可升级
-                          {installInfo.recommended_agent_version
-                            ? ` → ${installInfo.recommended_agent_version}`
-                            : ''}
-                        </Badge>
+                        <StatusBadge
+                          value="outdated"
+                          label={
+                            installInfo.recommended_agent_version
+                              ? `可升级 → ${installInfo.recommended_agent_version}`
+                              : undefined
+                          }
+                        />
                       ) : node.agent_version ? (
-                        <Badge variant="outline" className="border-success/30 text-success">
-                          已最新 ({node.agent_version})
-                        </Badge>
+                        <StatusBadge value="success" label="已最新" />
                       ) : null
                     ) : null}
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 pt-6 border-t border-border text-xs">
-                <div className="space-y-1">
-                  <span className="text-muted-foreground block">控制面</span>
-                  <code className="text-foreground font-mono">
-                    {node.address || '（待填）'}:{node.grpc_port}
-                  </code>
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4 text-xs">
+                {node.control_mode === 'uplink' ? null : (
+                  <div className="space-y-1">
+                    <span className="text-muted-foreground block">控制面</span>
+                    <code className="text-foreground font-mono">
+                      {nodeEndpointLabel(node)}
+                    </code>
+                  </div>
+                )}
                 <div className="space-y-1">
                   <span className="text-muted-foreground block">订阅入口</span>
                   <code className="text-foreground font-mono break-all">
