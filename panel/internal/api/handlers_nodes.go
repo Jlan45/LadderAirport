@@ -1004,7 +1004,7 @@ func (s *Server) handleNodeLogs(w http.ResponseWriter, r *http.Request) {
 // handleNodeUpgrade asks the agent to stage a release binary; the node root helper
 // replaces the binary and restarts ladder-agent. Panel should re-probe afterwards.
 // POST /api/v1/nodes/{id}/upgrade
-// Body (optional): {"version":"v0.7.2","repo":"Jlan45/LadderAirport","download_url":"","sha256":""}
+// Body (optional): {"version":"v0.7.2","repo":"LadderAirport/LadderAirport","download_url":"","sha256":""}
 func (s *Server) handleNodeUpgrade(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r)
 	node, err := s.Store.GetNode(id)

@@ -1949,7 +1949,7 @@ type UpgradeAgentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Target release tag, e.g. "v0.7.1". Empty or "latest" resolves GitHub latest.
 	Version string `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
-	// Optional GitHub owner/repo override (default Jlan45/LadderAirport).
+	// Optional GitHub owner/repo override (default LadderAirport/LadderAirport).
 	Repo string `protobuf:"bytes,2,opt,name=repo,proto3" json:"repo,omitempty"`
 	// Optional direct download URL for the linux binary (skips GitHub resolution).
 	DownloadUrl string `protobuf:"bytes,3,opt,name=download_url,json=downloadUrl,proto3" json:"download_url,omitempty"`

@@ -24,7 +24,7 @@ const (
 	// A root-owned systemd path unit watches this directory and applies the upgrade.
 	DefaultUpgradeDir = "/var/lib/ladder-agent/upgrade"
 
-	defaultUpgradeRepo = "Jlan45/LadderAirport"
+	defaultUpgradeRepo = "LadderAirport/LadderAirport"
 	githubAPIBase      = "https://api.github.com"
 	githubReleaseBase  = "https://github.com"
 

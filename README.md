@@ -21,12 +21,12 @@
 
 ## 快速安装
 
-无需克隆仓库，从 [GitHub Release](https://github.com/Jlan45/LadderAirport/releases) 拉最新二进制。
+无需克隆仓库，从 [GitHub Release](https://github.com/LadderAirport/LadderAirport/releases) 拉最新二进制。
 
 **Panel**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
   | sudo bash
 ```
 
@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/i
 ## 本地开发
 
 ```bash
-git clone --recurse-submodules https://github.com/Jlan45/LadderAirport.git
+git clone --recurse-submodules https://github.com/LadderAirport/LadderAirport.git
 cd LadderAirport
 
 make agent   # → bin/ladder-agent（tags: with_quic,with_utls）

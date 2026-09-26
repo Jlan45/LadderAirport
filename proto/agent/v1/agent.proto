@@ -212,7 +212,7 @@ message ListInterfacesResponse {
 message UpgradeAgentRequest {
   // Target release tag, e.g. "v0.7.1". Empty or "latest" resolves GitHub latest.
   string version = 1;
-  // Optional GitHub owner/repo override (default Jlan45/LadderAirport).
+  // Optional GitHub owner/repo override (default LadderAirport/LadderAirport).
   string repo = 2;
   // Optional direct download URL for the linux binary (skips GitHub resolution).
   string download_url = 3;
