@@ -32,7 +32,7 @@ type Meta struct {
 	CheckedAtUnix int64 `json:"checked_at_unix,omitempty"`
 }
 
-const githubLatestReleaseURL = "https://api.github.com/repos/Jlan45/LadderAirport/releases/latest"
+const githubLatestReleaseURL = "https://api.github.com/repos/LadderAirport/LadderAirport/releases/latest"
 
 var (
 	releaseCacheMu    sync.Mutex

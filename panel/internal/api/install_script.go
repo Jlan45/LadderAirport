@@ -10,7 +10,7 @@ import (
 	"github.com/ladderairport/panel/internal/store"
 )
 
-const releaseDownloadBaseURL = "https://github.com/Jlan45/LadderAirport/releases"
+const releaseDownloadBaseURL = "https://github.com/LadderAirport/LadderAirport/releases"
 const defaultInstallScriptURL = releaseDownloadBaseURL + "/latest/download/install-agent.sh"
 
 func releaseScriptURL(asset, version string) string {

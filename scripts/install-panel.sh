@@ -3,19 +3,19 @@
 # 默认从 GitHub Release 拉最新二进制。
 #
 # 安装（推荐）:
-#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+#   curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
 #     | sudo bash
 #
 # 生产推荐（固定 session secret + 监听）:
-#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+#   curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
 #     | sudo env LADDER_SESSION_SECRET='长随机串' LADDER_LISTEN=':8080' bash
 #
 # 升级（只换二进制 + 刷新 unit + restart；保留 panel.env 与 SQLite）:
-#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+#   curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
 #     | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
 #
 # 卸载（默认保留 conf/data；LADDER_PURGE=1 全清，会删 panel.db）:
-#   curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+#   curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
 #     | sudo env LADDER_ACTION=uninstall bash
 #
 # 其它:
@@ -26,7 +26,7 @@
 #
 set -euo pipefail
 
-REPO="${LADDER_REPO:-Jlan45/LadderAirport}"
+REPO="${LADDER_REPO:-LadderAirport/LadderAirport}"
 API_BASE="${LADDER_GITHUB_API:-https://api.github.com}"
 RELEASES_BASE="${LADDER_GITHUB_RELEASES:-https://github.com/${REPO}/releases}"
 

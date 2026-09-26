@@ -59,7 +59,7 @@ push 模式由 Panel 主动拨号 Agent gRPC。Agent 位于 NAT 后又必须走 
 已完成 Panel PKI 注册的节点可以在 Panel 中远程升级，也可以执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-agent.sh \
   | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.9.0 bash
 ```
 
@@ -76,7 +76,7 @@ systemctl restart ladder-agent
 卸载但保留配置和数据：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-agent.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-agent.sh \
   | sudo env LADDER_ACTION=uninstall bash
 ```
 

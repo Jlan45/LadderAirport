@@ -5,14 +5,14 @@
 控制面机器上**无需 Go / Node / 源码**，只要能访问 GitHub：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
   | sudo bash
 ```
 
 指定 HTTP 监听与版本（可选）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
   | sudo LADDER_LISTEN=':8080' LADDER_VERSION=v0.3.1 bash
 ```
 
@@ -79,7 +79,7 @@ sudo cat /etc/ladder-panel/panel.env   # 含 session secret，权限 640
 | `LADDER_BOOTSTRAP_RETRY_INTERVAL` | `30s` | 重试间隔 |
 | `LADDER_VERSION` | `latest` | Release 标签，如 `v0.3.1` |
 | `LADDER_FROM` | `release` | `release` 下载；`local` 源码/本地 bin |
-| `LADDER_REPO` | `Jlan45/LadderAirport` | GitHub 仓库 |
+| `LADDER_REPO` | `LadderAirport/LadderAirport` | GitHub 仓库 |
 | `LADDER_USER` / `LADDER_GROUP` | `ladder-panel` | 运行用户/组 |
 | `INSTALL_BIN` | `/usr/local/bin/ladder-panel` | 安装路径 |
 
@@ -99,11 +99,11 @@ systemctl restart ladder-panel
 
 ```bash
 # 升到最新
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
   | sudo env LADDER_ACTION=upgrade bash
 
 # 升到指定版本
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
   | sudo env LADDER_ACTION=upgrade LADDER_VERSION=v0.3.1 bash
 ```
 
@@ -120,11 +120,11 @@ sudo systemctl restart ladder-panel
 
 ```bash
 # 保留 conf/data（推荐）
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
   | sudo env LADDER_ACTION=uninstall bash
 
 # 全清（会删除 panel.db，务必先备份）
-curl -fsSL https://raw.githubusercontent.com/Jlan45/LadderAirport/main/scripts/install-panel.sh \
+curl -fsSL https://raw.githubusercontent.com/LadderAirport/LadderAirport/main/scripts/install-panel.sh \
   | sudo env LADDER_ACTION=uninstall LADDER_PURGE=1 bash
 ```
 
