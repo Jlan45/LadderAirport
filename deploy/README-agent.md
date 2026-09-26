@@ -1,5 +1,7 @@
 # 快速部署 Agent（systemd）
 
+OpenWrt 路由器请使用兄弟仓 [LadderAirportOpenwrt](https://github.com/Jlan45/LadderAirportOpenwrt) 的 `opkg` 软件包（默认 uplink），不要使用本 systemd 脚本。
+
 Agent 管理面只支持 Panel CA 签发的双向 TLS，不支持明文、节点自签 CA 或手工粘贴 CA。
 
 ## 新节点安装

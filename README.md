@@ -17,7 +17,7 @@
 - **订阅**：Clash / sing-box 链接，基础 CN 分流；可聚合外部机场订阅源；订阅令牌支持轮换与停用
 - **路由计划**：全局计划下发节点 sing-box 路由规则，订阅级计划注入订阅渲染输出；域名 / 关键字 / IP / 进程名匹配，代理链 / 直连 / 拦截动作（见 [路由计划](docs/route-plans.md)）
 - **DNS / ACME**：AliDNS、DNSPod、Cloudflare 自动解析；DNS-01 自动签发和续期协议 TLS 证书，私钥只留在 Agent
-- **部署**：一键装成 systemd 服务
+- **部署**：一键装成 systemd 服务；OpenWrt 路由节点见兄弟仓 [LadderAirportOpenwrt](https://github.com/Jlan45/LadderAirportOpenwrt)
 
 ## 快速安装
 

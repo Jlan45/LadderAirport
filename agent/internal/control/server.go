@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"log"
 	"strings"
 	"time"
 
@@ -24,7 +25,13 @@ type Server struct {
 	protocolCerts   *protocolcert.Manager
 	frps            *frpsruntime.Runtime
 	dataDir         string
+
+	interfacesProvider  InterfacesProvider
+	nodeMetricsProvider NodeMetricsProvider
 }
+
+// NodeMetricsProvider is a pluggable node metrics provider.
+type NodeMetricsProvider func() (*agentv1.GetNodeMetricsResponse, error)
 
 func (s *Server) SetPublicAddressResolver(resolver *PublicAddressResolver) {
 	s.publicAddresses = resolver
@@ -40,6 +47,14 @@ func (s *Server) SetFRPServerRuntime(runtime *frpsruntime.Runtime) {
 
 func (s *Server) SetDataDir(dir string) {
 	s.dataDir = dir
+}
+
+func (s *Server) SetInterfacesProvider(provider InterfacesProvider) {
+	s.interfacesProvider = provider
+}
+
+func (s *Server) SetNodeMetricsProvider(provider NodeMetricsProvider) {
+	s.nodeMetricsProvider = provider
 }
 
 // NewServer constructs an AgentControl server.
@@ -59,6 +74,11 @@ func NewServer(rt Runtime, agentVersion, singboxVersion string, logs *LogBuf) *S
 func (s *Server) Ping(context.Context, *agentv1.PingRequest) (*agentv1.PingResponse, error) {
 	capabilities := []string{"proxy_chain_v1", "uplink-v1"}
 	capabilities = append(capabilities, nodeSysCapabilities()...)
+	// Android only advertises metrics when a host provider is wired; Linux
+	// already includes node-metrics-v1 via nodeSysCapabilities.
+	if s.nodeMetricsProvider != nil && !containsString(capabilities, "node-metrics-v1") {
+		capabilities = append(capabilities, "node-metrics-v1")
+	}
 	if s.publicAddresses != nil {
 		capabilities = append(capabilities, "public-address-v1")
 	}
@@ -382,6 +402,13 @@ func (s *Server) GetMetrics(ctx context.Context, _ *agentv1.GetMetricsRequest) (
 }
 
 func (s *Server) ListInterfaces(context.Context, *agentv1.ListInterfacesRequest) (*agentv1.ListInterfacesResponse, error) {
+	if s.interfacesProvider != nil {
+		ifaces, err := s.interfacesProvider()
+		if err == nil {
+			return &agentv1.ListInterfacesResponse{Interfaces: ifaces}, nil
+		}
+		log.Printf("interfaces provider failed, falling back to host enumeration: %v", err)
+	}
 	ifaces, err := listHostInterfaces()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "获取网卡列表失败：%v", err)
@@ -469,6 +496,15 @@ func levelMatch(filter, level string) bool {
 		return true
 	}
 	return strings.EqualFold(filter, level)
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func toProtoLogLine(line LogLine) *agentv1.LogLine {

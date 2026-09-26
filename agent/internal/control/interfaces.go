@@ -7,6 +7,9 @@ import (
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 )
 
+// InterfacesProvider is a pluggable network interface enumerator.
+type InterfacesProvider func() ([]*agentv1.NetworkInterface, error)
+
 // listHostInterfaces enumerates host network interfaces for egress selection.
 // Returns all interfaces (including loopback/down); the UI decides what to show.
 func listHostInterfaces() ([]*agentv1.NetworkInterface, error) {

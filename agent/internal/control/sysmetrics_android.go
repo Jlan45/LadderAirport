@@ -4,6 +4,7 @@ package control
 
 import (
 	"context"
+	"log"
 
 	agentv1 "github.com/ladderairport/proto/gen/go/agent/v1"
 	"google.golang.org/grpc/codes"
@@ -11,11 +12,19 @@ import (
 )
 
 // nodeSysCapabilities reports the Android build. BBR and host sysctls are not available.
+// node-metrics-v1 is only advertised from Ping when a NodeMetricsProvider is set.
 func nodeSysCapabilities() []string {
 	return []string{"android-v1"}
 }
 
 func (s *Server) GetNodeMetrics(context.Context, *agentv1.GetNodeMetricsRequest) (*agentv1.GetNodeMetricsResponse, error) {
+	if s.nodeMetricsProvider != nil {
+		resp, err := s.nodeMetricsProvider()
+		if err == nil {
+			return resp, nil
+		}
+		log.Printf("node metrics provider failed: %v", err)
+	}
 	return nil, status.Error(codes.Unimplemented, "Android 节点系统指标未提供")
 }
 

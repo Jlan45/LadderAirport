@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"time"
 
 	"github.com/coder/websocket"
@@ -171,7 +172,11 @@ func (s *session) dispatchUnary(ctx context.Context, method string, payload json
 		return s.invoke(payload, req, func() (proto.Message, error) { return srv.Ping(ctx, req) })
 	case uplinkws.MethodApplyConfig:
 		req := &agentv1.ApplyConfigRequest{}
-		return s.invoke(payload, req, func() (proto.Message, error) { return srv.ApplyConfig(ctx, req) })
+		res, err := s.invoke(payload, req, func() (proto.Message, error) { return srv.ApplyConfig(ctx, req) })
+		if err == nil {
+			log.Printf("uplink WS 收到并成功应用配置：hash=%s", req.GetConfigHash())
+		}
+		return res, err
 	case uplinkws.MethodStart:
 		req := &agentv1.StartRequest{}
 		return s.invoke(payload, req, func() (proto.Message, error) { return srv.Start(ctx, req) })

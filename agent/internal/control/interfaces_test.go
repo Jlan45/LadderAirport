@@ -39,3 +39,31 @@ func TestServerListInterfaces(t *testing.T) {
 		}
 	}
 }
+
+func TestServerListInterfacesProvider(t *testing.T) {
+	s := NewServer(nil, "test", "test", nil)
+	s.SetInterfacesProvider(func() ([]*agentv1.NetworkInterface, error) {
+		return []*agentv1.NetworkInterface{{Name: "fake0", Up: true}}, nil
+	})
+	resp, err := s.ListInterfaces(context.Background(), &agentv1.ListInterfacesRequest{})
+	if err != nil {
+		t.Fatalf("ListInterfaces: %v", err)
+	}
+	if len(resp.GetInterfaces()) != 1 || resp.GetInterfaces()[0].GetName() != "fake0" {
+		t.Fatalf("unexpected interfaces: %+v", resp.GetInterfaces())
+	}
+}
+
+func TestPingAddsNodeMetricsWhenProviderSet(t *testing.T) {
+	s := NewServer(nil, "test", "test", nil)
+	s.SetNodeMetricsProvider(func() (*agentv1.GetNodeMetricsResponse, error) {
+		return &agentv1.GetNodeMetricsResponse{}, nil
+	})
+	ping, err := s.Ping(context.Background(), &agentv1.PingRequest{})
+	if err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
+	if !containsString(ping.GetCapabilities(), "node-metrics-v1") {
+		t.Fatalf("expected node-metrics-v1 when provider set, got %v", ping.GetCapabilities())
+	}
+}

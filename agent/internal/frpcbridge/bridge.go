@@ -87,6 +87,7 @@ func buildConfigs(tag string, connection ConnectionConfig) (*v1.ClientCommonConf
 		return nil, nil, fmt.Errorf("入站 %q 的 FRPS 连接信息必须包含地址、控制端口、Token、对外端口和本地高位端口", tag)
 	}
 	loginFailExit := false
+	dialTimeout := int64(10)
 	common := &v1.ClientCommonConfig{
 		ServerAddr:    connection.ServerAddr,
 		ServerPort:    connection.ServerPort,
@@ -94,10 +95,13 @@ func buildConfigs(tag string, connection ConnectionConfig) (*v1.ClientCommonConf
 		ClientID:      "ladder-" + tag,
 		LoginFailExit: &loginFailExit,
 		Auth:          v1.AuthClientConfig{Token: connection.Token},
-		Transport: v1.ClientTransportConfig{TLS: v1.TLSClientConfig{
-			Enable:                    connection.TLSEnable,
-			DisableCustomTLSFirstByte: connection.TLSDisableCustomTLSFirstByte,
-		}},
+		Transport: v1.ClientTransportConfig{
+			DialServerTimeout: dialTimeout,
+			TLS: v1.TLSClientConfig{
+				Enable:                    connection.TLSEnable,
+				DisableCustomTLSFirstByte: connection.TLSDisableCustomTLSFirstByte,
+			},
+		},
 	}
 	if err := common.Complete(); err != nil {
 		return nil, nil, fmt.Errorf("入站 %q 的 FRPC 公共配置无效：%w", tag, err)

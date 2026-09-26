@@ -84,16 +84,25 @@ func (r *BoxRuntime) applyLocked(ctx context.Context, configJSON string, hash st
 	// Restart the traffic persist loop if a previous Stop shut it down.
 	r.startTrafficPersistLoopLocked()
 
+	prepared, err := prepareConfigJSON(configJSON)
+	if err != nil {
+		r.setLastError(err.Error())
+		return err
+	}
+
 	// Idempotent: already running this exact config — do not restart.
+	// Compare against the prepared JSON so platform rewrites (default DNS /
+	// Android sanitize) do not force a restart when the panel re-pushes the
+	// same source config + hash.
 	r.mu.Lock()
-	same := r.state == StateRunning && r.instance != nil && hash != "" && hash == r.configHash && configJSON == r.configJSON
+	same := r.state == StateRunning && r.instance != nil && hash != "" && hash == r.configHash && prepared == r.configJSON
 	r.mu.Unlock()
 	if same {
 		return nil
 	}
 
 	// Parse/validate BEFORE tearing down the current instance.
-	opts, err := r.parseOptions(configJSON)
+	opts, err := r.parseOptions(prepared)
 	if err != nil {
 		r.setLastError(err.Error())
 		return err
@@ -108,9 +117,9 @@ func (r *BoxRuntime) applyLocked(ctx context.Context, configJSON string, hash st
 	// Brief disconnect is acceptable; avoids dual listen on the same ports.
 	r.stopInstanceLocked()
 
-	if err := r.startInstanceLocked(opts, configJSON, hash); err != nil {
+	if err := r.startInstanceLocked(opts, prepared, hash); err != nil {
 		// Best-effort restore of previous config when reload fails mid-way.
-		if prevJSON != "" && prevJSON != configJSON {
+		if prevJSON != "" && prevJSON != prepared {
 			if restErr := r.startInstanceFromJSONLocked(prevJSON, prevHash); restErr != nil {
 				r.setLastError(fmt.Sprintf("启动失败：%v；恢复旧配置也失败：%v", err, restErr))
 				return fmt.Errorf("启动代理实例失败：%w（恢复旧配置也失败：%v）", err, restErr)
@@ -123,7 +132,7 @@ func (r *BoxRuntime) applyLocked(ctx context.Context, configJSON string, hash st
 	}
 
 	if r.dataDir != "" {
-		if err := r.writeCurrent(r.dataDir, configJSON); err != nil {
+		if err := r.writeCurrent(r.dataDir, prepared); err != nil {
 			r.setLastError("代理实例正在运行，但写入 current.json 失败：" + err.Error())
 		}
 	}
@@ -170,11 +179,15 @@ func (r *BoxRuntime) stopInstanceLocked() {
 
 // startInstanceFromJSONLocked parses and starts. Caller holds applyMu; no current instance.
 func (r *BoxRuntime) startInstanceFromJSONLocked(configJSON, hash string) error {
-	opts, err := r.parseOptions(configJSON)
+	prepared, err := prepareConfigJSON(configJSON)
 	if err != nil {
 		return err
 	}
-	return r.startInstanceLocked(opts, configJSON, hash)
+	opts, err := r.parseOptions(prepared)
+	if err != nil {
+		return err
+	}
+	return r.startInstanceLocked(opts, prepared, hash)
 }
 
 // startInstanceLocked creates and starts a box. Caller holds applyMu; instance must be nil.
@@ -348,6 +361,74 @@ func (r *BoxRuntime) parseOptions(configJSON string) (option.Options, error) {
 		return option.Options{}, fmt.Errorf("解析配置失败：%w", err)
 	}
 	return opts, nil
+}
+
+// prepareConfigJSON applies platform-neutral and platform-specific rewrites
+// before parse/start. Safe to call on already-prepared JSON (idempotent).
+func prepareConfigJSON(configJSON string) (string, error) {
+	configJSON, err := ensureDefaultDNS(configJSON)
+	if err != nil {
+		return "", err
+	}
+	return sanitizePlatformConfig(configJSON)
+}
+
+func ensureDefaultDNS(configJSON string) (string, error) {
+	var document map[string]stdjson.RawMessage
+	if err := stdjson.Unmarshal([]byte(configJSON), &document); err != nil {
+		return "", fmt.Errorf("解析节点配置失败：%w", err)
+	}
+	rawDNS, hasDNS := document["dns"]
+	needsDefault := !hasDNS
+	if hasDNS {
+		var dnsObj struct {
+			Servers []stdjson.RawMessage `json:"servers"`
+		}
+		if err := stdjson.Unmarshal(rawDNS, &dnsObj); err != nil || len(dnsObj.Servers) == 0 {
+			needsDefault = true
+		}
+	}
+	if needsDefault {
+		defaultDNS := map[string]any{
+			"servers": []map[string]any{
+				{
+					"type":        "udp",
+					"tag":         "default-dns-alidns",
+					"server":      "223.5.5.5",
+					"server_port": 53,
+				},
+				{
+					"type":        "udp",
+					"tag":         "default-dns-dnspod",
+					"server":      "119.29.29.29",
+					"server_port": 53,
+				},
+				{
+					"type":        "udp",
+					"tag":         "default-dns-cf",
+					"server":      "1.1.1.1",
+					"server_port": 53,
+				},
+				{
+					"type":        "udp",
+					"tag":         "default-dns-google",
+					"server":      "8.8.8.8",
+					"server_port": 53,
+				},
+			},
+		}
+		data, err := stdjson.Marshal(defaultDNS)
+		if err != nil {
+			return "", fmt.Errorf("编码默认 DNS 失败：%w", err)
+		}
+		document["dns"] = data
+		updated, err := stdjson.Marshal(document)
+		if err != nil {
+			return "", fmt.Errorf("编码节点配置失败：%w", err)
+		}
+		return string(updated), nil
+	}
+	return configJSON, nil
 }
 
 func splitFRPCConfig(configJSON string) (string, map[string]string, error) {

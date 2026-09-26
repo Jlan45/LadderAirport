@@ -310,6 +310,7 @@ func (c *Client) applySync(ctx context.Context, resp syncResponse) error {
 		c.mu.Lock()
 		c.configHash = resp.ConfigHash
 		c.mu.Unlock()
+		log.Printf("uplink 已成功应用最新配置：hash=%s", resp.ConfigHash)
 	}
 	if resp.Changed && resp.FRPS == nil && resp.ConfigJSON == "" {
 		c.mu.Lock()

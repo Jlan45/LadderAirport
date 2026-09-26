@@ -56,3 +56,55 @@ func TestBoxRuntimeFRPInboundStartsWithLoopbackListener(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestEnsureDefaultDNS(t *testing.T) {
+	// Case 1: missing dns block gets default DNS injected
+	cfg1 := `{"inbounds":[],"outbounds":[{"type":"direct","tag":"direct"}]}`
+	res1, err := prepareConfigJSON(cfg1)
+	if err != nil {
+		t.Fatalf("prepareConfigJSON failed: %v", err)
+	}
+	r := NewBoxRuntime(t.TempDir())
+	opts1, err := r.parseOptions(res1)
+	if err != nil {
+		t.Fatalf("parseOptions failed: %v", err)
+	}
+	if opts1.DNS == nil || len(opts1.DNS.Servers) == 0 {
+		t.Fatalf("expected default DNS servers to be injected, got %#v", opts1.DNS)
+	}
+	if opts1.DNS.Servers[0].Tag != "default-dns-alidns" {
+		t.Fatalf("expected first server to be default-dns-alidns, got %s", opts1.DNS.Servers[0].Tag)
+	}
+
+	// Case 2: existing custom dns block is preserved
+	cfg2 := `{"dns":{"servers":[{"type":"udp","tag":"custom-dns","server":"8.8.4.4","server_port":53}]}}`
+	res2, err := prepareConfigJSON(cfg2)
+	if err != nil {
+		t.Fatalf("prepareConfigJSON failed: %v", err)
+	}
+	opts2, err := r.parseOptions(res2)
+	if err != nil {
+		t.Fatalf("parseOptions failed: %v", err)
+	}
+	if len(opts2.DNS.Servers) != 1 || opts2.DNS.Servers[0].Tag != "custom-dns" {
+		t.Fatalf("expected custom DNS to be preserved, got %#v", opts2.DNS.Servers)
+	}
+
+	// Case 3: prepare is idempotent (same input → stable prepared JSON)
+	again, err := prepareConfigJSON(cfg1)
+	if err != nil {
+		t.Fatalf("prepareConfigJSON second pass: %v", err)
+	}
+	if again != res1 {
+		t.Fatalf("prepareConfigJSON not idempotent:\nfirst=%s\nsecond=%s", res1, again)
+	}
+	reprepared, err := prepareConfigJSON(res1)
+	if err != nil {
+		t.Fatalf("prepareConfigJSON on prepared: %v", err)
+	}
+	if reprepared != res1 {
+		t.Fatalf("prepareConfigJSON changed already-prepared JSON:\ngot=%s\nwant=%s", reprepared, res1)
+	}
+}
+
+
